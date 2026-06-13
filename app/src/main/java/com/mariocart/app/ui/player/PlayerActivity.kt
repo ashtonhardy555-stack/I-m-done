@@ -887,34 +887,70 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     /**
-     * Hide the embed's original play button via CSS.
-     * This avoids redirect/popup scripts attached to their play button.
-     * Our custom play button below the video calls video.play() directly.
+     * Hide ONLY the fake overlay play buttons that streaming sites use to
+     * hijack clicks and trigger redirects/popups. The real video player
+     * controls (control bar play/pause, progress bar, etc.) are kept intact.
+     *
+     * Fake overlays are typically:
+     *  - Large centered elements covering the entire video area
+     *  - Have onclick/onmousedown handlers that call window.open
+     *  - Are positioned absolute/fixed with high z-index on top of the video
      */
     private fun injectHideOriginalPlayButton(view: WebView?) {
         view?.evaluateJavascript("""
 (function(){
-    var style = document.createElement('style');
-    style.textContent = [
-        '.vjs-big-play-button { display: none !important; }',
-        '.jw-display-icon-container { display: none !important; }',
-        '.jw-icon-display { display: none !important; }',
-        '.plyr__control--overlaid { display: none !important; }',
-        '.ytp-large-play-button { display: none !important; }',
-        '[class*="play-btn"] { display: none !important; }',
-        '[class*="play_btn"] { display: none !important; }',
-        '[class*="playBtn"] { display: none !important; }',
-        '[class*="play-button"]:not(video) { display: none !important; }',
-        '[class*="play_button"]:not(video) { display: none !important; }',
-        '[class*="playButton"]:not(video) { display: none !important; }',
-        '.video-play-button { display: none !important; }',
-        '.btn-play { display: none !important; }',
-        '.icon-play { display: none !important; }',
-        '[class*="big-play"] { display: none !important; }',
-        '[class*="play-overlay"] { display: none !important; }',
-        '[class*="play-icon"] { display: none !important; }'
-    ].join('\n');
-    document.head.appendChild(style);
+    if(window.__fakePlayHidden) return;
+    window.__fakePlayHidden = true;
+
+    // Only target elements that are large overlays on top of the player,
+    // NOT the small control-bar buttons.
+    function isFakeOverlay(el) {
+        try {
+            var st = window.getComputedStyle(el);
+            var pos = st.position;
+            // Must be positioned (absolute/fixed) — control bar buttons are inline/relative
+            if (pos !== 'absolute' && pos !== 'fixed') return false;
+            // Must be large — fake overlays cover most of the video area
+            if (el.offsetWidth < 80 || el.offsetHeight < 80) return false;
+            // Check if it has redirect-related event handlers
+            var onclick = el.getAttribute('onclick') || '';
+            var onmousedown = el.getAttribute('onmousedown') || '';
+            if (onclick.includes('window.open') || onmousedown.includes('window.open') ||
+                onclick.includes('location') || onmousedown.includes('location')) {
+                return true;
+            }
+            // Check if it's a high-z overlay sitting on top of a video
+            var z = parseInt(st.zIndex) || 0;
+            if (z > 100 && el.offsetWidth > 150 && el.offsetHeight > 100) {
+                // Make sure it's not a real video or player container
+                if (!el.querySelector('video') && el.tagName !== 'VIDEO' &&
+                    !el.classList.contains('vjs-control-bar') &&
+                    !el.classList.contains('jw-controlbar') &&
+                    !el.classList.contains('plyr__controls')) {
+                    return true;
+                }
+            }
+            return false;
+        } catch(e) { return false; }
+    }
+
+    // Scan and remove fake overlays
+    function removeFakeOverlays() {
+        var all = document.querySelectorAll('div, a, span, button');
+        for (var i = 0; i < all.length; i++) {
+            var el = all[i];
+            if (isFakeOverlay(el)) {
+                el.style.pointerEvents = 'none';
+                el.style.opacity = '0';
+                el.style.display = 'none';
+            }
+        }
+    }
+
+    // Run immediately and after short delays (for dynamically injected overlays)
+    removeFakeOverlays();
+    setTimeout(removeFakeOverlays, 1000);
+    setTimeout(removeFakeOverlays, 3000);
 
     // Also try inside same-origin iframes
     try {
@@ -922,13 +958,34 @@ class PlayerActivity : AppCompatActivity() {
             try {
                 var fd = f.contentDocument;
                 if(fd) {
-                    var s2 = fd.createElement('style');
-                    s2.textContent = style.textContent;
-                    fd.head.appendChild(s2);
+                    var all = fd.querySelectorAll('div, a, span, button');
+                    for (var i = 0; i < all.length; i++) {
+                        if (isFakeOverlay(all[i])) {
+                            all[i].style.pointerEvents = 'none';
+                            all[i].style.opacity = '0';
+                            all[i].style.display = 'none';
+                        }
+                    }
                 }
             } catch(e){}
         });
     } catch(e){}
+
+    // MutationObserver to catch future fake overlays
+    if (document.body) {
+        var obs = new MutationObserver(function(mutations) {
+            mutations.forEach(function(m) {
+                m.addedNodes.forEach(function(node) {
+                    if (node.nodeType === 1 && isFakeOverlay(node)) {
+                        node.style.pointerEvents = 'none';
+                        node.style.opacity = '0';
+                        node.style.display = 'none';
+                    }
+                });
+            });
+        });
+        obs.observe(document.body, { childList: true, subtree: true });
+    }
 })();
         """.trimIndent(), null)
     }
