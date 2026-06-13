@@ -89,6 +89,7 @@ class PlayerActivity : AppCompatActivity() {
     private lateinit var videoSeekBar: SeekBar
     private lateinit var timeText: TextView
     private lateinit var seekRow: LinearLayout
+    private lateinit var controlsContainer: LinearLayout
     private var progressRunnable: Runnable? = null
 
     private val handler = Handler(Looper.getMainLooper())
@@ -370,12 +371,32 @@ class PlayerActivity : AppCompatActivity() {
                 ): Boolean = false
             }
         }
-        root.addView(playerView)
+        // Wrap playerView and controls in a FrameLayout so controls can overlay in fullscreen
+        val playerFrame = FrameLayout(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
+            )
+        }
+        playerView.layoutParams = FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.MATCH_PARENT
+        )
+        playerFrame.addView(playerView)
+
+        // Controls container — sits at bottom, overlays on top of video in fullscreen
+        controlsContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.parseColor("#CC141414"))
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                android.view.Gravity.BOTTOM
+            )
+        }
 
         // ---- Progress bar (seek bar) ----
         seekRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setBackgroundColor(Color.parseColor("#1A1A1A"))
             setPadding(24, 8, 24, 0)
             gravity = android.view.Gravity.CENTER_VERTICAL
         }
@@ -402,13 +423,12 @@ class PlayerActivity : AppCompatActivity() {
         }
         seekRow.addView(timeText)
 
-        root.addView(seekRow)
+        controlsContainer.addView(seekRow)
 
         // ---- Control buttons row ----
         controlBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setBackgroundColor(Color.parseColor("#1A1A1A"))
-            setPadding(16, 8, 16, 16)
+            setPadding(16, 8, 16, 12)
             gravity = android.view.Gravity.CENTER
         }
 
@@ -453,7 +473,9 @@ class PlayerActivity : AppCompatActivity() {
         }
         controlBar.addView(fullscreenBtn)
 
-        root.addView(controlBar)
+        controlsContainer.addView(controlBar)
+        playerFrame.addView(controlsContainer)
+        root.addView(playerFrame)
 
         setContentView(root)
 
@@ -618,8 +640,8 @@ class PlayerActivity : AppCompatActivity() {
         isFullscreen = true
         topBar.visibility = View.GONE
         statusText.visibility = View.GONE
-        seekRow.visibility = View.GONE
-        controlBar.visibility = View.GONE
+        // Controls stay visible — they overlay on the video via FrameLayout
+        controlsContainer.visibility = View.VISIBLE
         window.decorView.systemUiVisibility = (
             View.SYSTEM_UI_FLAG_FULLSCREEN or
             View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
@@ -630,8 +652,7 @@ class PlayerActivity : AppCompatActivity() {
     private fun exitCustomFullscreen() {
         isFullscreen = false
         topBar.visibility = View.VISIBLE
-        seekRow.visibility = View.VISIBLE
-        controlBar.visibility = View.VISIBLE
+        controlsContainer.visibility = View.VISIBLE
         window.decorView.systemUiVisibility = (
             View.SYSTEM_UI_FLAG_FULLSCREEN or
             View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
@@ -902,31 +923,55 @@ class PlayerActivity : AppCompatActivity() {
     if(window.__fakePlayHidden) return;
     window.__fakePlayHidden = true;
 
-    // Only target elements that are large overlays on top of the player,
-    // NOT the small control-bar buttons.
+    // 1. CSS: Hide known big centered play buttons (these are the ones
+    //    streaming sites use as click-hijack targets for redirects).
+    //    We ONLY target the BIG overlay buttons, NOT the small control bar ones.
+    var style = document.createElement('style');
+    style.textContent = [
+        // VideoJS big center play button (NOT the control bar play)
+        '.vjs-big-play-button { display: none !important; }',
+        // JWPlayer big center display icon (NOT the controlbar)
+        '.jw-display-icon-container { display: none !important; }',
+        // Plyr big overlay play (NOT the bottom controls)
+        '.plyr__control--overlaid { display: none !important; }',
+        // YouTube big play
+        '.ytp-large-play-button { display: none !important; }',
+        // Generic big-play / play-overlay selectors
+        '[class*="big-play"] { display: none !important; }',
+        '[class*="play-overlay"] { display: none !important; }',
+        '[class*="play-icon-overlay"] { display: none !important; }',
+        '[class*="center-play"] { display: none !important; }',
+        '[class*="centerPlay"] { display: none !important; }'
+    ].join('\n');
+    if(document.head) document.head.appendChild(style);
+
+    // 2. JS: Find and neutralize any large centered element that looks like
+    //    a fake play button overlay (positioned, large, centered on screen)
     function isFakeOverlay(el) {
         try {
             var st = window.getComputedStyle(el);
             var pos = st.position;
-            // Must be positioned (absolute/fixed) — control bar buttons are inline/relative
             if (pos !== 'absolute' && pos !== 'fixed') return false;
-            // Must be large — fake overlays cover most of the video area
-            if (el.offsetWidth < 80 || el.offsetHeight < 80) return false;
-            // Check if it has redirect-related event handlers
+            var w = el.offsetWidth, h = el.offsetHeight;
+            // Skip tiny elements (these are real control bar buttons)
+            if (w < 60 || h < 60) return false;
+            // Check for redirect-related event handlers
             var onclick = el.getAttribute('onclick') || '';
             var onmousedown = el.getAttribute('onmousedown') || '';
             if (onclick.includes('window.open') || onmousedown.includes('window.open') ||
                 onclick.includes('location') || onmousedown.includes('location')) {
                 return true;
             }
-            // Check if it's a high-z overlay sitting on top of a video
+            // Large high-z overlay covering the video area
             var z = parseInt(st.zIndex) || 0;
-            if (z > 100 && el.offsetWidth > 150 && el.offsetHeight > 100) {
-                // Make sure it's not a real video or player container
+            if (z > 50 && w > 120 && h > 80) {
                 if (!el.querySelector('video') && el.tagName !== 'VIDEO' &&
                     !el.classList.contains('vjs-control-bar') &&
                     !el.classList.contains('jw-controlbar') &&
-                    !el.classList.contains('plyr__controls')) {
+                    !el.classList.contains('plyr__controls') &&
+                    !el.closest('.vjs-control-bar') &&
+                    !el.closest('.jw-controlbar') &&
+                    !el.closest('.plyr__controls')) {
                     return true;
                 }
             }
@@ -934,52 +979,65 @@ class PlayerActivity : AppCompatActivity() {
         } catch(e) { return false; }
     }
 
-    // Scan and remove fake overlays
-    function removeFakeOverlays() {
-        var all = document.querySelectorAll('div, a, span, button');
+    function removeFakeOverlays(doc) {
+        var all = doc.querySelectorAll('div, a, span, button');
         for (var i = 0; i < all.length; i++) {
-            var el = all[i];
-            if (isFakeOverlay(el)) {
-                el.style.pointerEvents = 'none';
-                el.style.opacity = '0';
-                el.style.display = 'none';
+            if (isFakeOverlay(all[i])) {
+                all[i].style.pointerEvents = 'none';
+                all[i].style.opacity = '0';
+                all[i].style.display = 'none';
             }
         }
     }
 
-    // Run immediately and after short delays (for dynamically injected overlays)
-    removeFakeOverlays();
-    setTimeout(removeFakeOverlays, 1000);
-    setTimeout(removeFakeOverlays, 3000);
-
-    // Also try inside same-origin iframes
-    try {
-        document.querySelectorAll('iframe').forEach(function(f){
-            try {
-                var fd = f.contentDocument;
-                if(fd) {
-                    var all = fd.querySelectorAll('div, a, span, button');
-                    for (var i = 0; i < all.length; i++) {
-                        if (isFakeOverlay(all[i])) {
-                            all[i].style.pointerEvents = 'none';
-                            all[i].style.opacity = '0';
-                            all[i].style.display = 'none';
-                        }
+    function runAll() {
+        removeFakeOverlays(document);
+        // Also inside same-origin iframes
+        try {
+            document.querySelectorAll('iframe').forEach(function(f){
+                try {
+                    var fd = f.contentDocument;
+                    if(fd) {
+                        // Inject CSS into iframe too
+                        var s2 = fd.createElement('style');
+                        s2.textContent = style.textContent;
+                        if(fd.head) fd.head.appendChild(s2);
+                        removeFakeOverlays(fd);
                     }
-                }
-            } catch(e){}
-        });
-    } catch(e){}
+                } catch(e){}
+            });
+        } catch(e){}
+    }
+
+    // Run immediately and on delays for dynamically injected overlays
+    runAll();
+    setTimeout(runAll, 500);
+    setTimeout(runAll, 1500);
+    setTimeout(runAll, 3000);
+    setTimeout(runAll, 5000);
 
     // MutationObserver to catch future fake overlays
     if (document.body) {
         var obs = new MutationObserver(function(mutations) {
             mutations.forEach(function(m) {
                 m.addedNodes.forEach(function(node) {
-                    if (node.nodeType === 1 && isFakeOverlay(node)) {
-                        node.style.pointerEvents = 'none';
-                        node.style.opacity = '0';
-                        node.style.display = 'none';
+                    if (node.nodeType === 1) {
+                        if (isFakeOverlay(node)) {
+                            node.style.pointerEvents = 'none';
+                            node.style.opacity = '0';
+                            node.style.display = 'none';
+                        }
+                        // Also check children
+                        try {
+                            var kids = node.querySelectorAll('div, a, span, button');
+                            for(var i = 0; i < kids.length; i++) {
+                                if (isFakeOverlay(kids[i])) {
+                                    kids[i].style.pointerEvents = 'none';
+                                    kids[i].style.opacity = '0';
+                                    kids[i].style.display = 'none';
+                                }
+                            }
+                        } catch(e){}
                     }
                 });
             });
