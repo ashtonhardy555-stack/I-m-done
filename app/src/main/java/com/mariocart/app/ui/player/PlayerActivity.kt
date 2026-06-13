@@ -69,6 +69,8 @@ class PlayerActivity : AppCompatActivity() {
     private var currentEmbedUrl = ""
     private var pageLoadFailed = false
     private var autoPlayRetries = 0
+    private var isPlaying = false
+    private var isFullscreen = false
 
     private lateinit var playerView: WebView
     private lateinit var statusText: TextView
@@ -76,6 +78,10 @@ class PlayerActivity : AppCompatActivity() {
     private lateinit var serverSpinner: Spinner
     private lateinit var progressBar: ProgressBar
     private lateinit var fullscreenContainer: FrameLayout
+    private lateinit var controlBar: LinearLayout
+    private lateinit var playPauseBtn: ImageButton
+    private lateinit var fullscreenBtn: ImageButton
+    private lateinit var topBar: LinearLayout
 
     private val handler = Handler(Looper.getMainLooper())
     private var fallbackRunnable: Runnable? = null
@@ -148,7 +154,7 @@ class PlayerActivity : AppCompatActivity() {
             setBackgroundColor(Color.BLACK)
         }
 
-        val topBar = LinearLayout(this).apply {
+        topBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             setBackgroundColor(Color.parseColor("#141414"))
             setPadding(24, 12, 24, 12)
@@ -286,9 +292,14 @@ class PlayerActivity : AppCompatActivity() {
                     injectRedirectGuard(view)
                     // Then inject ad blocker CSS/DOM removal
                     injectAdBlocker(view)
+                    // Hide the embed's original play button
+                    injectHideOriginalPlayButton(view)
                     // Then start auto-play attempts
                     autoPlayRetries = 0
                     startAutoPlayTimer()
+                    // Mark as playing once auto-play kicks in
+                    isPlaying = true
+                    handler.post { playPauseBtn.setImageResource(android.R.drawable.ic_media_pause) }
                 }
 
                 override fun onReceivedError(
@@ -349,10 +360,163 @@ class PlayerActivity : AppCompatActivity() {
         }
         root.addView(playerView)
 
+        // ---- Custom control bar below video ----
+        controlBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setBackgroundColor(Color.parseColor("#1A1A1A"))
+            setPadding(32, 16, 32, 16)
+            gravity = android.view.Gravity.CENTER_VERTICAL
+        }
+
+        playPauseBtn = ImageButton(this).apply {
+            setImageResource(android.R.drawable.ic_media_play)
+            setBackgroundColor(Color.TRANSPARENT)
+            setColorFilter(Color.WHITE)
+            setPadding(24, 12, 24, 12)
+            setOnClickListener { togglePlayPause() }
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+        }
+        controlBar.addView(playPauseBtn)
+
+        // Spacer
+        controlBar.addView(View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(0, 1, 1f)
+        })
+
+        // Server info text in control bar
+        val serverInfoText = TextView(this).apply {
+            setTextColor(Color.parseColor("#888888"))
+            textSize = 12f
+            text = "Server: ${servers.firstOrNull()?.name ?: ""}"
+            gravity = android.view.Gravity.CENTER
+        }
+        controlBar.addView(serverInfoText)
+
+        // Spacer
+        controlBar.addView(View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(0, 1, 1f)
+        })
+
+        fullscreenBtn = ImageButton(this).apply {
+            setImageResource(android.R.drawable.ic_menu_crop)
+            setBackgroundColor(Color.TRANSPARENT)
+            setColorFilter(Color.WHITE)
+            setPadding(24, 12, 24, 12)
+            setOnClickListener { toggleFullscreen() }
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+        }
+        controlBar.addView(fullscreenBtn)
+
+        root.addView(controlBar)
+
         setContentView(root)
 
         // Auto-play: load first server immediately
         loadServer(0)
+    }
+
+    private fun togglePlayPause() {
+        if (isPlaying) {
+            playerView.evaluateJavascript("""
+                (function(){
+                    var v = document.querySelector('video');
+                    if(v) { v.pause(); return 'paused'; }
+                    // Try inside iframes
+                    var iframes = document.querySelectorAll('iframe');
+                    for(var i=0;i<iframes.length;i++){
+                        try {
+                            var fv = iframes[i].contentDocument.querySelector('video');
+                            if(fv) { fv.pause(); return 'paused'; }
+                        } catch(e){}
+                    }
+                    return 'no-video';
+                })();
+            """.trimIndent(), null)
+            isPlaying = false
+            playPauseBtn.setImageResource(android.R.drawable.ic_media_play)
+        } else {
+            playerView.evaluateJavascript("""
+                (function(){
+                    var v = document.querySelector('video');
+                    if(v) { v.play(); return 'playing'; }
+                    var iframes = document.querySelectorAll('iframe');
+                    for(var i=0;i<iframes.length;i++){
+                        try {
+                            var fv = iframes[i].contentDocument.querySelector('video');
+                            if(fv) { fv.play(); return 'playing'; }
+                        } catch(e){}
+                    }
+                    return 'no-video';
+                })();
+            """.trimIndent(), null)
+            isPlaying = true
+            playPauseBtn.setImageResource(android.R.drawable.ic_media_pause)
+        }
+    }
+
+    private fun toggleFullscreen() {
+        if (isFullscreen) {
+            // Exit fullscreen
+            playerView.evaluateJavascript("""
+                (function(){
+                    if(document.exitFullscreen) document.exitFullscreen();
+                    else if(document.webkitExitFullscreen) document.webkitExitFullscreen();
+                })();
+            """.trimIndent(), null)
+            exitCustomFullscreen()
+        } else {
+            // Enter fullscreen — try the video element first, then the page
+            playerView.evaluateJavascript("""
+                (function(){
+                    var v = document.querySelector('video');
+                    if(!v) {
+                        var iframes = document.querySelectorAll('iframe');
+                        for(var i=0;i<iframes.length;i++){
+                            try { v = iframes[i].contentDocument.querySelector('video'); if(v) break; } catch(e){}
+                        }
+                    }
+                    if(v) {
+                        if(v.requestFullscreen) v.requestFullscreen();
+                        else if(v.webkitRequestFullscreen) v.webkitRequestFullscreen();
+                        else if(v.webkitEnterFullscreen) v.webkitEnterFullscreen();
+                    } else {
+                        var el = document.documentElement;
+                        if(el.requestFullscreen) el.requestFullscreen();
+                        else if(el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+                    }
+                })();
+            """.trimIndent(), null)
+            enterCustomFullscreen()
+        }
+    }
+
+    private fun enterCustomFullscreen() {
+        isFullscreen = true
+        topBar.visibility = View.GONE
+        statusText.visibility = View.GONE
+        controlBar.visibility = View.GONE
+        window.decorView.systemUiVisibility = (
+            View.SYSTEM_UI_FLAG_FULLSCREEN or
+            View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+            View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+        )
+    }
+
+    private fun exitCustomFullscreen() {
+        isFullscreen = false
+        topBar.visibility = View.VISIBLE
+        controlBar.visibility = View.VISIBLE
+        window.decorView.systemUiVisibility = (
+            View.SYSTEM_UI_FLAG_FULLSCREEN or
+            View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+            View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+        )
     }
 
     /**
@@ -603,6 +767,53 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     /**
+     * Hide the embed's original play button via CSS.
+     * This avoids redirect/popup scripts attached to their play button.
+     * Our custom play button below the video calls video.play() directly.
+     */
+    private fun injectHideOriginalPlayButton(view: WebView?) {
+        view?.evaluateJavascript("""
+(function(){
+    var style = document.createElement('style');
+    style.textContent = [
+        '.vjs-big-play-button { display: none !important; }',
+        '.jw-display-icon-container { display: none !important; }',
+        '.jw-icon-display { display: none !important; }',
+        '.plyr__control--overlaid { display: none !important; }',
+        '.ytp-large-play-button { display: none !important; }',
+        '[class*="play-btn"] { display: none !important; }',
+        '[class*="play_btn"] { display: none !important; }',
+        '[class*="playBtn"] { display: none !important; }',
+        '[class*="play-button"]:not(video) { display: none !important; }',
+        '[class*="play_button"]:not(video) { display: none !important; }',
+        '[class*="playButton"]:not(video) { display: none !important; }',
+        '.video-play-button { display: none !important; }',
+        '.btn-play { display: none !important; }',
+        '.icon-play { display: none !important; }',
+        '[class*="big-play"] { display: none !important; }',
+        '[class*="play-overlay"] { display: none !important; }',
+        '[class*="play-icon"] { display: none !important; }'
+    ].join('\n');
+    document.head.appendChild(style);
+
+    // Also try inside same-origin iframes
+    try {
+        document.querySelectorAll('iframe').forEach(function(f){
+            try {
+                var fd = f.contentDocument;
+                if(fd) {
+                    var s2 = fd.createElement('style');
+                    s2.textContent = style.textContent;
+                    fd.head.appendChild(s2);
+                }
+            } catch(e){}
+        });
+    } catch(e){}
+})();
+        """.trimIndent(), null)
+    }
+
+    /**
      * Auto-play: aggressively find and click play buttons, then force
      * play on any video elements. Retries multiple times.
      */
@@ -796,6 +1007,10 @@ class PlayerActivity : AppCompatActivity() {
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         if (keyCode == KeyEvent.KEYCODE_BACK) {
+            if (isFullscreen) {
+                exitCustomFullscreen()
+                return true
+            }
             if (customView != null) {
                 playerView.webChromeClient?.onHideCustomView()
                 return true
