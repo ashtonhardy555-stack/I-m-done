@@ -125,7 +125,11 @@ class PlayerActivity : AppCompatActivity() {
             or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
         )
 
-        tmdbId      = intent.getIntExtra(EXTRA_TMDB_ID, 0)
+                tmdbId = intent.getIntExtra(EXTRA_TMDB_ID, 0)
+        if (tmdbId <= 0) {
+            finish()
+            return
+        }
         contentType = intent.getStringExtra(EXTRA_TYPE) ?: "movie"
         title       = intent.getStringExtra(EXTRA_TITLE) ?: ""
         season      = intent.getIntExtra(EXTRA_SEASON, 1)
