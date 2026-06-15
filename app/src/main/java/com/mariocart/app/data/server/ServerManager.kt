@@ -18,285 +18,191 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.util.concurrent.TimeUnit
 
+/**
+ * Manages the list of streaming servers.
+ *
+ * Strategy:
+ *  1. Start with the builtin list from [ContentRepository].
+ *  2. Run a fast parallel connectivity check — remove servers that don't respond at all.
+ *  3. Servers that have *actually played a video* (via [markServerSuccess]) are sorted first.
+ *  4. Servers that keep failing (via [markServerDead]) are sorted last.
+ *
+ * The only real test of whether a server can play a video is to load it in
+ * a WebView and wait for <video>.play() — that happens in PlayerActivity.
+ * This class just provides a smart initial ordering so the player reaches a
+ * working server faster.
+ */
 object ServerManager {
 
-    private const val TAG = "ServerManager"
-    private const val HEALTH_TIMEOUT_SECONDS = 6L
-    private const val PREFS_NAME = "server_prefs"
-    private const val KEY_DISCOVERED = "discovered_servers"
-    private const val KEY_DEAD = "dead_servers"
-    private const val KEY_LAST_CHECK = "last_check"
+    private const val TAG              = "ServerManager"
+    private const val PREFS_NAME       = "server_prefs"
+    private const val KEY_SUCCESS      = "success_count_"   // prefix + serverName
+    private const val KEY_DEAD         = "dead_servers"
+    private const val KEY_LAST_CHECK   = "last_check"
+    private const val CHECK_INTERVAL   = 30 * 60 * 1000L    // 30 min
+    private const val PROBE_TIMEOUT    = 5_000L             // 5 s per server
 
-    // Known search URLs for discovering embed servers
-    private val discoverySearchUrls = listOf(
-        "https://www.google.com/search?q=free+movie+embed+api+vidsrc+site",
-        "https://www.google.com/search?q=tmdb+embed+streaming+server+2024+2025",
-        "https://www.google.com/search?q=vidsrc+alternative+embed+movie+api"
-    )
-
-    // Known embed URL patterns to detect servers from web scraping
-    private val embedPatterns = listOf(
-        Regex("""https?://[a-zA-Z0-9.-]+\.[a-z]{2,}/embed""", RegexOption.IGNORE_CASE),
-        Regex("""https?://[a-zA-Z0-9.-]+\.[a-z]{2,}/e/""", RegexOption.IGNORE_CASE),
-        Regex("""https?://[a-zA-Z0-9.-]+\.[a-z]{2,}/v/""", RegexOption.IGNORE_CASE)
-    )
-
-    // Well-known aggregator pages that list embed servers
-    private val aggregatorUrls = listOf(
-        "https://raw.githubusercontent.com/ashtonhardy555-stack/I-m-done/main/servers.json",
-        "https://raw.githubusercontent.com/movie-web/providers/main/README.md"
-    )
-
-    private val healthClient = OkHttpClient.Builder()
-        .connectTimeout(HEALTH_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-        .readTimeout(HEALTH_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(PROBE_TIMEOUT, TimeUnit.MILLISECONDS)
+        .readTimeout(PROBE_TIMEOUT, TimeUnit.MILLISECONDS)
         .followRedirects(true)
         .build()
 
-    private val _liveServers = MutableStateFlow<List<StreamingServer>>(emptyList())
-    val liveServers: StateFlow<List<StreamingServer>> = _liveServers
-
-    private val _deadServers = MutableStateFlow<Set<String>>(emptySet())
-    val deadServers: StateFlow<Set<String>> = _deadServers
-
-    private val _isChecking = MutableStateFlow(false)
-    val isChecking: StateFlow<Boolean> = _isChecking
-
-    private val _statusMessage = MutableStateFlow("")
-    val statusMessage: StateFlow<String> = _statusMessage
-
-    private val mutex = Mutex()
+    private val mutex  = Mutex()
     private var prefs: SharedPreferences? = null
+
+    val isChecking     = MutableStateFlow(false)
+    val statusMessage  = MutableStateFlow("")
+
+    // The ordered, filtered server list — updated by initialize()
+    private val _servers = MutableStateFlow<List<StreamingServer>>(emptyList())
+    val liveServers: StateFlow<List<StreamingServer>> = _servers
+
+    // ── Public API ────────────────────────────────────────────────────────────
 
     fun init(context: Context) {
         prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     }
 
+    /**
+     * Call once on app start. Runs a connectivity check and orders servers by
+     * past success. Safe to call multiple times — re-runs only every 30 min.
+     */
     suspend fun initialize(context: Context) {
         init(context)
         mutex.withLock {
-            val lastCheck = prefs?.getLong(KEY_LAST_CHECK, 0L) ?: 0L
-            // Only re-check every 10 minutes
-            if (_liveServers.value.isNotEmpty() &&
-                System.currentTimeMillis() - lastCheck < 600_000
-            ) return
+            val last = prefs?.getLong(KEY_LAST_CHECK, 0L) ?: 0L
+            if (_servers.value.isNotEmpty() &&
+                System.currentTimeMillis() - last < CHECK_INTERVAL) return
         }
 
-        _isChecking.value = true
-        _statusMessage.value = "Checking servers..."
+        isChecking.value = true
+        statusMessage.value = "Checking servers…"
 
         try {
-            // 1. Start with builtin servers
-            val allServers = mutableListOf<StreamingServer>()
-            allServers.addAll(ContentRepository().streamingServers)
+            val allBuiltin = ContentRepository().streamingServers
+            val dead       = loadDeadServers()
 
-            // 2. Load previously discovered servers from cache
-            loadCachedServers()?.let { cached ->
-                val existingUrls = allServers.map { it.baseUrl }.toSet()
-                cached.filter { it.baseUrl !in existingUrls }.let { allServers.addAll(it) }
-            }
+            // Quick connectivity check: discard servers that won't even load the embed page
+            statusMessage.value = "Testing ${allBuiltin.size} servers…"
+            val alive = connectivityCheck(allBuiltin, dead)
 
-            // 3. Try to discover new servers from the web
-            _statusMessage.value = "Searching for new servers..."
-            val discovered = discoverServersFromWeb()
-            val existingUrls = allServers.map { it.baseUrl }.toSet()
-            val newServers = discovered.filter { it.baseUrl !in existingUrls }
-            if (newServers.isNotEmpty()) {
-                Log.d(TAG, "Discovered ${newServers.size} new servers from web")
-                allServers.addAll(newServers)
-            }
+            // Sort alive servers: highest success count first
+            val ordered = sortBySuccess(alive)
 
-            // 4. Health check all servers
-            _statusMessage.value = "Testing ${allServers.size} servers..."
-            val results = healthCheckAll(allServers)
+            // Append dead / unreachable at the end so the user can still pick them
+            val unreachable = allBuiltin.filter { s -> ordered.none { it.name == s.name } }
 
-            val live = mutableListOf<StreamingServer>()
-            val dead = mutableSetOf<String>()
-
-            results.forEach { (server, isAlive) ->
-                if (isAlive) live.add(server)
-                else dead.add(server.name)
-            }
-
-            _liveServers.value = live
-            _deadServers.value = dead
-            _statusMessage.value = "${live.size} servers online"
-
-            // 5. Cache the results
-            saveCachedServers(live)
-            saveDeadServers(dead)
+            _servers.value = ordered + unreachable
             prefs?.edit()?.putLong(KEY_LAST_CHECK, System.currentTimeMillis())?.apply()
 
-            Log.d(TAG, "Health check complete: ${live.size} live, ${dead.size} dead")
+            statusMessage.value = "${ordered.size} servers ready"
+            Log.d(TAG, "Ready: ${ordered.size} reachable, ${unreachable.size} unreachable")
         } catch (e: Exception) {
-            Log.e(TAG, "Init error, using builtins", e)
-            if (_liveServers.value.isEmpty()) {
-                _liveServers.value = ContentRepository().streamingServers
-            }
-            _statusMessage.value = "Using default servers"
+            Log.e(TAG, "Initialize failed, using builtin list", e)
+            if (_servers.value.isEmpty()) _servers.value = ContentRepository().streamingServers
+            statusMessage.value = "Using default servers"
         } finally {
-            _isChecking.value = false
+            isChecking.value = false
         }
     }
 
-    private suspend fun discoverServersFromWeb(): List<StreamingServer> =
-        withContext(Dispatchers.IO) {
-            val found = mutableMapOf<String, String>() // baseUrl -> name
+    /**
+     * Call this when a server **actually plays video** in the WebView/ExoPlayer.
+     * Increments its success score so it appears earlier next time.
+     */
+    fun markServerSuccess(serverName: String) {
+        if (serverName.isBlank()) return
+        val key    = KEY_SUCCESS + serverName
+        val old    = prefs?.getInt(key, 0) ?: 0
+        prefs?.edit()?.putInt(key, old + 1)?.apply()
 
-            // Try each aggregator/discovery source
-            for (url in aggregatorUrls) {
-                try {
-                    val request = Request.Builder()
-                        .url(url)
-                        .header(
-                            "User-Agent",
-                            "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36"
-                        )
-                        .build()
-                    val response = healthClient.newCall(request).execute()
-                    val body = response.body?.string() ?: continue
-                    response.close()
-
-                    // Try parsing as JSON array first
-                    if (body.trimStart().startsWith("[")) {
-                        try {
-                            val arr = org.json.JSONArray(body)
-                            for (i in 0 until arr.length()) {
-                                val obj = arr.getJSONObject(i)
-                                val name = obj.optString("name", "")
-                                val baseUrl = obj.optString("baseUrl", "")
-                                if (name.isNotEmpty() && baseUrl.isNotEmpty()) {
-                                    found[baseUrl] = name
-                                }
-                            }
-                        } catch (_: Exception) { }
-                    }
-
-                    // Also scan for embed URLs in the text
-                    extractEmbedUrls(body, found)
-                } catch (e: Exception) {
-                    Log.d(TAG, "Discovery source failed: $url - ${e.message}")
-                }
-            }
-
-            // Search the web for more embed servers
-            for (searchUrl in discoverySearchUrls) {
-                try {
-                    val request = Request.Builder()
-                        .url(searchUrl)
-                        .header(
-                            "User-Agent",
-                            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                        )
-                        .build()
-                    val response = healthClient.newCall(request).execute()
-                    val body = response.body?.string() ?: continue
-                    response.close()
-                    extractEmbedUrls(body, found)
-                } catch (e: Exception) {
-                    Log.d(TAG, "Web search failed: ${e.message}")
-                }
-            }
-
-            found.map { (baseUrl, name) -> StreamingServer(name, baseUrl) }
+        // Also move it to the front of the in-memory list for this session
+        val current = _servers.value.toMutableList()
+        val idx     = current.indexOfFirst { it.name == serverName }
+        if (idx > 0) {
+            val s = current.removeAt(idx)
+            current.add(0, s)
+            _servers.value = current
         }
-
-    private fun extractEmbedUrls(html: String, into: MutableMap<String, String>) {
-        for (pattern in embedPatterns) {
-            pattern.findAll(html).forEach { match ->
-                val url = match.value.trimEnd('/')
-                // Filter out known non-streaming domains
-                val dominated = listOf(
-                    "google", "youtube", "facebook", "twitter",
-                    "instagram", "tiktok", "reddit", "wikipedia",
-                    "github.com", "stackoverflow", "amazon"
-                )
-                val dominated2 = dominated.any { url.contains(it) }
-                if (!dominated2 && url !in into) {
-                    val host = try {
-                        android.net.Uri.parse(url).host?.replace("www.", "") ?: url
-                    } catch (_: Exception) { url }
-                    val name = host.split(".").first()
-                        .replaceFirstChar { it.uppercase() }
-                    into[url] = name
-                }
-            }
-        }
+        Log.d(TAG, "Success: $serverName (score=${old + 1})")
     }
 
-    private suspend fun healthCheckAll(
-        servers: List<StreamingServer>
-    ): List<Pair<StreamingServer, Boolean>> = coroutineScope {
-        servers.map { server ->
-            async(Dispatchers.IO) {
-                server to checkServer(server)
-            }
-        }.awaitAll()
-    }
-
-    private fun checkServer(server: StreamingServer): Boolean {
-        return try {
-            val testUrl = server.movieUrl(550) // Fight Club as test
-            val request = Request.Builder()
-                .url(testUrl)
-                .head()
-                .header(
-                    "User-Agent",
-                    "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36"
-                )
-                .build()
-            val response = healthClient.newCall(request).execute()
-            val code = response.code
-            response.close()
-            code in 200..499
-        } catch (_: Exception) {
-            false
-        }
-    }
-
+    /**
+     * Call when a server fails with an HTTP error or network error.
+     * Moves it to the end of the in-memory list. Does NOT persist — servers get
+     * another chance next session (sites recover).
+     */
     fun markServerDead(serverName: String) {
-        _deadServers.value = _deadServers.value + serverName
-        _liveServers.value = _liveServers.value.filter { it.name != serverName }
-        val dead = prefs?.getStringSet(KEY_DEAD, emptySet())?.toMutableSet() ?: mutableSetOf()
-        dead.add(serverName)
-        prefs?.edit()?.putStringSet(KEY_DEAD, dead)?.apply()
-    }
-
-    fun getOrderedServers(): List<StreamingServer> {
-        val live = _liveServers.value
-        return if (live.isNotEmpty()) live else ContentRepository().streamingServers
-    }
-
-    private fun saveCachedServers(servers: List<StreamingServer>) {
-        val json = org.json.JSONArray()
-        servers.forEach { s ->
-            val obj = org.json.JSONObject()
-            obj.put("name", s.name)
-            obj.put("baseUrl", s.baseUrl)
-            json.put(obj)
+        if (serverName.isBlank()) return
+        val current = _servers.value.toMutableList()
+        val idx     = current.indexOfFirst { it.name == serverName }
+        if (idx >= 0) {
+            val s = current.removeAt(idx)
+            current.add(s)
+            _servers.value = current
         }
-        prefs?.edit()?.putString(KEY_DISCOVERED, json.toString())?.apply()
+        Log.d(TAG, "Dead (this session): $serverName")
     }
 
-    private fun loadCachedServers(): List<StreamingServer>? {
-        val raw = prefs?.getString(KEY_DISCOVERED, null) ?: return null
-        return try {
-            val arr = org.json.JSONArray(raw)
-            val list = mutableListOf<StreamingServer>()
-            for (i in 0 until arr.length()) {
-                val obj = arr.getJSONObject(i)
-                list.add(
-                    StreamingServer(
-                        name = obj.getString("name"),
-                        baseUrl = obj.getString("baseUrl")
-                    )
-                )
-            }
-            list
-        } catch (_: Exception) { null }
+    /**
+     * Returns the current ordered server list, or the builtin list if not yet
+     * initialized (safe to call before [initialize] finishes).
+     */
+    fun getOrderedServers(): List<StreamingServer> {
+        val live = _servers.value
+        return if (live.isNotEmpty()) live else sortBySuccess(ContentRepository().streamingServers)
     }
 
-    private fun saveDeadServers(dead: Set<String>) {
-        prefs?.edit()?.putStringSet(KEY_DEAD, dead)?.apply()
+    // ── Private helpers ───────────────────────────────────────────────────────
+
+    /**
+     * Parallel connectivity check.  Uses HEAD requests — a failed response
+     * means the server is completely down.  A 200/3xx means the page loads
+     * (doesn't guarantee video plays — that's proven by the WebView in PlayerActivity).
+     */
+    private suspend fun connectivityCheck(
+        servers: List<StreamingServer>,
+        dead: Set<String>
+    ): List<StreamingServer> = withContext(Dispatchers.IO) {
+
+        // Use Fight Club (550) — virtually every server has it
+        val TEST_ID = 550
+        coroutineScope {
+            servers.map { server ->
+                async {
+                    // Skip previously persisted dead servers (but still include at end)
+                    if (server.name in dead) return@async null
+                    val url = server.movieUrl(TEST_ID)
+                    val ok  = probe(url)
+                    if (ok) server else null
+                }
+            }.awaitAll().filterNotNull()
+        }
     }
+
+    private fun probe(url: String): Boolean = try {
+        val req = Request.Builder()
+            .url(url)
+            .head()
+            .header("User-Agent",
+                "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 " +
+                "(KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36")
+            .header("Accept", "text/html,application/xhtml+xml,*/*;q=0.8")
+            .header("Accept-Language", "en-US,en;q=0.5")
+            .build()
+        val resp = client.newCall(req).execute()
+        val code = resp.code
+        resp.close()
+        // 200–399 = the page is there (redirect is fine); 404/5xx = skip
+        code in 200..399
+    } catch (_: Exception) { false }
+
+    private fun sortBySuccess(servers: List<StreamingServer>): List<StreamingServer> {
+        val p = prefs ?: return servers
+        return servers.sortedByDescending { p.getInt(KEY_SUCCESS + it.name, 0) }
+    }
+
+    private fun loadDeadServers(): Set<String> =
+        prefs?.getStringSet(KEY_DEAD, emptySet()) ?: emptySet()
 }

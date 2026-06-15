@@ -55,7 +55,7 @@ class PlayerActivity : AppCompatActivity() {
         private const val EXTRA_EPISODE    = "episode"
 
         // How long to wait on a page before giving up and switching server
-        private const val FALLBACK_TIMEOUT_MS           = 16_000L
+        private const val FALLBACK_TIMEOUT_MS           = 8_000L
         // Interval between auto-play injection retries
         private const val AUTO_PLAY_RETRY_MS            = 1_800L
         // Max number of auto-play retries per page load
@@ -65,7 +65,7 @@ class PlayerActivity : AppCompatActivity() {
         // After this many block-caused reloads on the SAME server, give up and switch
         private const val MAX_BLOCK_RELOADS_PER_SERVER  = 5
         // If video hasn't started within this window, switch server
-        private const val VIDEO_WATCHDOG_MS             = 20_000L
+        private const val VIDEO_WATCHDOG_MS             = 12_000L
 
         fun newIntent(
             context: Context,
@@ -135,7 +135,10 @@ class PlayerActivity : AppCompatActivity() {
     // Full-screen spinner shown while searching for a working stream
     private lateinit var loadingOverlay:      FrameLayout
     private lateinit var loadingStatusText:   TextView
-    private var serversTried = 0
+    private var serversTried  = 0
+    // Playback position saved before a server switch so we can resume from it
+    private var savedPositionMs = 0L
+    private var adSkipRunnable: Runnable? = null
 
     // ── Runnables ─────────────────────────────────────────────────────────────
     private var exoPlayer:               ExoPlayer? = null
@@ -206,8 +209,11 @@ class PlayerActivity : AppCompatActivity() {
                 setStatus("")
                 cancelFallbackTimer()
                 cancelVideoWatchdog()
-                // Video confirmed playing — hide the spinner, show controls
+                // Video confirmed playing — remember this server, hide spinner
+                ServerManager.markServerSuccess(servers.getOrNull(currentServerIndex)?.name ?: "")
                 hideLoadingOverlay()
+                resumeFromSavedPosition()
+                startAdSkipTimer()
             }
         }
 
@@ -241,62 +247,10 @@ class PlayerActivity : AppCompatActivity() {
         // Step 1 — immediately show UI with the first known-good server
         loadServer(0)
 
-        // Step 2 — in parallel, probe all servers for THIS specific content
-        //          and reorder the spinner + jump to the fastest responding one
-        probeServersForContent()
+        // Server selection: we rely on the sequential WebView load — the only
+        // reliable way to know if a server plays video is to actually load it.
     }
 
-    // ── Per-movie server probing ──────────────────────────────────────────────
-    /**
-     * Fires off a lightweight parallel probe of all servers for the exact
-     * movie/TV URL being played.  As soon as a faster-responding server is
-     * found that ranks higher than where we currently are, we switch to it.
-     */
-    private fun probeServersForContent() {
-        val currentTmdbId   = tmdbId
-        val currentType     = contentType
-        val currentSeason   = season
-        val currentEpisode  = episode
-
-        lifecycleScope.launch(Dispatchers.IO) {
-            setStatus("⏳ Finding best server for this title…")
-            val rankedServers = ServerTester.rankForContent(
-                servers      = servers,
-                tmdbId       = currentTmdbId,
-                type         = currentType,
-                season       = currentSeason,
-                episode      = currentEpisode
-            )
-
-            withContext(Dispatchers.Main) {
-                if (rankedServers.isEmpty()) return@withContext
-                // Rebuild spinner with the new order
-                servers = rankedServers
-                val spinnerAdapter = ArrayAdapter(
-                    this@PlayerActivity,
-                    android.R.layout.simple_spinner_dropdown_item,
-                    rankedServers.map { it.name }.toTypedArray()
-                ).apply { setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
-                serverSpinner.adapter = spinnerAdapter
-                serverSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-                    override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) {
-                        if (pos != currentServerIndex) loadServer(pos)
-                    }
-                    override fun onNothingSelected(p: AdapterView<*>?) {}
-                }
-
-                // If the best server is different from what is currently loading,
-                // AND the video hasn't started playing yet, switch immediately.
-                if (!isPlaying && !usingExoPlayer && currentServerIndex != 0) {
-                    setStatus("⏳ Switching to best server…")
-                    loadServer(0)
-                } else if (!isPlaying && !usingExoPlayer) {
-                    // Already on index 0 but ranked list may give us a better URL
-                    loadServer(0)
-                }
-            }
-        }
-    }
 
     // ── Layout builder ────────────────────────────────────────────────────────
     private fun buildLayout(title: String) {
@@ -575,7 +529,8 @@ class PlayerActivity : AppCompatActivity() {
 
         webView.visibility = View.GONE
         exoPlayerView.visibility = View.VISIBLE
-        // ExoPlayer is handling playback — hide the spinner now
+        // ExoPlayer is handling playback — remember this server, hide spinner
+        ServerManager.markServerSuccess(servers.getOrNull(currentServerIndex)?.name ?: "")
         hideLoadingOverlay()
 
         val player = ExoPlayer.Builder(this).build()
@@ -602,7 +557,12 @@ class PlayerActivity : AppCompatActivity() {
         player.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
                 when (state) {
-                    Player.STATE_READY    -> { setStatus(""); startProgressUpdater() }
+                    Player.STATE_READY    -> {
+                        setStatus("")
+                        startProgressUpdater()
+                        resumeFromSavedPosition()
+                        startAdSkipTimer()
+                    }
                     Player.STATE_ENDED    -> { isPlaying = false; playPauseBtn.setImageResource(android.R.drawable.ic_media_play) }
                     Player.STATE_BUFFERING -> setStatus("⏳ Buffering…")
                     else -> {}
@@ -1002,11 +962,13 @@ try{document.querySelectorAll('iframe').forEach(function(f){try{var fd=f.content
     }
 
     private fun loadServer(index: Int) {
-        if (index >= servers.size) { setStatus("❌ All servers tried. Select one manually."); return }
+        if (index >= servers.size) { showLoadingOverlay("No working stream found.\nTry selecting a server manually."); return }
+        // Snapshot position BEFORE resetting state so resumeFromSavedPosition can use it
+        if (isPlaying || lastWebViewPositionMs > 3_000L) savedPositionMs = getCurrentPositionMs()
         currentServerIndex = index
         sameServerBlockReloads = 0; blockedBeforeReload = false
         usingExoPlayer = false; extractedVideoUrl = null
-        userInitiatedPause = false; cancelPlayRetryTimer()
+        userInitiatedPause = false; cancelPlayRetryTimer(); cancelAdSkipTimer()
         if (index == 0) serversTried = 0
         releaseExoPlayer(); cancelExtractTimeout(); cancelVideoWatchdog()
 
@@ -1042,6 +1004,60 @@ try{document.querySelectorAll('iframe').forEach(function(f){try{var fd=f.content
     }
     private fun cancelFallbackTimer() { fallbackRunnable?.let { handler.removeCallbacks(it) }; fallbackRunnable = null }
 
+    // ── Position memory + ad-skip AI ──────────────────────────────────────────
+
+    private var lastWebViewPositionMs = 0L   // kept fresh by the progress loop
+
+    /** Current playback position in ms from whichever player is active. */
+    private fun getCurrentPositionMs(): Long =
+        if (usingExoPlayer) exoPlayer?.currentPosition ?: 0L else lastWebViewPositionMs
+
+    /**
+     * After a server switch, seek back to the position the user was watching.
+     * Only kicks in if we were more than 3 s into the video.
+     */
+    private fun resumeFromSavedPosition() {
+        val pos = savedPositionMs
+        savedPositionMs = 0L
+        if (pos <= 3_000L) return
+        if (usingExoPlayer) {
+            handler.postDelayed({ exoPlayer?.seekTo(pos) }, 600L)
+        } else {
+            val sec = pos / 1000.0
+            handler.postDelayed({
+                webView.evaluateJavascript(
+                    "(function(){var v=document.querySelector('video');"
+                    +"if(!v){var fs=document.querySelectorAll('iframe');"
+                    +"for(var i=0;i<fs.length;i++){try{v=fs[i].contentDocument.querySelector('video');if(v)break;}catch(e){}}}"
+                    +"if(v&&v.duration>$sec)v.currentTime=$sec;})();",
+                    null
+                )
+            }, 1_500L)
+        }
+    }
+
+    /**
+     * Silent AI: runs every 800 ms while video is playing.
+     * Clicks skip-ad buttons, removes overlay divs, and nudges stalled video back to play.
+     */
+    private fun startAdSkipTimer() {
+        cancelAdSkipTimer()
+        val js = "(function(){var ss=['[class*=skip i]','[id*=skip i]','[class*=Skip]','[id*=Skip]','.videoAdUiSkipButton','.ytp-ad-skip-button','[data-purpose*=skip]','[aria-label*=Skip i]','[title*=Skip i]','[class*=closeBtn]','[class*=close-btn]'];for(var i=0;i<ss.length;i++){try{var els=document.querySelectorAll(ss[i]);for(var j=0;j<els.length;j++){var e=els[j];if(e.offsetWidth>0&&e.offsetHeight>0&&!e.disabled){e.click();break;}}}catch(ex){}}var all=document.querySelectorAll('*');for(var k=0;k<all.length;k++){try{var el=all[k];var cs=window.getComputedStyle(el);var z=parseInt(cs.zIndex)||0;if((cs.position==='fixed'||cs.position==='absolute')&&z>999&&!el.querySelector('video')&&el.tagName!=='VIDEO'&&!el.querySelector('iframe')&&el.tagName!=='IFRAME'){el.style.display='none';}}catch(ex){}}var v=document.querySelector('video');if(!v){var fs=document.querySelectorAll('iframe');for(var m=0;m<fs.length;m++){try{v=fs[m].contentDocument.querySelector('video');if(v)break;}catch(ex){}}}if(v&&v.paused&&v.readyState>=2&&v.duration>0&&v.currentTime>0){try{v.play();}catch(ex){}}var spans=document.querySelectorAll('span,div,button');for(var n=0;n<spans.length;n++){var t=spans[n].textContent||'';if(/skip ad in 0/i.test(t)||/skip in 0/i.test(t)||/skip \(0\)/i.test(t)){spans[n].click();break;}}})();"
+        adSkipRunnable = object : Runnable {
+            override fun run() {
+                if (!usingExoPlayer && isPlaying && !userInitiatedPause) {
+                    webView.evaluateJavascript(js, null)
+                }
+                handler.postDelayed(this, 800L)
+            }
+        }
+        handler.postDelayed(adSkipRunnable!!, 800L)
+    }
+    private fun cancelAdSkipTimer() {
+        adSkipRunnable?.let { handler.removeCallbacks(it) }
+        adSkipRunnable = null
+    }
+
     private fun showLoadingOverlay(msg: String = "Finding a stream\u2026") = handler.post {
         if (::loadingStatusText.isInitialized) loadingStatusText.text = msg
         if (::loadingOverlay.isInitialized) loadingOverlay.visibility = View.VISIBLE
@@ -1067,10 +1083,10 @@ try{document.querySelectorAll('iframe').forEach(function(f){try{var fd=f.content
         }
         return super.onKeyDown(keyCode, event)
     }
-    override fun onPause() { super.onPause(); webView.onPause(); exoPlayer?.pause(); cancelAutoPlayTimer(); cancelPlayRetryTimer(); stopProgressUpdater() }
+    override fun onPause() { super.onPause(); webView.onPause(); exoPlayer?.pause(); cancelAutoPlayTimer(); cancelPlayRetryTimer(); cancelAdSkipTimer(); stopProgressUpdater() }
     override fun onResume() { super.onResume(); webView.onResume() }
     override fun onDestroy() {
-        cancelFallbackTimer(); cancelAutoPlayTimer(); cancelPlayRetryTimer(); cancelExtractTimeout()
+        cancelFallbackTimer(); cancelAutoPlayTimer(); cancelPlayRetryTimer(); cancelAdSkipTimer(); cancelExtractTimeout()
         cancelVideoWatchdog(); stopProgressUpdater(); releaseExoPlayer(); webView.destroy()
         super.onDestroy()
     }
