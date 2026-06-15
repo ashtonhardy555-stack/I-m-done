@@ -540,7 +540,14 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     // ── Quality picker ────────────────────────────────────────────────────────
-            dialog.setContentView(buildPickerDialog("Quality", labels) { idx ->
+                // ── Quality picker ────────────────────────────────────────────────────────
+    private fun showQualityPicker() {
+        cancelAutoHide()
+        val heights = listOf(2160, 1080, 720, 480, 360)
+        val labels = heights.map { "${it}p" }.toTypedArray()
+
+        val dialog = Dialog(this, android.R.style.Theme_Material_Dialog_NoActionBar)
+        dialog.setContentView(buildPickerDialog("Quality", labels) { idx ->
             selectedMaxHeight = heights[idx]
             qualityBtn.text = labels[idx]
             exoPlayer?.let { player ->
@@ -549,6 +556,10 @@ class PlayerActivity : AppCompatActivity() {
             }
             dialog.dismiss(); scheduleAutoHide()
         })
+        dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+        dialog.setOnDismissListener { if (isPlaying) scheduleAutoHide() }
+        dialog.show()
+    }
     // ── Server picker ─────────────────────────────────────────────────────────
     private fun showServerPicker() {
         cancelAutoHide()
