@@ -37,6 +37,7 @@ import androidx.media3.ui.PlayerView
 import com.mariocart.app.data.model.StreamingServer
 import com.mariocart.app.data.server.ServerManager
 import com.mariocart.app.data.server.ServerTester
+import com.mariocart.app.data.server.StreamExtractor
 import kotlinx.coroutines.launch
 import java.io.File
 
