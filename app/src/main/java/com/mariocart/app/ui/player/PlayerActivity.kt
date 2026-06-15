@@ -307,9 +307,16 @@ class PlayerActivity : AppCompatActivity() {
         }
         val rewindBtn = iconBtn(android.R.drawable.ic_media_rew) { seekRelative(-10_000L) }
         bottomBar.addView(rewindBtn)
-        playPauseBtn = iconBtn(android.R.drawable.ic_media_play) { togglePlayPause() }
-        (playPauseBtn.layoutParams as LinearLayout.LayoutParams).apply {
-            leftMargin = dp(8); rightMargin = dp(8)
+        playPauseBtn = ImageButton(this).apply {
+            setImageResource(android.R.drawable.ic_media_play)
+            setBackgroundColor(Color.TRANSPARENT)
+            setColorFilter(Color.WHITE)
+            setPadding(dp(16), dp(12), dp(16), dp(12))
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { leftMargin = dp(8); rightMargin = dp(8) }
+            setOnClickListener { togglePlayPause() }
         }
         bottomBar.addView(playPauseBtn)
         val forwardBtn = iconBtn(android.R.drawable.ic_media_ff) { seekRelative(10_000L) }
