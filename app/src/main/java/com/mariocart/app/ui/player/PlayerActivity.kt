@@ -65,6 +65,34 @@ class PlayerActivity : AppCompatActivity() {
         // Max block-reloads on the same server before moving on
         private const val MAX_BLOCK_RELOADS     = 3
 
+        val AUTO_PLAY_JS = """
+(function(){
+  function tryPlay(v){try{v.muted=false;v.volume=1;var p=v.play();if(p&&p.catch)p.catch(function(){v.muted=true;v.play();});}catch(e){}}
+  var vids=document.querySelectorAll('video');
+  for(var i=0;i<vids.length;i++){tryPlay(vids[i]);}
+  var frames=document.querySelectorAll('iframe');
+  for(var j=0;j<frames.length;j++){
+    try{var fv=frames[j].contentDocument.querySelectorAll('video');
+    for(var k=0;k<fv.length;k++){tryPlay(fv[k]);}}catch(e){}
+  }
+  var origOpen=XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open=function(method,url){
+    if(url&&(url.indexOf('.m3u8')>=0||url.indexOf('.mp4')>=0||url.indexOf('.ts')>=0)){
+      try{Android.onVideoPlaying(url);}catch(e){}
+    }
+    return origOpen.apply(this,arguments);
+  };
+  var origFetch=window.fetch;
+  window.fetch=function(input){
+    var url=typeof input==='string'?input:(input&&input.url)||'';
+    if(url&&(url.indexOf('.m3u8')>=0||url.indexOf('.mp4')>=0)){
+      try{Android.onVideoPlaying(url);}catch(e){}
+    }
+    return origFetch.apply(this,arguments);
+  };
+})();
+""".trimIndent()
+
         fun newIntent(
             context: Context,
             tmdbId: Int,
@@ -148,10 +176,12 @@ class PlayerActivity : AppCompatActivity() {
         "criteo","teads","carbon","ethicalads","buysellads","pagead2","amazon-adsystem"
     )
 
-    private fun isAdUrl(url: String): Boolean = try {
-        val host = Uri.parse(url).host?.lowercase() ?: return false
-        adDomains.any { host.contains(it) }
-    } catch (_: Exception) { false }
+    private fun isAdUrl(url: String): Boolean {
+        return try {
+            val host = Uri.parse(url).host?.lowercase() ?: return false
+            adDomains.any { host.contains(it) }
+        } catch (_: Exception) { false }
+    }
 
     private fun isVideoUrl(url: String): Boolean {
         val lower = url.lowercase()
@@ -1000,36 +1030,4 @@ var all=document.querySelectorAll('*');for(var k=0;k<all.length;k++){try{var el=
         cornerRadius = radiusPx.toFloat()
     }
 
-    // ── Auto-play JS injected into hidden WebView ─────────────────────────────
-    companion object AutoPlayJs {
-        private val AUTO_PLAY_JS = """
-(function(){
-  function tryPlay(v){try{v.muted=false;v.volume=1;var p=v.play();if(p&&p.catch)p.catch(function(){v.muted=true;v.play();});}catch(e){}}
-  var vids=document.querySelectorAll('video');
-  for(var i=0;i<vids.length;i++){tryPlay(vids[i]);}
-  var frames=document.querySelectorAll('iframe');
-  for(var j=0;j<frames.length;j++){
-    try{var fv=frames[j].contentDocument.querySelectorAll('video');
-    for(var k=0;k<fv.length;k++){tryPlay(fv[k]);}}catch(e){}
-  }
-  // Intercept XMLHttpRequest for stream URL detection
-  var origOpen=XMLHttpRequest.prototype.open;
-  XMLHttpRequest.prototype.open=function(method,url){
-    if(url&&(url.indexOf('.m3u8')>=0||url.indexOf('.mp4')>=0||url.indexOf('.ts')>=0)){
-      try{Android.onVideoPlaying(url);}catch(e){}
-    }
-    return origOpen.apply(this,arguments);
-  };
-  // Intercept fetch
-  var origFetch=window.fetch;
-  window.fetch=function(input){
-    var url=typeof input==='string'?input:(input&&input.url)||'';
-    if(url&&(url.indexOf('.m3u8')>=0||url.indexOf('.mp4')>=0)){
-      try{Android.onVideoPlaying(url);}catch(e){}
-    }
-    return origFetch.apply(this,arguments);
-  };
-})();
-""".trimIndent()
-    }
 }
