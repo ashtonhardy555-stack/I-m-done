@@ -132,6 +132,10 @@ class PlayerActivity : AppCompatActivity() {
     private lateinit var seekRow:             LinearLayout
     private lateinit var controlsContainer:   LinearLayout
     private lateinit var playerFrame:         FrameLayout
+    // Full-screen spinner shown while searching for a working stream
+    private lateinit var loadingOverlay:      FrameLayout
+    private lateinit var loadingStatusText:   TextView
+    private var serversTried = 0
 
     // ── Runnables ─────────────────────────────────────────────────────────────
     private var exoPlayer:               ExoPlayer? = null
@@ -202,6 +206,8 @@ class PlayerActivity : AppCompatActivity() {
                 setStatus("")
                 cancelFallbackTimer()
                 cancelVideoWatchdog()
+                // Video confirmed playing — hide the spinner, show controls
+                hideLoadingOverlay()
             }
         }
 
@@ -376,7 +382,36 @@ class PlayerActivity : AppCompatActivity() {
         playerFrame.addView(webView)
 
         controlsContainer = buildControlsOverlay()
+        controlsContainer.visibility = View.GONE   // hidden until video starts
         playerFrame.addView(controlsContainer)
+
+        // Full-screen loading overlay (on top of everything in playerFrame)
+        loadingOverlay = FrameLayout(this).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
+            )
+            setBackgroundColor(Color.BLACK)
+        }
+        val spinnerBig = ProgressBar(this).apply {
+            isIndeterminate = true
+            layoutParams = FrameLayout.LayoutParams(180, 180, android.view.Gravity.CENTER).also {
+                it.topMargin = -80
+            }
+        }
+        loadingStatusText = TextView(this).apply {
+            text = "Finding a stream\u2026"
+            setTextColor(Color.parseColor("#AAAAAA"))
+            textSize = 14f
+            gravity = android.view.Gravity.CENTER
+            setPadding(32, 0, 32, 0)
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                android.view.Gravity.CENTER
+            ).also { it.topMargin = 120 }
+        }
+        loadingOverlay.addView(spinnerBig)
+        loadingOverlay.addView(loadingStatusText)
+        playerFrame.addView(loadingOverlay)
 
         root.addView(playerFrame)
         setContentView(root)
@@ -540,6 +575,8 @@ class PlayerActivity : AppCompatActivity() {
 
         webView.visibility = View.GONE
         exoPlayerView.visibility = View.VISIBLE
+        // ExoPlayer is handling playback — hide the spinner now
+        hideLoadingOverlay()
 
         val player = ExoPlayer.Builder(this).build()
         exoPlayer = player
@@ -970,6 +1007,7 @@ try{document.querySelectorAll('iframe').forEach(function(f){try{var fd=f.content
         sameServerBlockReloads = 0; blockedBeforeReload = false
         usingExoPlayer = false; extractedVideoUrl = null
         userInitiatedPause = false; cancelPlayRetryTimer()
+        if (index == 0) serversTried = 0
         releaseExoPlayer(); cancelExtractTimeout(); cancelVideoWatchdog()
 
         serverSpinner.setSelection(index, false)
@@ -983,6 +1021,8 @@ try{document.querySelectorAll('iframe').forEach(function(f){try{var fd=f.content
         webView.visibility = View.VISIBLE
         isPlaying = false
         playPauseBtn.setImageResource(android.R.drawable.ic_media_play)
+        controlsContainer.visibility = View.GONE   // hide controls until video plays
+        showLoadingOverlay(if (serversTried == 0) "Finding a stream\u2026" else "Trying source ${currentServerIndex + 1} of ${servers.size}\u2026")
         webView.loadUrl(currentEmbedUrl)
     }
 
@@ -1001,6 +1041,17 @@ try{document.querySelectorAll('iframe').forEach(function(f){try{var fd=f.content
         handler.postDelayed(fallbackRunnable!!, FALLBACK_TIMEOUT_MS)
     }
     private fun cancelFallbackTimer() { fallbackRunnable?.let { handler.removeCallbacks(it) }; fallbackRunnable = null }
+
+    private fun showLoadingOverlay(msg: String = "Finding a stream\u2026") = handler.post {
+        if (::loadingStatusText.isInitialized) loadingStatusText.text = msg
+        if (::loadingOverlay.isInitialized) loadingOverlay.visibility = View.VISIBLE
+    }
+
+    private fun hideLoadingOverlay() = handler.post {
+        if (::loadingOverlay.isInitialized) loadingOverlay.visibility = View.GONE
+        if (::controlsContainer.isInitialized) controlsContainer.visibility = View.VISIBLE
+        startProgressUpdater()
+    }
 
     private fun setStatus(msg: String) = handler.post {
         if (msg.isBlank()) statusText.visibility = View.GONE
