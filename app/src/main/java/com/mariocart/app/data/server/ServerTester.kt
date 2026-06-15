@@ -102,9 +102,10 @@ object ServerTester {
 
             val elapsed = System.currentTimeMillis() - start
 
-            // Accept 200–499: even a 403/404 means the server is alive and reachable.
-            // Reject 5xx (server error) and connection failures.
-            if (code in 200..499) elapsed else null
+            // Only accept 200–299: the server must actually have the content.
+            // 404 means content not found — treat as failure so we skip to next server.
+            // 403 means blocked — also skip. 5xx = server error — skip.
+            if (code in 200..299) elapsed else null
         } catch (e: Exception) {
             Log.d(TAG, "Probe failed for $url: ${e.message}")
             null

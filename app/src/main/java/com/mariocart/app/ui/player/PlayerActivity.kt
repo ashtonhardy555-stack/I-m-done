@@ -473,11 +473,15 @@ class PlayerActivity : AppCompatActivity() {
             }
 
             override fun onReceivedHttpError(view: WebView?, request: WebResourceRequest?, errorResponse: WebResourceResponse?) {
-                if (request?.isForMainFrame == true && (errorResponse?.statusCode ?: 0) >= 500) {
-                    pageLoadFailed = true
-                    setStatus("⚠️ HTTP ${errorResponse?.statusCode}, trying next…")
-                    ServerManager.markServerDead(servers.getOrNull(currentServerIndex)?.name ?: "")
-                    tryNextServer()
+                if (request?.isForMainFrame == true) {
+                    val code = errorResponse?.statusCode ?: 0
+                    // 404 = content not on this server, 4xx = access denied, 5xx = server down
+                    if (code == 404 || code >= 500) {
+                        pageLoadFailed = true
+                        setStatus("⚠️ HTTP $code — trying next server…")
+                        ServerManager.markServerDead(servers.getOrNull(currentServerIndex)?.name ?: "")
+                        tryNextServer()
+                    }
                 }
             }
         }
@@ -799,6 +803,27 @@ wv();setTimeout(wv,1500);setTimeout(wv,3500);setTimeout(wv,7000);
     }
 
     /**
+     * Dispatches a real Android touch DOWN+UP at the center of the WebView.
+     * This works even on cross-origin iframes where JS injection is blocked,
+     * because it's a genuine system touch event — the browser treats it as a
+     * real user tap and will honour play-button clicks on any player.
+     */
+    private fun simulateTapAtCenter() {
+        val w = webView.width.toFloat()
+        val h = webView.height.toFloat()
+        if (w <= 0f || h <= 0f) return
+        val cx = w / 2f
+        val cy = h / 2f
+        val now = android.os.SystemClock.uptimeMillis()
+        val down = android.view.MotionEvent.obtain(now, now, android.view.MotionEvent.ACTION_DOWN, cx, cy, 0)
+        val up   = android.view.MotionEvent.obtain(now, now + 80L, android.view.MotionEvent.ACTION_UP, cx, cy, 0)
+        webView.dispatchTouchEvent(down)
+        webView.dispatchTouchEvent(up)
+        down.recycle()
+        up.recycle()
+    }
+
+    /**
      * Presses every known play-button selector, then calls .play() on all <video> elements.
      * Skips if video is already playing.
      */
@@ -825,6 +850,8 @@ try{document.querySelectorAll('iframe').forEach(function(f){try{var fd=f.content
                 if (autoPlayRetries <= AUTO_PLAY_MAX_RETRIES) {
                     injectAutoPlay(webView)
                     injectAdBlocker(webView)
+                    // Also dispatch a real touch at center — works on cross-origin iframes
+                    simulateTapAtCenter()
                     handler.postDelayed(this, AUTO_PLAY_RETRY_MS)
                 }
             }
