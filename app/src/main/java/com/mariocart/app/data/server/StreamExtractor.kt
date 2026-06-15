@@ -10,7 +10,7 @@ import java.util.concurrent.TimeUnit
 object StreamExtractor {
 
     private const val TAG = "StreamExtractor"
-    private const val TIMEOUT_MS = 12_000L   // Shorter to avoid hanging
+    private const val TIMEOUT_MS = 15_000L
 
     private val UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36"
 
@@ -27,19 +27,25 @@ object StreamExtractor {
         Regex(""""src"\s*:\s*["']?(https?://[^"'\s]+?\.m3u8[^"'\s]*)["']?""", RegexOption.IGNORE_CASE),
         Regex("""sources\s*:\s*\[.*?["']?(https?://[^"'\s]+?\.m3u8)""", RegexOption.IGNORE_CASE),
         Regex("""master\.m3u8""", RegexOption.IGNORE_CASE),
+        Regex("""playlist\.m3u8""", RegexOption.IGNORE_CASE),
         Regex("""(https?://[^\s"'<>\)]+\.m3u8(?:\?[^\s"'<>)]*)?)""", RegexOption.IGNORE_CASE),
-        Regex("""(https?://[^\s"'<>\)]+\.mp4(?:\?[^\s"'<>)]*)?)""", RegexOption.IGNORE_CASE)
+        Regex("""(https?://[^\s"'<>\)]+\.mp4(?:\?[^\s"'<>)]*)?)""", RegexOption.IGNORE_CASE),
+        // Additional common patterns for VidSrc family
+        Regex("""["']?https?://[^"'\s]+?/(?:master|index|playlist)\.m3u8""", RegexOption.IGNORE_CASE)
     )
 
     suspend fun extract(embedUrl: String): String? = withContext(Dispatchers.IO) {
         try {
-            Log.d(TAG, "Trying $embedUrl")
+            Log.d(TAG, "Trying: $embedUrl")
             val html = fetch(embedUrl) ?: return@withContext null
 
             var videoUrl = findVideoUrl(html)
-            if (videoUrl != null) return@withContext videoUrl
+            if (videoUrl != null) {
+                Log.d(TAG, "✅ Found: $videoUrl")
+                return@withContext videoUrl
+            }
 
-            // Aggressive iframe following
+            // Try common iframe paths
             val iframeRegex = Regex("""<iframe[^>]+src=["']?(https?://[^"'\s>]+)""", RegexOption.IGNORE_CASE)
             iframeRegex.findAll(html).forEach { match ->
                 val iframeSrc = match.groupValues[1]
@@ -64,6 +70,7 @@ object StreamExtractor {
                 .url(url)
                 .header("User-Agent", UA)
                 .header("Referer", url)
+                .header("Accept", "text/html,application/xhtml+xml")
                 .build()
             val resp = client.newCall(req).execute()
             val body = if (resp.isSuccessful) resp.body?.string() else null
@@ -76,12 +83,16 @@ object StreamExtractor {
         for (pattern in videoPatterns) {
             pattern.findAll(html).forEach { match ->
                 val url = match.groupValues.getOrNull(1)?.trim() ?: match.value
-                if (url.contains(".m3u8") || url.contains(".mp4")) {
-                    if (!isAdUrl(url)) return url
-                }
+                if (isValidVideo(url)) return url
             }
         }
         return null
+    }
+
+    private fun isValidVideo(url: String): Boolean {
+        if (url.isBlank() || url.length < 20) return false
+        val lower = url.lowercase()
+        return (lower.contains(".m3u8") || lower.contains(".mp4")) && !isAdUrl(url)
     }
 
     private fun isAdUrl(url: String): Boolean {
