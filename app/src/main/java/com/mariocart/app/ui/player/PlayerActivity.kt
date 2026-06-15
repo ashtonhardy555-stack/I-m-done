@@ -110,6 +110,7 @@ class PlayerActivity : AppCompatActivity() {
     private var usingExoPlayer  = false
     private var extractedVideoUrl: String? = null
     private var videoCache: SimpleCache? = null
+    private var selectedMaxHeight = Int.MAX_VALUE  // Int.MAX_VALUE = Auto
 
     // User-control flags — prevent auto-timers fighting manual actions
     private var userInitiatedPause  = false
@@ -131,6 +132,7 @@ class PlayerActivity : AppCompatActivity() {
     private lateinit var skipBackBtn:         ImageButton
     private lateinit var skipForwardBtn:      ImageButton
     private lateinit var fullscreenBtn:       ImageButton
+    private lateinit var qualityBtn:          android.widget.TextView
     private lateinit var topBar:              LinearLayout
     private lateinit var videoSeekBar:        SeekBar
     private lateinit var timeText:            TextView
@@ -571,6 +573,13 @@ class PlayerActivity : AppCompatActivity() {
         }
         player.prepare()
         player.playWhenReady = true
+        // Re-apply user's quality preference on every server switch
+        if (selectedMaxHeight != Int.MAX_VALUE) {
+            player.trackSelectionParameters = player.trackSelectionParameters
+                .buildUpon()
+                .setMaxVideoSize(Int.MAX_VALUE, selectedMaxHeight)
+                .build()
+        }
         isPlaying = true
         playPauseBtn.setImageResource(android.R.drawable.ic_media_pause)
 
@@ -732,6 +741,15 @@ return 'none';
             setOnClickListener { skipVideo(10) }
         }
         controlBar.addView(skipForwardBtn)
+        qualityBtn = android.widget.TextView(this).apply {
+            text = "Auto"
+            setTextColor(Color.WHITE)
+            textSize = 12f
+            setPadding(20, 12, 20, 12)
+            setBackgroundColor(Color.parseColor("#44FFFFFF"))
+            setOnClickListener { showQualityMenu() }
+        }
+        controlBar.addView(qualityBtn)
         controlBar.addView(View(this).apply { layoutParams = LinearLayout.LayoutParams(0, 1, 1f) })
         fullscreenBtn = ImageButton(this).apply {
             setImageResource(android.R.drawable.ic_menu_crop)
@@ -741,6 +759,51 @@ return 'none';
         controlBar.addView(fullscreenBtn)
         container.addView(controlBar)
         return container
+    }
+
+    // ── Quality selection ─────────────────────────────────────────────────────
+    private fun showQualityMenu() {
+        val options = arrayOf("Auto", "1080p", "720p", "480p", "360p")
+        val heights  = intArrayOf(Int.MAX_VALUE, 1080, 720, 480, 360)
+        val current  = heights.indexOfFirst { it == selectedMaxHeight }.takeIf { it >= 0 } ?: 0
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Video Quality")
+            .setSingleChoiceItems(options, current) { dialog, which ->
+                applyQuality(heights[which])
+                dialog.dismiss()
+            }
+            .show()
+    }
+
+    private fun applyQuality(maxHeight: Int) {
+        selectedMaxHeight = maxHeight
+        val label = if (maxHeight == Int.MAX_VALUE) "Auto" else "${maxHeight}p"
+        qualityBtn.text = label
+        // ExoPlayer — set max video height so ABR picks the right track
+        exoPlayer?.let { p ->
+            p.trackSelectionParameters = p.trackSelectionParameters
+                .buildUpon()
+                .setMaxVideoSize(Int.MAX_VALUE, maxHeight)
+                .build()
+        }
+        // WebView embed — best-effort JS injection for common players
+        if (!usingExoPlayer) {
+            webView.evaluateJavascript("""
+(function(){
+try{
+  if(window.jwplayer){var p=jwplayer();var q=p.getQualityLevels();for(var i=0;i<q.length;i++){var h=q[i].height||0;if(${maxHeight}===2147483647||(h>0&&h<=${maxHeight})){p.setCurrentQuality(i);return;}}}
+} catch(e) {}
+try{
+  var vj=document.querySelector('.video-js');
+  if(vj&&vj.player){var pl=vj.player();if(pl.qualityLevels){var ls=pl.qualityLevels();for(var i=0;i<ls.length;i++){ls[i].enabled=(${maxHeight}===2147483647)||ls[i].height<=${maxHeight};}}}
+} catch(e) {}
+try{
+  var btns=document.querySelectorAll('li,button,div,span');
+  for(var i=0;i<btns.length;i++){var t=(btns[i].textContent||'').trim();if(t==="${label}"&&btns[i].offsetWidth>0){btns[i].click();return;}}
+} catch(e) {}
+})();
+            """.trimIndent(), null)
+        }
     }
 
     private fun togglePlayPause() {
