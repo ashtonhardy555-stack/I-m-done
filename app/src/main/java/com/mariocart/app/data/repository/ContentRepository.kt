@@ -125,8 +125,15 @@ class ContentRepository {
     suspend fun getTvDetails(tvId: Int): TvSeasonsResponse? =
         runCatching { api.getTvDetails(tvId, key) }.getOrNull()
 
-    suspend fun discover(type: String, genreId: String? = null, page: Int = 1): List<TmdbItem> =
-        runCatching { filterEnglish(api.discover(type, key, genreId, page = page).results) }.getOrDefault(emptyList())
+    suspend fun discover(
+        type: String,
+        genreId: String? = null,
+        sortBy: String = "popularity.desc",
+        page: Int = 1
+    ): List<TmdbItem> =
+        runCatching {
+            filterEnglish(api.discover(type, key, genreId, sortBy = sortBy, page = page).results)
+        }.getOrDefault(emptyList())
 
     suspend fun search(query: String, type: String = "multi", year: String? = null, page: Int = 1): List<TmdbItem> =
         runCatching { filterEnglish(api.search(type, key, query, year = year, page = page).results) }.getOrDefault(emptyList())
