@@ -1,62 +1,60 @@
 name: Build & Release APK
 
-  on:
-    push:
-      branches: [ "main" ]
-    workflow_dispatch:
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
 
-  permissions:
-    contents: write
+permissions:
+  contents: write
 
-  jobs:
-    build:
-      name: Build & Release Debug APK
-      runs-on: ubuntu-latest
+jobs:
+  build:
+    name: Build & Release Debug APK
+    runs-on: ubuntu-latest
 
-      steps:
-        - name: Checkout code
-          uses: actions/checkout@v4
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-        - name: Set up JDK 17
-          uses: actions/setup-java@v4
-          with:
-            java-version: '17'
-            distribution: 'temurin'
-            cache: gradle
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
 
-        - name: Cache Gradle packages
-          uses: actions/cache@v4
-          with:
-            path: |
-              ~/.gradle/caches
-              ~/.gradle/wrapper
-            key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-            restore-keys: |
-              ${{ runner.os }}-gradle-
+      - name: Cache Gradle packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
 
-        - name: Grant execute permission for gradlew
-          run: chmod +x gradlew
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
 
-        - name: Build debug APK
-          run: ./gradlew assembleDebug --stacktrace
+      - name: Build debug APK
+        run: ./gradlew assembleDebug --stacktrace
 
-        - name: Get version name
-          id: version
-          run: |
-            VERSION=$(grep 'versionName' app/build.gradle.kts | sed 's/.*= *"\(.*\)"/\1/')
-            BUILD=${{ github.run_number }}
-            echo "tag=v${VERSION}-build${BUILD}" >> $GITHUB_OUTPUT
-            echo "name=v${VERSION} (build ${BUILD})" >> $GITHUB_OUTPUT
+      - name: Get version info
+        id: version
+        run: |
+          VERSION=$(grep 'versionName' app/build.gradle.kts | sed 's/[^"]*"\([^"]*\)".*/\1/')
+          echo "tag=v${VERSION}-build${{ github.run_number }}" >> $GITHUB_OUTPUT
+          echo "name=v${VERSION} (build ${{ github.run_number }})" >> $GITHUB_OUTPUT
 
-        - name: Create GitHub Release
-          uses: softprops/action-gh-release@v2
-          with:
-            tag_name: ${{ steps.version.outputs.tag }}
-            name: ${{ steps.version.outputs.name }}
-            body: |
-              **Debug APK** — built automatically from the latest commit.
-              Download the APK below and install it on your device.
-              > Enable "Install from unknown sources" in Android settings if prompted.
-            files: app/build/outputs/apk/debug/app-debug.apk
-            fail_on_unmatched_files: true
-  
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.name }}
+          body: |
+            Debug APK built automatically from the latest commit.
+            Download the APK below and sideload it on your Android device.
+            Enable "Install from unknown sources" in settings if prompted.
+          files: app/build/outputs/apk/debug/app-debug.apk
+          fail_on_unmatched_files: true
