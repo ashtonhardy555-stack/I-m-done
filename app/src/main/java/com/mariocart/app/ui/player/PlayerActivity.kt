@@ -4,11 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
-import android.net.Uri
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
-import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -17,27 +13,8 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
-import android.widget.ImageButton
-import android.widget.LinearLayout
-import android.widget.SeekBar
-import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
-import androidx.lifecycle.lifecycleScope
-import androidx.media3.common.MediaItem
-import androidx.media3.common.Player
-import androidx.media3.datasource.DefaultHttpDataSource
-import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.hls.HlsMediaSource
-import androidx.media3.exoplayer.source.ProgressiveMediaSource
-import androidx.media3.ui.PlayerView
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.launch
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import org.json.JSONObject
-import java.util.concurrent.TimeUnit
 
-@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class PlayerActivity : AppCompatActivity() {
 
     companion object {
@@ -46,10 +23,6 @@ class PlayerActivity : AppCompatActivity() {
         private const val EXTRA_TITLE   = "title"
         private const val EXTRA_SEASON  = "season"
         private const val EXTRA_EPISODE = "episode"
-        
-        // Backend API configuration
-        // TODO: Replace with your actual deployed backend URL (e.g., https://imdone-backend.railway.app/api/stream)
-        private const val BACKEND_API_URL = "https://your-backend-url.com/api/stream"
 
         fun newIntent(
             context: Context,
@@ -71,31 +44,9 @@ class PlayerActivity : AppCompatActivity() {
     private var contentType = "movie"
     private var season = 1
     private var episode = 1
-    private var title = ""
-    private var currentEmbedUrl = ""
-    private var currentOrigin = ""
-
-    private var extractJob: Job? = null
-    private var videoFound = false
-
-    private var exoPlayer: ExoPlayer? = null
-    private var isPlaying = false
-
-    private lateinit var rootContainer: FrameLayout
-    private lateinit var playerView: PlayerView
+    private var videoTitle = ""
+    
     private lateinit var webView: WebView
-    private lateinit var loadingOverlay: FrameLayout
-    private lateinit var loadingStatus: TextView
-    private lateinit var controlsOverlay: LinearLayout
-    private lateinit var playPauseBtn: ImageButton
-    private lateinit var seekBar: SeekBar
-    private lateinit var timeLabel: TextView
-
-    private val handler = Handler(Looper.getMainLooper())
-    private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .build()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -105,203 +56,40 @@ class PlayerActivity : AppCompatActivity() {
 
         tmdbId = intent.getIntExtra(EXTRA_TMDB_ID, 0)
         contentType = intent.getStringExtra(EXTRA_TYPE) ?: "movie"
-        title = intent.getStringExtra(EXTRA_TITLE) ?: ""
+        videoTitle = intent.getStringExtra(EXTRA_TITLE) ?: ""
         season = intent.getIntExtra(EXTRA_SEASON, 1)
         episode = intent.getIntExtra(EXTRA_EPISODE, 1)
 
-        buildLayout()
-        // Try background extraction while showing WebView first
-        resolveStreamFromBackend()
-        switchToWebView()
+        setupLayout()
+        loadVideo()
     }
 
-    @SuppressLint("SetJavaScriptEnabled")
-    private fun buildLayout() {
-        rootContainer = FrameLayout(this).apply { 
+    private fun setupLayout() {
+        val root = FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
-            layoutParams = ViewGroup.LayoutParams(MATCH, MATCH) 
+            layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         }
-        
-        playerView = PlayerView(this).apply { 
-            useController = false
-            setBackgroundColor(Color.BLACK)
-            layoutParams = FrameLayout.LayoutParams(MATCH, MATCH) 
-        }
-        rootContainer.addView(playerView)
 
-        // WebView fallback for iframe embeds
         webView = WebView(this).apply {
-            visibility = View.GONE
-            layoutParams = FrameLayout.LayoutParams(MATCH, MATCH)
-            settings.javaScriptEnabled = true
-            settings.domStorageEnabled = true
-            webViewClient = object : WebViewClient() {
-                override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
-                    val url = request?.url?.toString() ?: ""
-                    if (url.contains(".m3u8") || url.contains(".mp4")) {
-                        handler.post { onVideoUrlFound(url, "WebView Sniffer") }
-                    }
-                    return super.shouldInterceptRequest(view, request)
-                }
-            }
-        }
-        rootContainer.addView(webView)
-
-        loadingOverlay = buildLoadingOverlay()
-        rootContainer.addView(loadingOverlay)
-        
-        controlsOverlay = buildControlsOverlay()
-        rootContainer.addView(controlsOverlay)
-        
-        setContentView(rootContainer)
-    }
-
-    /**
-     * Resolve stream using the backend API
-     * The backend handles all parallel server probing and extraction
-     */
-    private fun resolveStreamFromBackend() {
-        videoFound = false
-        extractJob = lifecycleScope.launch {
-            setLoadingStatus("Connecting to stream resolver…")
-            
-            try {
-                // Build API URL with parameters
-                val apiUrl = buildString {
-                    append(BACKEND_API_URL)
-                    append("?tmdb_id=$tmdbId")
-                    append("&content_type=$contentType")
-                    if (contentType == "tv") {
-                        append("&season=$season")
-                        append("&episode=$episode")
-                    }
-                }
-
-                setLoadingStatus("Probing servers…")
-                
-                // Make HTTP request to backend
-                val request = Request.Builder()
-                    .url(apiUrl)
-                    .addHeader("User-Agent", "I-m-done-Android/1.0")
-                    .build()
-
-                val response = httpClient.newCall(request).execute()
-                
-                if (!response.isSuccessful) {
-                    setLoadingStatus("Backend unavailable, using local extraction…")
-                    switchToLocalExtraction()
-                    return@launch
-                }
-
-                val body = response.body?.string() ?: ""
-                val json = JSONObject(body)
-
-                if (!json.getBoolean("success")) {
-                    setLoadingStatus("No streams found, trying fallback…")
-                    val fallbackIframe = json.optString("fallback_iframe", "")
-                    handler.post { switchToWebView(if (fallbackIframe.isNotEmpty()) fallbackIframe else null) }
-                    return@launch
-                }
-
-                val stream = json.getJSONObject("stream")
-                val videoUrl = stream.getString("url")
-                val serverName = stream.getString("server")
-                val headers = stream.optJSONObject("headers")
-
-                // Store headers for playback
-                if (headers != null) {
-                    currentEmbedUrl = if (headers.has("referer")) headers.optString("referer") else headers.optString("Referer", "")
-                    currentOrigin = if (headers.has("origin")) headers.optString("origin") else headers.optString("Origin", "")
-                }
-
-                onVideoUrlFound(videoUrl, serverName)
-
-            } catch (e: Exception) {
-                setLoadingStatus("Error: ${e.message}")
-                switchToLocalExtraction()
-            }
-        }
-    }
-
-    /**
-     * Fallback to local extraction if backend is unavailable
-     * This preserves the original functionality
-     */
-    private fun switchToLocalExtraction() {
-        // Placeholder: Original local extraction logic would go here
-        // For now, switch to WebView fallback
-        handler.post { switchToWebView() }
-    }
-
-    private fun onVideoUrlFound(videoUrl: String, serverName: String, embedUrl: String = "") {
-        lifecycleScope.launch {
-            if (videoFound) return@launch
-            videoFound = true
-            extractJob?.cancel()
-            handler.post {
-                // If a direct stream is found, we can switch back to the native player
-                // But since the user wants WebView first, we only switch if the WebView fails or if we want to upgrade the experience
-                // For now, let's keep it in WebView as requested, but we've found the stream
-                setLoadingStatus("Direct stream found: $serverName")
-            }
-        }
-    }
-
-    private fun playVideo(videoUrl: String, serverName: String) {
-        releaseExoPlayer()
-        val player = ExoPlayer.Builder(this).build()
-        exoPlayer = player
-        playerView.player = player
-
-        val finalOrigin = if (currentOrigin.isNotEmpty()) currentOrigin 
-                          else try { "https://${Uri.parse(currentEmbedUrl).host}" } catch (_: Exception) { "" }
-                          
-        val httpDsf = DefaultHttpDataSource.Factory()
-            .setUserAgent("Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36")
-            .setAllowCrossProtocolRedirects(true)
-            .setDefaultRequestProperties(mapOf(
-                "Referer" to currentEmbedUrl,
-                "Origin" to finalOrigin
-            ))
-
-        val mi = MediaItem.fromUri(videoUrl)
-        val source = if (videoUrl.lowercase().contains(".m3u8")) {
-            HlsMediaSource.Factory(httpDsf).createMediaSource(mi)
-        } else {
-            ProgressiveMediaSource.Factory(httpDsf).createMediaSource(mi)
+            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            visibility = View.VISIBLE
+            setupCleanWebView(this)
         }
 
-        player.setMediaSource(source)
-        player.prepare()
-        player.playWhenReady = true
-        player.addListener(object : Player.Listener {
-            override fun onPlaybackStateChanged(state: Int) {
-                if (state == Player.STATE_READY) {
-                    isPlaying = true
-                    loadingOverlay.visibility = View.GONE
-                    controlsOverlay.visibility = View.VISIBLE
-                }
-            }
-        })
+        root.addView(webView)
+        setContentView(root)
     }
 
-    private fun switchToWebView(url: String? = null) {
-        val embedUrl = url ?: if (contentType == "movie") {
+    private fun loadVideo() {
+        val embedUrl = if (contentType == "movie") {
             "https://vidsrc.to/embed/movie/$tmdbId"
         } else {
             "https://vidsrc.to/embed/tv/$tmdbId/$season/$episode"
         }
-        
-        // Hide native player and overlays immediately
-        loadingOverlay.visibility = View.GONE
-        playerView.visibility = View.GONE
-        controlsOverlay.visibility = View.GONE
-        webView.visibility = View.VISIBLE
-        
-        setupCleanWebView(webView)
         webView.loadUrl(embedUrl)
     }
 
+    @SuppressLint("SetJavaScriptEnabled")
     private fun setupCleanWebView(web: WebView) {
         web.settings.apply {
             javaScriptEnabled = true
@@ -312,155 +100,87 @@ class PlayerActivity : AppCompatActivity() {
         }
 
         web.webViewClient = object : WebViewClient() {
-            // Block ad-related domains and popups
+            // THE "FIRST-CLICK" AD TRAP BLOCKER
             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                 val url = request?.url?.toString() ?: ""
                 val host = request?.url?.host ?: ""
                 
-                // Only allow the main embed domain and its essential subdomains
-                val allowedDomains = listOf("vidsrc.to", "vidsrc.me", "vidlink.pro", "vsembed.ru", "megacloud.live", "vizcloud.co")
+                // Essential domains only
+                val allowedDomains = listOf("vidsrc.to", "vidsrc.me", "vidlink.pro", "vsembed.ru", "megacloud.live", "vizcloud.co", "2embed")
                 val isAllowed = allowedDomains.any { host.contains(it) }
                 
+                // If it's not an allowed domain, it's almost certainly an ad redirect from the first click
                 return if (isAllowed) {
-                    false // Let the WebView load it
+                    false 
                 } else {
-                    true // Block the navigation (likely an ad popup)
+                    true // BLOCK THE AD REDIRECT
                 }
             }
 
             override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
                 val url = request?.url?.toString()?.lowercase() ?: ""
+                val adKeywords = listOf("google-analytics", "doubleclick", "adsystem", "adservice", "popunder", "popup", "vast", "prebid", "proads")
                 
-                // Common ad/tracker keywords
-                val adKeywords = listOf("google-analytics", "doubleclick", "adsystem", "adservice", "popunder", "popup", "vast", "prebid")
                 if (adKeywords.any { url.contains(it) }) {
-                    return WebResourceResponse("text/plain", "utf-8", null) // Return empty response for ads
+                    return WebResourceResponse("text/plain", "utf-8", null)
                 }
-                
                 return super.shouldInterceptRequest(view, request)
             }
 
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
-                // Inject JS to remove overlays and auto-play
-                val cleanScript = """
-                    (function() {
-                        const clean = () => {
-                            // 1. Remove common ad overlays and annoying elements
-                            const selectors = [
-                                '.ad-overlay', '.popup-container', '#popunder', 
-                                'div[class*="overlay"]', 'div[class*="popup"]',
-                                'iframe[src*="ads"]', 'a[href*="click"]',
-                                '.fixed-bottom', '.top-ad'
-                            ];
-                            selectors.forEach(s => {
-                                document.querySelectorAll(s).forEach(el => {
-                                    el.style.display = 'none';
-                                    el.remove();
-                                });
-                            });
-
-                            // 2. Auto-click play buttons if they exist
-                            const playButtons = [
-                                '#play-button', '.play-button', 'div[aria-label="Play"]',
-                                '#pl_but', '.vjs-big-play-button', '.play-btn'
-                            ];
-                            playButtons.forEach(s => {
-                                const btn = document.querySelector(s);
-                                if (btn && btn.offsetParent !== null) btn.click();
-                            });
-                        };
-
-                        // Run immediately and then every second for 10 seconds to catch dynamic ads
-                        clean();
-                        let count = 0;
-                        const interval = setInterval(() => {
-                            clean();
-                            if (++count > 10) clearInterval(interval);
-                        }, 1000);
-
-                        // 3. Prevent new windows from opening
-                        window.open = function() { return null; };
-                    })();
-                """.trimIndent()
-                view?.evaluateJavascript(cleanScript, null)
+                injectCleanupScript(view)
             }
         }
     }
 
-    private fun buildLoadingOverlay() = FrameLayout(this).apply {
-        setBackgroundColor(Color.BLACK)
-        val center = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            addView(TextView(context).apply { 
-                text = title
-                setTextColor(Color.WHITE)
-                textSize = 20f
-                gravity = Gravity.CENTER
-                setPadding(48, 0, 48, 24) 
-            })
-            loadingStatus = TextView(context).apply { 
-                text = "Initializing…"
-                setTextColor(Color.GRAY)
-                textSize = 13f
-                gravity = Gravity.CENTER 
-            }
-            addView(loadingStatus)
-        }
-        addView(center, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.CENTER))
+    private fun injectCleanupScript(view: WebView?) {
+        val script = """
+            (function() {
+                const clean = () => {
+                    // 1. Remove ad overlays
+                    const selectors = [
+                        '.ad-overlay', '.popup-container', '#popunder', 
+                        'div[class*="overlay"]', 'div[class*="popup"]',
+                        'iframe[src*="ads"]', 'a[href*="click"]',
+                        '.fixed-bottom', '.top-ad', '#disclaimer'
+                    ];
+                    selectors.forEach(s => {
+                        document.querySelectorAll(s).forEach(el => el.remove());
+                    });
+
+                    // 2. Force click play button
+                    const playButtons = [
+                        '#play-button', '.play-button', 'div[aria-label="Play"]',
+                        '#pl_but', '.vjs-big-play-button', '.play-btn', '.vjs-big-play-button'
+                    ];
+                    playButtons.forEach(s => {
+                        const btn = document.querySelector(s);
+                        if (btn && btn.offsetParent !== null) {
+                            btn.click();
+                            // Dispatch a real click event to bypass some anti-bot checks
+                            btn.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true, view: window}));
+                        }
+                    });
+                };
+
+                // Continuous cleaning for 15 seconds
+                clean();
+                let count = 0;
+                const interval = setInterval(() => {
+                    clean();
+                    if (++count > 15) clearInterval(interval);
+                }, 1000);
+
+                // Disable window.open to stop popups
+                window.open = function() { return null; };
+            })();
+        """.trimIndent()
+        view?.evaluateJavascript(script, null)
     }
 
-    private fun buildControlsOverlay() = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL
-        visibility = View.GONE
-        addView(View(context).apply { layoutParams = LinearLayout.LayoutParams(MATCH, 0, 1f) })
-        val bar = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-            setPadding(16, 16, 16, 16)
-            playPauseBtn = ImageButton(context).apply { 
-                setImageResource(android.R.drawable.ic_media_play)
-                setBackgroundColor(Color.TRANSPARENT)
-                setColorFilter(Color.WHITE)
-                setOnClickListener { togglePlayPause() } 
-            }
-            addView(playPauseBtn)
-            seekBar = SeekBar(context).apply { 
-                layoutParams = LinearLayout.LayoutParams(0, WRAP, 1f) 
-            }
-            addView(seekBar)
-            timeLabel = TextView(context).apply { 
-                text = "0:00 / 0:00"
-                setTextColor(Color.WHITE)
-                textSize = 11f 
-            }
-            addView(timeLabel)
-        }
-        addView(bar)
-    }
-
-    private fun togglePlayPause() { 
-        exoPlayer?.let { 
-            if (it.isPlaying) it.pause() else it.play() 
-        } 
-    }
-
-    private fun releaseExoPlayer() { 
-        exoPlayer?.release()
-        exoPlayer = null 
-    }
-
-    private fun setLoadingStatus(msg: String) { 
-        handler.post { loadingStatus.text = msg } 
-    }
-
-    override fun onDestroy() { 
-        releaseExoPlayer()
+    override fun onDestroy() {
         webView.destroy()
-        super.onDestroy() 
+        super.onDestroy()
     }
-
-    private val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
-    private val WRAP  = ViewGroup.LayoutParams.WRAP_CONTENT
 }
