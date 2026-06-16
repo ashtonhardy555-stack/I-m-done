@@ -1,5 +1,6 @@
 package com.mariocart.app.ui.player
 
+import android.annotation.SuppressLint
 import android.app.Dialog
 import android.content.Context
 import android.content.Intent
@@ -49,9 +50,8 @@ class PlayerActivity : AppCompatActivity() {
         private const val EXTRA_SEASON  = "season"
         private const val EXTRA_EPISODE = "episode"
 
-        private const val MIN_DURATION_MS      = 5 * 60 * 1000L
-        private const val EXTRACT_TIMEOUT_MS   = 15_000L
-        private const val DIRECT_TIMEOUT_MS    = 20_000L
+        private const val MIN_DURATION_MS    = 5 * 60 * 1000L
+        private const val EXTRACT_TIMEOUT_MS = 20_000L
 
         fun newIntent(
             context: Context,
@@ -69,6 +69,7 @@ class PlayerActivity : AppCompatActivity() {
         }
     }
 
+    // ── Server / content state ────────────────────────────────────────────────
     private var servers: List<StreamingServer> = emptyList()
     private var currentServerIndex = 0
     private var tmdbId = 0
@@ -78,8 +79,10 @@ class PlayerActivity : AppCompatActivity() {
     private var title = ""
     private var currentEmbedUrl = ""
 
+    // ── Extraction state ──────────────────────────────────────────────────────
     private var extractJob: Job? = null
 
+    // ── Player state ─────────────────────────────────────────────────────────
     private var exoPlayer: ExoPlayer? = null
     private var isPlaying = false
     private var isSeeking = false
@@ -87,6 +90,7 @@ class PlayerActivity : AppCompatActivity() {
     private var savedPositionMs = 0L
     private var selectedMaxHeight = Int.MAX_VALUE
 
+    // ── Views ─────────────────────────────────────────────────────────────────
     private lateinit var playerView: PlayerView
     private lateinit var loadingOverlay: FrameLayout
     private lateinit var loadingTitle: TextView
@@ -100,12 +104,14 @@ class PlayerActivity : AppCompatActivity() {
     private lateinit var qualityBtn: TextView
     private lateinit var errorText: TextView
 
+    // ── Handler / runnables ───────────────────────────────────────────────────
     private val handler = Handler(Looper.getMainLooper())
     private var autoHideRunnable: Runnable? = null
     private var dotsRunnable: Runnable? = null
     private var progressRunnable: Runnable? = null
     private var dotsCount = 0
 
+    // ── Lifecycle ─────────────────────────────────────────────────────────────
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -120,7 +126,10 @@ class PlayerActivity : AppCompatActivity() {
         )
 
         tmdbId = intent.getIntExtra(EXTRA_TMDB_ID, 0)
-        if (tmdbId <= 0) { finish(); return }
+        if (tmdbId <= 0) {
+            finish()
+            return
+        }
         contentType = intent.getStringExtra(EXTRA_TYPE) ?: "movie"
         title       = intent.getStringExtra(EXTRA_TITLE) ?: ""
         season      = intent.getIntExtra(EXTRA_SEASON, 1)
@@ -130,6 +139,7 @@ class PlayerActivity : AppCompatActivity() {
         initServersAndPlay()
     }
 
+    // ── Layout ────────────────────────────────────────────────────────────────
     private fun buildLayout() {
         val root = FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
@@ -144,6 +154,7 @@ class PlayerActivity : AppCompatActivity() {
         }
         root.addView(playerView)
 
+        // Loading overlay
         loadingOverlay = FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
             layoutParams = FrameLayout.LayoutParams(MATCH, MATCH)
@@ -202,6 +213,7 @@ class PlayerActivity : AppCompatActivity() {
             layoutParams = FrameLayout.LayoutParams(MATCH, MATCH)
         }
 
+        // Top scrim + bar
         val topScrim = View(this).apply {
             background = GradientDrawable(
                 GradientDrawable.Orientation.TOP_BOTTOM,
@@ -249,6 +261,7 @@ class PlayerActivity : AppCompatActivity() {
             layoutParams = LinearLayout.LayoutParams(MATCH, 0, 1f)
         })
 
+        // Bottom scrim + seek + buttons
         val bottomScrim = View(this).apply {
             background = GradientDrawable(
                 GradientDrawable.Orientation.BOTTOM_TOP,
@@ -303,9 +316,10 @@ class PlayerActivity : AppCompatActivity() {
             setBackgroundColor(Color.TRANSPARENT)
             setColorFilter(Color.WHITE)
             setPadding(dp(16), dp(12), dp(16), dp(12))
-            layoutParams = LinearLayout.LayoutParams(WRAP, WRAP).apply {
-                leftMargin = dp(8); rightMargin = dp(8)
-            }
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { leftMargin = dp(8); rightMargin = dp(8) }
             setOnClickListener { togglePlayPause() }
         }
         bottomBar.addView(playPauseBtn)
@@ -326,15 +340,15 @@ class PlayerActivity : AppCompatActivity() {
         return overlay
     }
 
-    // ── Initialization — tries direct JSON APIs first, then server scraping ───
-
+    // ── Initialization ────────────────────────────────────────────────────────
     private fun initServersAndPlay() {
         startDotsAnimation()
+        ServerManager.resetHealth()   // clear stale dead/good flags from any previous title
         extractJob = lifecycleScope.launch {
 
             // Step 1: try all known JSON APIs directly (fastest path)
             setLoadingStatus("Checking direct sources…")
-            val directUrl = withTimeoutOrNull(DIRECT_TIMEOUT_MS) {
+            val directUrl = withTimeoutOrNull(20_000L) {
                 StreamExtractor.extractDirect(tmdbId, contentType, season, episode)
             }
             if (directUrl != null) {
@@ -351,6 +365,7 @@ class PlayerActivity : AppCompatActivity() {
         }
     }
 
+    // ── Server loading ────────────────────────────────────────────────────────
     private fun loadServer(index: Int) {
         if (index >= servers.size) {
             showError("No working stream found.\nTap SOURCE to pick manually.")
@@ -386,6 +401,7 @@ class PlayerActivity : AppCompatActivity() {
         else showError("All sources tried.\nTap SOURCE to pick manually.")
     }
 
+    // ── URL found → start ExoPlayer ───────────────────────────────────────────
     private fun onVideoUrlFound(videoUrl: String) {
         ServerManager.markServerSuccess(servers.getOrNull(currentServerIndex)?.name ?: "")
 
@@ -395,12 +411,12 @@ class PlayerActivity : AppCompatActivity() {
 
         val embedHost = try { "https://${Uri.parse(currentEmbedUrl).host}" } catch (_: Exception) { "" }
         val httpDsf = DefaultHttpDataSource.Factory()
-            .setUserAgent("Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36")
+            .setUserAgent("Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36")
             .setAllowCrossProtocolRedirects(true)
             .setDefaultRequestProperties(mapOf("Referer" to currentEmbedUrl, "Origin" to embedHost))
 
         val mi = MediaItem.fromUri(videoUrl)
-        val source = if (videoUrl.lowercase().let { it.contains(".m3u8") || it.contains("/hls/") })
+        val source = if (videoUrl.lowercase().contains(".m3u8"))
             HlsMediaSource.Factory(httpDsf).createMediaSource(mi)
         else
             ProgressiveMediaSource.Factory(httpDsf).createMediaSource(mi)
@@ -420,7 +436,7 @@ class PlayerActivity : AppCompatActivity() {
                     Player.STATE_READY -> {
                         val dur = player.duration
                         if (dur in 1L until MIN_DURATION_MS) {
-                            setLoadingStatus("Clip too short, trying next…")
+                            setLoadingStatus("Clip too short, trying next source…")
                             showLoadingOverlay()
                             releaseExoPlayer()
                             handler.postDelayed({ tryNextServer() }, 300L)
@@ -451,6 +467,7 @@ class PlayerActivity : AppCompatActivity() {
         })
     }
 
+    // ── Player controls ───────────────────────────────────────────────────────
     private fun showPlayerControls() {
         loadingOverlay.visibility = View.GONE
         controlsOverlay.visibility = View.VISIBLE
@@ -529,38 +546,51 @@ class PlayerActivity : AppCompatActivity() {
         if (pos > 3_000L) handler.postDelayed({ exoPlayer?.seekTo(pos) }, 600L)
     }
 
+    // ── ExoPlayer release ─────────────────────────────────────────────────────
     private fun releaseExoPlayer() {
         stopProgressUpdater()
         exoPlayer?.release(); exoPlayer = null
         isPlaying = false
     }
 
+    // ── Quality picker ────────────────────────────────────────────────────────
     private fun showQualityPicker() {
         cancelAutoHide()
-        val labels  = arrayOf("Auto (Best)", "1080p", "720p", "480p", "360p")
+        val labels = arrayOf("Auto (Best)", "1080p", "720p", "480p", "360p")
         val heights = intArrayOf(Int.MAX_VALUE, 1080, 720, 480, 360)
+
         val dialog = Dialog(this, android.R.style.Theme_Material_Dialog_NoActionBar)
         dialog.setContentView(buildPickerDialog("Quality", labels) { idx ->
             selectedMaxHeight = heights[idx]
             qualityBtn.text = labels[idx]
-            exoPlayer?.trackSelectionParameters = exoPlayer?.trackSelectionParameters
-                ?.buildUpon()?.setMaxVideoSize(Int.MAX_VALUE, heights[idx])?.build()
-                ?: return@buildPickerDialog
-            dialog.dismiss(); scheduleAutoHide()
+            exoPlayer?.let { player ->
+                player.trackSelectionParameters = player.trackSelectionParameters
+                    .buildUpon().setMaxVideoSize(Int.MAX_VALUE, heights[idx]).build()
+            }
+            dialog.dismiss()
+            scheduleAutoHide()
         })
         dialog.show()
     }
 
+    // ── Server picker ─────────────────────────────────────────────────────────
     private fun showServerPicker() {
         cancelAutoHide()
-        val names = servers.mapIndexed { i, s ->
-            "${when { i == currentServerIndex -> "▶  "; i < currentServerIndex -> "✓  "; else -> "     " }}${s.name}"
+        val serverNames = servers.mapIndexed { i, s ->
+            val marker = when {
+                i == currentServerIndex -> "▶  "
+                i < currentServerIndex  -> "✓  "
+                else                    -> "     "
+            }
+            "$marker${s.name}"
         }.toTypedArray()
+
         val dialog = Dialog(this, android.R.style.Theme_Material_Dialog_NoActionBar)
-        dialog.setContentView(buildPickerDialog("Select Source", names) { idx ->
+        dialog.setContentView(buildPickerDialog("Select Source", serverNames) { idx ->
             if (idx != currentServerIndex) {
                 savedPositionMs = exoPlayer?.currentPosition ?: 0L
-                showLoadingOverlay(); loadServer(idx)
+                showLoadingOverlay()
+                loadServer(idx)
             }
             dialog.dismiss()
         })
@@ -578,6 +608,118 @@ class PlayerActivity : AppCompatActivity() {
         }
         wrapper.addView(TextView(this).apply {
             text = title
-            setText **...**
+            setTextColor(Color.parseColor("#AAAAAA"))
+            textSize = 11f
+            letterSpacing = 0.15f
+            setPadding(dp(20), 0, dp(20), dp(12))
+        })
+        val list = ListView(this).apply {
+            adapter = object : ArrayAdapter<String>(this@PlayerActivity,
+                android.R.layout.simple_list_item_1, items) {
+                override fun getView(pos: Int, convertView: View?, parent: ViewGroup): View {
+                    val tv = super.getView(pos, convertView, parent) as TextView
+                    tv.setTextColor(if (pos == currentServerIndex) Color.WHITE else Color.parseColor("#CCCCCC"))
+                    tv.textSize = 15f
+                    tv.setPadding(dp(20), dp(14), dp(20), dp(14))
+                    tv.setBackgroundColor(Color.TRANSPARENT)
+                    return tv
+                }
+            }
+            divider = ColorDrawable(Color.parseColor("#2A2A2A"))
+            dividerHeight = 1
+            setBackgroundColor(Color.TRANSPARENT)
+        }
+        list.setOnItemClickListener { _, _, pos, _ -> onPick(pos) }
+        wrapper.addView(list)
+        return wrapper
+    }
 
-_This response is too long to display in full._
+    // ── Loading UI ────────────────────────────────────────────────────────────
+    private fun setLoadingStatus(msg: String) = handler.post { loadingStatus.text = msg }
+
+    private fun showError(msg: String) = handler.post {
+        stopDotsAnimation()
+        loadingDots.visibility = View.GONE
+        loadingStatus.visibility = View.GONE
+        errorText.text = msg
+        errorText.visibility = View.VISIBLE
+        loadingOverlay.visibility = View.VISIBLE
+        controlsOverlay.visibility = View.GONE
+    }
+
+    private fun hideError() = handler.post {
+        errorText.visibility = View.GONE
+        loadingDots.visibility = View.VISIBLE
+        loadingStatus.visibility = View.VISIBLE
+    }
+
+    private fun startDotsAnimation() {
+        stopDotsAnimation()
+        dotsRunnable = object : Runnable {
+            private val states = listOf("⬤  ○  ○", "○  ⬤  ○", "○  ○  ⬤", "○  ⬤  ○")
+            override fun run() {
+                loadingDots.text = states[dotsCount % states.size]
+                dotsCount++
+                handler.postDelayed(this, 400L)
+            }
+        }
+        handler.post(dotsRunnable!!)
+    }
+
+    private fun stopDotsAnimation() {
+        dotsRunnable?.let { handler.removeCallbacks(it) }
+        dotsRunnable = null
+    }
+
+    // ── Lifecycle ─────────────────────────────────────────────────────────────
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_BACK) { finish(); return true }
+        return super.onKeyDown(keyCode, event)
+    }
+
+    override fun onPause() {
+        super.onPause()
+        exoPlayer?.pause()
+        stopProgressUpdater()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (isPlaying && !userInitiatedPause) {
+            exoPlayer?.play()
+            startProgressUpdater()
+        }
+    }
+
+    override fun onDestroy() {
+        extractJob?.cancel()
+        cancelAutoHide()
+        stopDotsAnimation()
+        releaseExoPlayer()
+        super.onDestroy()
+    }
+
+    // ── Utilities ─────────────────────────────────────────────────────────────
+    private val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
+    private val WRAP  = ViewGroup.LayoutParams.WRAP_CONTENT
+
+    private fun dp(v: Int) = (v * resources.displayMetrics.density + 0.5f).toInt()
+
+    private fun formatMs(ms: Long): String {
+        val s = ms / 1000L; val m = s / 60L; val h = m / 60L
+        return if (h > 0) "%d:%02d:%02d".format(h, m % 60, s % 60)
+               else       "%d:%02d".format(m, s % 60)
+    }
+
+    private fun iconBtn(resId: Int, onClick: () -> Unit) = ImageButton(this).apply {
+        setImageResource(resId)
+        setBackgroundColor(Color.TRANSPARENT)
+        setColorFilter(Color.WHITE)
+        setPadding(dp(16), dp(12), dp(16), dp(12))
+        setOnClickListener { onClick() }
+    }
+
+    private fun roundedBg(color: Int, radiusPx: Int) = GradientDrawable().apply {
+        setColor(color); cornerRadius = radiusPx.toFloat()
+    }
+}

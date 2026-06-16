@@ -384,4 +384,4 @@ object StreamExtractor {
     private fun String.toOrigin(): String = try {
         val u = Uri.parse(this); "${u.scheme}://${u.host}"
     } catch (_: Exception) { this }
-                  }
+}
