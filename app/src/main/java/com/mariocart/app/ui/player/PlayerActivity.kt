@@ -82,7 +82,7 @@ class PlayerActivity : AppCompatActivity() {
     // ── Extraction state ──────────────────────────────────────────────────────
     private var extractJob: Job? = null
 
-    // ── Player state ────────────────────────────────────────────────────────
+    // ── Player state ─────────────────────────────────────────────────────────
     private var exoPlayer: ExoPlayer? = null
     private var isPlaying = false
     private var isSeeking = false
@@ -90,7 +90,7 @@ class PlayerActivity : AppCompatActivity() {
     private var savedPositionMs = 0L
     private var selectedMaxHeight = Int.MAX_VALUE
 
-    // ── Views ──────────────────────────────────────────────────────────
+    // ── Views ─────────────────────────────────────────────────────────────────
     private lateinit var playerView: PlayerView
     private lateinit var loadingOverlay: FrameLayout
     private lateinit var loadingTitle: TextView
@@ -111,7 +111,7 @@ class PlayerActivity : AppCompatActivity() {
     private var progressRunnable: Runnable? = null
     private var dotsCount = 0
 
-    // ── Lifecycle ─────────────────────────────────────────────────────────
+    // ── Lifecycle ─────────────────────────────────────────────────────────────
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -125,7 +125,7 @@ class PlayerActivity : AppCompatActivity() {
             or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
         )
 
-                tmdbId = intent.getIntExtra(EXTRA_TMDB_ID, 0)
+        tmdbId = intent.getIntExtra(EXTRA_TMDB_ID, 0)
         if (tmdbId <= 0) {
             finish()
             return
@@ -139,7 +139,7 @@ class PlayerActivity : AppCompatActivity() {
         initServersAndPlay()
     }
 
-    // ── Layout ──────────────────────────────────────────────────────────
+    // ── Layout ────────────────────────────────────────────────────────────────
     private fun buildLayout() {
         val root = FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
@@ -340,7 +340,7 @@ class PlayerActivity : AppCompatActivity() {
         return overlay
     }
 
-    // ── Initialization ───────────────────────────────────────────────────────
+    // ── Initialization ────────────────────────────────────────────────────────
     private fun initServersAndPlay() {
         startDotsAnimation()
         lifecycleScope.launch {
@@ -351,7 +351,7 @@ class PlayerActivity : AppCompatActivity() {
         }
     }
 
-    // ── Server loading — uses StreamExtractor, no WebView ─────────────────────
+    // ── Server loading ────────────────────────────────────────────────────────
     private fun loadServer(index: Int) {
         if (index >= servers.size) {
             showError("No working stream found.\nTap SOURCE to pick manually.")
@@ -370,7 +370,7 @@ class PlayerActivity : AppCompatActivity() {
 
         extractJob = lifecycleScope.launch {
             val videoUrl = withTimeoutOrNull(EXTRACT_TIMEOUT_MS) {
-                StreamExtractor.extract(currentEmbedUrl)
+                StreamExtractor.extract(currentEmbedUrl, tmdbId, contentType, season, episode)
             }
             if (videoUrl != null) {
                 onVideoUrlFound(videoUrl)
@@ -539,7 +539,7 @@ class PlayerActivity : AppCompatActivity() {
         isPlaying = false
     }
 
-    // ── Quality picker ───────────────────────────────────────────────────────
+    // ── Quality picker ────────────────────────────────────────────────────────
     private fun showQualityPicker() {
         cancelAutoHide()
         val labels = arrayOf("Auto (Best)", "1080p", "720p", "480p", "360p")
@@ -550,7 +550,8 @@ class PlayerActivity : AppCompatActivity() {
             selectedMaxHeight = heights[idx]
             qualityBtn.text = labels[idx]
             exoPlayer?.let { player ->
-                // Re-prepare with new quality preference if needed
+                player.trackSelectionParameters = player.trackSelectionParameters
+                    .buildUpon().setMaxVideoSize(Int.MAX_VALUE, heights[idx]).build()
             }
             dialog.dismiss()
             scheduleAutoHide()
@@ -558,7 +559,7 @@ class PlayerActivity : AppCompatActivity() {
         dialog.show()
     }
 
-    // ── Server picker ───────────────────────────────────────────────────────
+    // ── Server picker ─────────────────────────────────────────────────────────
     private fun showServerPicker() {
         cancelAutoHide()
         val serverNames = servers.mapIndexed { i, s ->
@@ -619,7 +620,7 @@ class PlayerActivity : AppCompatActivity() {
         return wrapper
     }
 
-    // ── Loading UI ────────────────────────────────────────────────────────
+    // ── Loading UI ────────────────────────────────────────────────────────────
     private fun setLoadingStatus(msg: String) = handler.post { loadingStatus.text = msg }
 
     private fun showError(msg: String) = handler.post {
@@ -656,7 +657,7 @@ class PlayerActivity : AppCompatActivity() {
         dotsRunnable = null
     }
 
-    // ── Lifecycle ─────────────────────────────────────────────────────────
+    // ── Lifecycle ─────────────────────────────────────────────────────────────
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         if (keyCode == KeyEvent.KEYCODE_BACK) { finish(); return true }
         return super.onKeyDown(keyCode, event)
@@ -684,7 +685,7 @@ class PlayerActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
-    // ── Utilities ─────────────────────────────────────────────────────────
+    // ── Utilities ─────────────────────────────────────────────────────────────
     private val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
     private val WRAP  = ViewGroup.LayoutParams.WRAP_CONTENT
 
