@@ -57,17 +57,23 @@ fun SearchScreen(
         )
 
         if (isLoading) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(
+                Modifier.fillMaxWidth().weight(1f),
+                contentAlignment = Alignment.Center
+            ) {
                 CircularProgressIndicator(color = Red)
             }
         } else if (results.isNotEmpty()) {
-            LazyColumn {
+            LazyColumn(modifier = Modifier.weight(1f)) {
                 items(results) { item ->
                     ContentCard(item = item, onClick = { onItemClick(item) })
                 }
             }
         } else if (query.length >= 2) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(
+                Modifier.fillMaxWidth().weight(1f),
+                contentAlignment = Alignment.Center
+            ) {
                 Text("No results found", color = TextMuted)
             }
         }
