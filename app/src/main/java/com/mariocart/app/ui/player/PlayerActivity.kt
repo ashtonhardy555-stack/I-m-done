@@ -73,6 +73,7 @@ class PlayerActivity : AppCompatActivity() {
     private var episode = 1
     private var title = ""
     private var currentEmbedUrl = ""
+    private var currentOrigin = ""
 
     private var extractJob: Job? = null
     private var videoFound = false
@@ -210,7 +211,8 @@ class PlayerActivity : AppCompatActivity() {
 
                 // Store headers for playback
                 if (headers != null) {
-                    currentEmbedUrl = headers.optString("Referer", "")
+                    currentEmbedUrl = if (headers.has("referer")) headers.optString("referer") else headers.optString("Referer", "")
+                    currentOrigin = if (headers.has("origin")) headers.optString("origin") else headers.optString("Origin", "")
                 }
 
                 onVideoUrlFound(videoUrl, serverName)
@@ -250,13 +252,15 @@ class PlayerActivity : AppCompatActivity() {
         exoPlayer = player
         playerView.player = player
 
-        val embedHost = try { "https://${Uri.parse(currentEmbedUrl).host}" } catch (_: Exception) { "" }
+        val finalOrigin = if (currentOrigin.isNotEmpty()) currentOrigin 
+                          else try { "https://${Uri.parse(currentEmbedUrl).host}" } catch (_: Exception) { "" }
+                          
         val httpDsf = DefaultHttpDataSource.Factory()
             .setUserAgent("Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36")
             .setAllowCrossProtocolRedirects(true)
             .setDefaultRequestProperties(mapOf(
                 "Referer" to currentEmbedUrl,
-                "Origin" to embedHost
+                "Origin" to finalOrigin
             ))
 
         val mi = MediaItem.fromUri(videoUrl)

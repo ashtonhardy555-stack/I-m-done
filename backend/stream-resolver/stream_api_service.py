@@ -138,13 +138,15 @@ async def extract_vidlink(tmdb_id: int, is_movie: bool, season: int = 1, episode
         
         if "stream" in data and "playlist" in data["stream"]:
             video_url = data["stream"]["playlist"]
+            # If the backend returns its own headers, use them, otherwise use defaults
+            resp_headers = data["stream"].get("headers", {})
             return VideoSource(
                 url=video_url,
                 format="hls",
                 server="VidLink",
                 headers={
-                    "Referer": "https://megacloud.live/",
-                    "Origin": "https://megacloud.live"
+                    "referer": resp_headers.get("referer", "https://megacloud.live/"),
+                    "origin": resp_headers.get("origin", "https://megacloud.live")
                 }
             )
     except Exception as e:
