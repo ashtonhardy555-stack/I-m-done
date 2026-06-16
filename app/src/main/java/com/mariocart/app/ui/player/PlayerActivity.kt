@@ -1,18 +1,14 @@
 package com.mariocart.app.ui.player
 
 import android.annotation.SuppressLint
-import android.app.Dialog
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
-import android.graphics.drawable.ColorDrawable
-import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
-import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -20,11 +16,9 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.widget.ArrayAdapter
 import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.LinearLayout
-import android.widget.ListView
 import android.widget.SeekBar
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
@@ -38,11 +32,14 @@ import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.ui.PlayerView
 import com.mariocart.app.data.model.StreamingServer
 import com.mariocart.app.data.server.ServerManager
-import com.mariocart.app.data.server.ServerTester
 import com.mariocart.app.data.server.StreamExtractor
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.io.ByteArrayInputStream
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
@@ -54,9 +51,6 @@ class PlayerActivity : AppCompatActivity() {
         private const val EXTRA_TITLE   = "title"
         private const val EXTRA_SEASON  = "season"
         private const val EXTRA_EPISODE = "episode"
-
-        private const val MIN_DURATION_MS    = 5 * 60 * 1000L
-        private const val EXTRACT_TIMEOUT_MS = 15_000L
 
         fun newIntent(
             context: Context,
@@ -74,9 +68,6 @@ class PlayerActivity : AppCompatActivity() {
         }
     }
 
-    // ── Server / content state ────────────────────────────────────────────────
-    private var servers: List<StreamingServer> = emptyList()
-    private var currentServerIndex = 0
     private var tmdbId = 0
     private var contentType = "movie"
     private var season = 1
@@ -84,55 +75,31 @@ class PlayerActivity : AppCompatActivity() {
     private var title = ""
     private var currentEmbedUrl = ""
 
-    // ── Extraction state ──────────────────────────────────────────────────────
     private var extractJob: Job? = null
-    private var isWebViewMode = false
+    private val mutex = Mutex()
+    private var videoFound = false
 
-    // ── Player state ─────────────────────────────────────────────────────────
     private var exoPlayer: ExoPlayer? = null
     private var isPlaying = false
-    private var isSeeking = false
-    private var userInitiatedPause = false
     private var savedPositionMs = 0L
-    private var selectedMaxHeight = Int.MAX_VALUE
 
-    // ── Views ─────────────────────────────────────────────────────────────────
     private lateinit var rootContainer: FrameLayout
     private lateinit var playerView: PlayerView
     private lateinit var webView: WebView
     private lateinit var loadingOverlay: FrameLayout
     private lateinit var loadingStatus: TextView
-    private lateinit var loadingDots: TextView
     private lateinit var controlsOverlay: LinearLayout
-    private lateinit var titleLabel: TextView
+    private lateinit var playPauseBtn: ImageButton
     private lateinit var seekBar: SeekBar
     private lateinit var timeLabel: TextView
-    private lateinit var playPauseBtn: ImageButton
-    private lateinit var qualityBtn: TextView
-    private lateinit var errorText: TextView
 
-    // ── Handler / runnables ───────────────────────────────────────────────────
     private val handler = Handler(Looper.getMainLooper())
-    private var autoHideRunnable: Runnable? = null
-    private var dotsRunnable: Runnable? = null
-    private var progressRunnable: Runnable? = null
-    private var dotsCount = 0
-
-    private val adDomains = setOf(
-        "doubleclick.net", "googlesyndication.com", "adservice.google",
-        "adnxs.com", "outbrain.com", "taboola.com", "popads.net", "popcash.net",
-        "onclickads.net", "exoclick.com", "juicyads.com", "clksite.com"
-    )
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         @Suppress("DEPRECATION")
-        window.decorView.systemUiVisibility = (
-            View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
-            View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
-            View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-        )
+        window.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY)
 
         tmdbId = intent.getIntExtra(EXTRA_TMDB_ID, 0)
         contentType = intent.getStringExtra(EXTRA_TYPE) ?: "movie"
@@ -141,22 +108,13 @@ class PlayerActivity : AppCompatActivity() {
         episode = intent.getIntExtra(EXTRA_EPISODE, 1)
 
         buildLayout()
-        initServersAndPlay()
+        startMassiveParallelSearch()
     }
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun buildLayout() {
-        rootContainer = FrameLayout(this).apply {
-            setBackgroundColor(Color.BLACK)
-            layoutParams = ViewGroup.LayoutParams(MATCH, MATCH)
-        }
-
-        playerView = PlayerView(this).apply {
-            useController = false
-            setBackgroundColor(Color.BLACK)
-            layoutParams = FrameLayout.LayoutParams(MATCH, MATCH)
-            setOnClickListener { if (!isWebViewMode) toggleControlsVisibility() }
-        }
+        rootContainer = FrameLayout(this).apply { setBackgroundColor(Color.BLACK); layoutParams = ViewGroup.LayoutParams(MATCH, MATCH) }
+        playerView = PlayerView(this).apply { useController = false; setBackgroundColor(Color.BLACK); layoutParams = FrameLayout.LayoutParams(MATCH, MATCH) }
         rootContainer.addView(playerView)
 
         webView = WebView(this).apply {
@@ -164,34 +122,11 @@ class PlayerActivity : AppCompatActivity() {
             layoutParams = FrameLayout.LayoutParams(MATCH, MATCH)
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
-            settings.mediaPlaybackRequiresUserGesture = false
-            settings.userAgentString = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
-            
             webViewClient = object : WebViewClient() {
-                override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                    val url = request?.url?.toString() ?: ""
-                    // Block all redirects to different hosts (ad-prevention)
-                    val embedHost = Uri.parse(currentEmbedUrl).host ?: ""
-                    val targetHost = Uri.parse(url).host ?: ""
-                    return if (targetHost.isNotEmpty() && !targetHost.contains(embedHost)) {
-                        android.util.Log.d("WebView", "Blocked redirect to: $url")
-                        true
-                    } else false
-                }
-
                 override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
-                    val url = request?.url?.toString()?.lowercase() ?: ""
-                    
-                    // 1. AD BLOCKING
-                    if (adDomains.any { url.contains(it) }) {
-                        return WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream("".toByteArray()))
-                    }
-
-                    // 2. SNIFFER: Catch video URLs in traffic
-                    if (url.contains(".m3u8") || url.contains(".mp4") || url.contains("/hls/") || url.contains("/stream/")) {
-                        if (!isWebViewMode && !url.contains("google.com") && !url.contains("gstatic.com")) {
-                            handler.post { onVideoUrlFound(request?.url?.toString()!!) }
-                        }
+                    val url = request?.url?.toString() ?: ""
+                    if (url.contains(".m3u8") || url.contains(".mp4")) {
+                        handler.post { onVideoUrlFound(url, "WebView Sniffer") }
                     }
                     return super.shouldInterceptRequest(view, request)
                 }
@@ -203,83 +138,62 @@ class PlayerActivity : AppCompatActivity() {
         rootContainer.addView(loadingOverlay)
         controlsOverlay = buildControlsOverlay()
         rootContainer.addView(controlsOverlay)
-
         setContentView(rootContainer)
     }
 
-    private fun initServersAndPlay() {
-        startDotsAnimation()
-        ServerManager.resetHealth()
+    private fun startMassiveParallelSearch() {
+        videoFound = false
         extractJob = lifecycleScope.launch {
-            setLoadingStatus("Checking direct sources…")
-            val directUrl = withTimeoutOrNull(10_000L) {
-                StreamExtractor.extractDirect(tmdbId, contentType, season, episode)
-            }
-            if (directUrl != null) {
-                onVideoUrlFound(directUrl)
-                return@launch
-            }
-
-            setLoadingStatus("Checking servers…")
+            setLoadingStatus("Searching all servers at once…")
             ServerManager.initialize(this@PlayerActivity)
-            val raw = ServerManager.getOrderedServers()
-            servers = ServerTester.rankForContent(raw, tmdbId, contentType, season, episode)
-            loadServer(0)
-        }
-    }
+            val allServers = ServerManager.getOrderedServers()
+            
+            // Limit to top 15 servers for stability
+            val topServers = allServers.take(15)
 
-    private fun loadServer(index: Int) {
-        if (index >= servers.size) {
-            showError("No working stream found.\nTap SOURCE to pick manually.")
-            return
-        }
-        currentServerIndex = index
-        extractJob?.cancel()
-        releaseExoPlayer()
-        isWebViewMode = false
-        webView.visibility = View.GONE
-        webView.loadUrl("about:blank")
-
-        val server = servers[index]
-        currentEmbedUrl = if (contentType == "movie") server.movieUrl(tmdbId)
-                          else server.tvUrl(tmdbId, season, episode)
-
-        setLoadingStatus("Trying ${server.name}…")
-        hideError()
-
-        // Sniffing & Scraping in parallel
-        webView.loadUrl(currentEmbedUrl)
-        
-        extractJob = lifecycleScope.launch {
-            val videoUrl = withTimeoutOrNull(EXTRACT_TIMEOUT_MS) {
-                StreamExtractor.extract(currentEmbedUrl, tmdbId, contentType, season, episode)
-            }
-            if (videoUrl != null) {
-                onVideoUrlFound(videoUrl)
-            } else {
-                // If extraction fails, wait a few more seconds for the sniffer, then switch to WebView
-                handler.postDelayed({
-                    if (exoPlayer == null && !isWebViewMode) {
-                        switchToWebView()
+            val tasks = topServers.map { server ->
+                async {
+                    val embed = if (contentType == "movie") server.movieUrl(tmdbId) else server.tvUrl(tmdbId, season, episode)
+                    val url = StreamExtractor.extract(embed, tmdbId, contentType, season, episode)
+                    if (url != null) {
+                        onVideoUrlFound(url, server.name, embed)
                     }
-                }, 5000L)
+                }
+            }
+            
+            // Also start a sniffer on the #1 server as a fallback
+            if (topServers.isNotEmpty()) {
+                val bestEmbed = if (contentType == "movie") topServers[0].movieUrl(tmdbId) else topServers[0].tvUrl(tmdbId, season, episode)
+                currentEmbedUrl = bestEmbed
+                webView.loadUrl(bestEmbed)
+            }
+
+            tasks.awaitAll()
+            
+            delay(10000) // Wait up to 10s for any parallel task or sniffer
+            if (!videoFound) {
+                setLoadingStatus("Switching to WebView fallback…")
+                switchToWebView()
             }
         }
     }
 
-    private fun switchToWebView() {
-        isWebViewMode = true
-        loadingOverlay.visibility = View.GONE
-        controlsOverlay.visibility = View.GONE
-        webView.visibility = View.VISIBLE
-        // Force the webview to stay in full screen and handle its own playback
-        android.util.Log.d("Player", "Switched to Protected WebView mode for $currentEmbedUrl")
+    private fun onVideoUrlFound(videoUrl: String, serverName: String, embedUrl: String = "") {
+        lifecycleScope.launch {
+            mutex.withLock {
+                if (videoFound) return@launch
+                videoFound = true
+                extractJob?.cancel()
+                handler.post {
+                    if (embedUrl.isNotEmpty()) currentEmbedUrl = embedUrl
+                    playVideo(videoUrl, serverName)
+                }
+            }
+        }
     }
 
-    private fun onVideoUrlFound(videoUrl: String) {
-        if (exoPlayer != null || isWebViewMode) return
-        
-        ServerManager.markServerSuccess(servers.getOrNull(currentServerIndex)?.name ?: "")
+    private fun playVideo(videoUrl: String, serverName: String) {
+        releaseExoPlayer()
         val player = ExoPlayer.Builder(this).build()
         exoPlayer = player
         playerView.player = player
@@ -291,10 +205,8 @@ class PlayerActivity : AppCompatActivity() {
             .setDefaultRequestProperties(mapOf("Referer" to currentEmbedUrl, "Origin" to embedHost))
 
         val mi = MediaItem.fromUri(videoUrl)
-        val source = if (videoUrl.lowercase().contains(".m3u8"))
-            HlsMediaSource.Factory(httpDsf).createMediaSource(mi)
-        else
-            ProgressiveMediaSource.Factory(httpDsf).createMediaSource(mi)
+        val source = if (videoUrl.lowercase().contains(".m3u8")) HlsMediaSource.Factory(httpDsf).createMediaSource(mi)
+                     else ProgressiveMediaSource.Factory(httpDsf).createMediaSource(mi)
 
         player.setMediaSource(source)
         player.prepare()
@@ -302,80 +214,50 @@ class PlayerActivity : AppCompatActivity() {
         player.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
                 if (state == Player.STATE_READY) {
-                    if (player.duration in 1L until MIN_DURATION_MS) {
-                        releaseExoPlayer(); tryNextServer()
-                    } else {
-                        isPlaying = true; showPlayerControls(); startProgressUpdater(); resumeFromSavedPosition()
-                    }
+                    isPlaying = true
+                    loadingOverlay.visibility = View.GONE
+                    controlsOverlay.visibility = View.VISIBLE
                 }
-            }
-            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                releaseExoPlayer(); tryNextServer()
             }
         })
     }
 
-    private fun tryNextServer() {
-        val next = currentServerIndex + 1
-        if (next < servers.size) loadServer(next)
-        else showError("All sources tried.\nTap SOURCE to pick manually.")
+    private fun switchToWebView() {
+        loadingOverlay.visibility = View.GONE
+        webView.visibility = View.VISIBLE
     }
 
-    // ── UI Helpers ────────────────────────────────────────────────────────────
-
-    private fun buildLoadingOverlay(): FrameLayout = FrameLayout(this).apply {
+    private fun buildLoadingOverlay() = FrameLayout(this).apply {
         setBackgroundColor(Color.BLACK)
         val center = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
+            orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
             addView(TextView(context).apply { text = title; setTextColor(Color.WHITE); textSize = 20f; gravity = Gravity.CENTER; setPadding(48, 0, 48, 24) })
-            loadingDots = TextView(context).apply { text = "⬤  ○  ○"; setTextColor(Color.WHITE); textSize = 14f; gravity = Gravity.CENTER }
-            loadingStatus = TextView(context).apply { text = "Finding a stream…"; setTextColor(Color.GRAY); textSize = 13f; gravity = Gravity.CENTER; setPadding(48, 20, 48, 0) }
-            errorText = TextView(context).apply { setTextColor(Color.RED); textSize = 13f; gravity = Gravity.CENTER; visibility = View.GONE }
-            addView(loadingDots); addView(loadingStatus); addView(errorText)
+            loadingStatus = TextView(context).apply { text = "Initializing search…"; setTextColor(Color.GRAY); textSize = 13f; gravity = Gravity.CENTER }
+            addView(loadingStatus)
         }
         addView(center, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.CENTER))
     }
 
-    private fun buildControlsOverlay(): LinearLayout = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL
-        visibility = View.GONE
-        // Simplified for brevity - actual implementation should include full controls
-        addView(View(this@PlayerActivity).apply { layoutParams = LinearLayout.LayoutParams(MATCH, 0, 1f) })
-        val bar = LinearLayout(this@PlayerActivity).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-            playPauseBtn = ImageButton(this@PlayerActivity).apply { setImageResource(android.R.drawable.ic_media_play); setBackgroundColor(Color.TRANSPARENT); setColorFilter(Color.WHITE); setOnClickListener { togglePlayPause() } }
+    private fun buildControlsOverlay() = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL; visibility = View.GONE
+        addView(View(context).apply { layoutParams = LinearLayout.LayoutParams(MATCH, 0, 1f) })
+        val bar = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER; setPadding(16, 16, 16, 16)
+            playPauseBtn = ImageButton(context).apply { setImageResource(android.R.drawable.ic_media_play); setBackgroundColor(Color.TRANSPARENT); setColorFilter(Color.WHITE); setOnClickListener { togglePlayPause() } }
             addView(playPauseBtn)
-            seekBar = SeekBar(this@PlayerActivity).apply { layoutParams = LinearLayout.LayoutParams(0, WRAP, 1f) }
+            seekBar = SeekBar(context).apply { layoutParams = LinearLayout.LayoutParams(0, WRAP, 1f) }
             addView(seekBar)
-            timeLabel = TextView(this@PlayerActivity).apply { text = "0:00 / 0:00"; setTextColor(Color.WHITE); textSize = 11f }
+            timeLabel = TextView(context).apply { text = "0:00 / 0:00"; setTextColor(Color.WHITE); textSize = 11f }
             addView(timeLabel)
         }
         addView(bar)
     }
 
-    private fun togglePlayPause() {
-        exoPlayer?.let { if (it.isPlaying) it.pause() else it.play() }
-    }
-
-    private fun toggleControlsVisibility() {
-        controlsOverlay.visibility = if (controlsOverlay.visibility == View.VISIBLE) View.GONE else View.VISIBLE
-    }
-
-    private fun showPlayerControls() { loadingOverlay.visibility = View.GONE; controlsOverlay.visibility = View.VISIBLE }
-    private fun showLoadingOverlay() { controlsOverlay.visibility = View.GONE; loadingOverlay.visibility = View.VISIBLE }
-    private fun hideError() { errorText.visibility = View.GONE }
-    private fun showError(msg: String) { errorText.text = msg; errorText.visibility = View.VISIBLE }
+    private fun togglePlayPause() { exoPlayer?.let { if (it.isPlaying) it.pause() else it.play() } }
+    private fun releaseExoPlayer() { exoPlayer?.release(); exoPlayer = null }
     private fun setLoadingStatus(msg: String) { handler.post { loadingStatus.text = msg } }
-    private fun startDotsAnimation() { /* Implementation of dots animation */ }
-    private fun startProgressUpdater() { /* Implementation of progress bar update */ }
-    private fun resumeFromSavedPosition() { exoPlayer?.seekTo(savedPositionMs) }
-    private fun releaseExoPlayer() { exoPlayer?.release(); exoPlayer = null; isPlaying = false }
-
     override fun onDestroy() { releaseExoPlayer(); webView.destroy(); super.onDestroy() }
 
-    private fun dp(v: Int) = (v * resources.displayMetrics.density + 0.5f).toInt()
     private val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
     private val WRAP  = ViewGroup.LayoutParams.WRAP_CONTENT
 }
