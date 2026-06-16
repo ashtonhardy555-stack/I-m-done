@@ -540,7 +540,7 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     // ── Quality picker ───────────────────────────────────────────────────────
-private fun showQualityPicker() {
+    private fun showQualityPicker() {
     cancelAutoHide()
     val labels = arrayOf("Auto (Best)", "1080p", "720p", "480p", "360p")
     val heights = intArrayOf(Int.MAX_VALUE, 1080, 720, 480, 360)
