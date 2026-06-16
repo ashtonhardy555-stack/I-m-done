@@ -82,7 +82,7 @@ class PlayerActivity : AppCompatActivity() {
     // ── Extraction state ──────────────────────────────────────────────────────
     private var extractJob: Job? = null
 
-    // ── Player state ──────────────────────────────────────────────────────────
+    // ── Player state ────────────────────────────────────────────────────────
     private var exoPlayer: ExoPlayer? = null
     private var isPlaying = false
     private var isSeeking = false
@@ -90,7 +90,7 @@ class PlayerActivity : AppCompatActivity() {
     private var savedPositionMs = 0L
     private var selectedMaxHeight = Int.MAX_VALUE
 
-    // ── Views ─────────────────────────────────────────────────────────────────
+    // ── Views ──────────────────────────────────────────────────────────
     private lateinit var playerView: PlayerView
     private lateinit var loadingOverlay: FrameLayout
     private lateinit var loadingTitle: TextView
@@ -111,7 +111,7 @@ class PlayerActivity : AppCompatActivity() {
     private var progressRunnable: Runnable? = null
     private var dotsCount = 0
 
-    // ── Lifecycle ─────────────────────────────────────────────────────────────
+    // ── Lifecycle ─────────────────────────────────────────────────────────
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -139,7 +139,7 @@ class PlayerActivity : AppCompatActivity() {
         initServersAndPlay()
     }
 
-    // ── Layout ────────────────────────────────────────────────────────────────
+    // ── Layout ──────────────────────────────────────────────────────────
     private fun buildLayout() {
         val root = FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
@@ -340,7 +340,7 @@ class PlayerActivity : AppCompatActivity() {
         return overlay
     }
 
-    // ── Initialization ────────────────────────────────────────────────────────
+    // ── Initialization ───────────────────────────────────────────────────────
     private fun initServersAndPlay() {
         startDotsAnimation()
         lifecycleScope.launch {
@@ -541,23 +541,24 @@ class PlayerActivity : AppCompatActivity() {
 
     // ── Quality picker ───────────────────────────────────────────────────────
     private fun showQualityPicker() {
-    cancelAutoHide()
-    val labels = arrayOf("Auto (Best)", "1080p", "720p", "480p", "360p")
-    val heights = intArrayOf(Int.MAX_VALUE, 1080, 720, 480, 360)
+        cancelAutoHide()
+        val labels = arrayOf("Auto (Best)", "1080p", "720p", "480p", "360p")
+        val heights = intArrayOf(Int.MAX_VALUE, 1080, 720, 480, 360)
 
-    val dialog = Dialog(this, android.R.style.Theme_Material_Dialog_NoActionBar)
-    dialog.setContentView(buildPickerDialog("Quality", labels) { idx ->
-        selectedMaxHeight = heights[idx]
-        qualityBtn.text = labels[idx]
-        exoPlayer?.let { player ->
-            // Re-prepare with new quality preference if needed
-        }
-        dialog.dismiss()
-        scheduleAutoHide()
-    })
-    dialog.show()
-}
-    // ── Server picker ─────────────────────────────────────────────────────────
+        val dialog = Dialog(this, android.R.style.Theme_Material_Dialog_NoActionBar)
+        dialog.setContentView(buildPickerDialog("Quality", labels) { idx ->
+            selectedMaxHeight = heights[idx]
+            qualityBtn.text = labels[idx]
+            exoPlayer?.let { player ->
+                // Re-prepare with new quality preference if needed
+            }
+            dialog.dismiss()
+            scheduleAutoHide()
+        })
+        dialog.show()
+    }
+
+    // ── Server picker ───────────────────────────────────────────────────────
     private fun showServerPicker() {
         cancelAutoHide()
         val serverNames = servers.mapIndexed { i, s ->
@@ -618,7 +619,7 @@ class PlayerActivity : AppCompatActivity() {
         return wrapper
     }
 
-    // ── Loading UI ────────────────────────────────────────────────────────────
+    // ── Loading UI ────────────────────────────────────────────────────────
     private fun setLoadingStatus(msg: String) = handler.post { loadingStatus.text = msg }
 
     private fun showError(msg: String) = handler.post {
@@ -655,7 +656,7 @@ class PlayerActivity : AppCompatActivity() {
         dotsRunnable = null
     }
 
-    // ── Lifecycle ─────────────────────────────────────────────────────────────
+    // ── Lifecycle ─────────────────────────────────────────────────────────
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         if (keyCode == KeyEvent.KEYCODE_BACK) { finish(); return true }
         return super.onKeyDown(keyCode, event)
@@ -683,7 +684,7 @@ class PlayerActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
-    // ── Utilities ─────────────────────────────────────────────────────────────
+    // ── Utilities ─────────────────────────────────────────────────────────
     private val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
     private val WRAP  = ViewGroup.LayoutParams.WRAP_CONTENT
 
