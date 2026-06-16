@@ -9,11 +9,12 @@ import com.google.gson.JsonSyntaxException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.Interceptor
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.Response
-import okhttp3.ResponseBody
+import okhttp3.ResponseBody.Companion.toResponseBody
 import java.util.concurrent.TimeUnit
 
 /**
@@ -21,9 +22,9 @@ import java.util.concurrent.TimeUnit
  * The returned URL is played directly in ExoPlayer — no WebView involved.
  *
  * Strategy (in order):
- *  1. For servers with known REST APIs → call their JSON API directly (fastest, cleanest)
- *  2. For VidSrc family → hit their AJAX endpoints
- *  3. For everything else → probe a set of common API patterns, then scrape static HTML
+ *  1. Known REST APIs  -> call JSON endpoint directly (fastest, no ads)
+ *  2. VidSrc family   -> hit their AJAX endpoints after one page fetch
+ *  3. Everything else -> probe 10 common API patterns, then scrape HTML
  */
 object StreamExtractor {
 
@@ -33,7 +34,6 @@ object StreamExtractor {
     private val UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 " +
             "(KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36"
 
-    // ── Blocked domains — ad networks, redirect farms, popup scripts ──────────
     private val blockedDomains = setOf(
         "doubleclick", "googlesyndication", "adservice", "adnxs", "adroll",
         "outbrain", "taboola", "popads", "popcash", "popunder", "propellerads",
@@ -41,19 +41,16 @@ object StreamExtractor {
         "adsterra", "clickadu", "hilltopads", "trafficstars", "richpush",
         "pushground", "megapu", "onclicka", "rotator", "adcash",
         "adf.ly", "linkvertise", "shrink.pe", "exe.io", "fc.lc",
-        "coinhive", "crypto-loot", "coinblockers",
+        "coinhive", "crypto-loot", "coinblockers"
     )
 
-    // ── JSON keys most likely to carry the stream URL — checked first ─────────
     private val priorityJsonKeys = setOf(
         "playlist", "file", "src", "url", "stream", "hls", "m3u8",
         "videoUrl", "video_url", "streamUrl", "stream_url",
         "source", "link", "direct", "mp4", "720p", "1080p", "480p", "360p"
     )
 
-    // ── Common REST API endpoint patterns tried on unknown servers ────────────
-    // {origin} = scheme + host, {id} = tmdb id, {s}/{e} = season/episode
-    private val genericMovieApiPatterns = listOf(
+    private val genericMoviePatterns = listOf(
         "{origin}/api/v2/movie/{id}",
         "{origin}/api/v1/movie/{id}",
         "{origin}/api/movie/{id}",
@@ -63,20 +60,20 @@ object StreamExtractor {
         "{origin}/api/embed/movie/{id}",
         "{origin}/ajax/embed/movie?id={id}",
         "{origin}/ajax/sources/{id}",
-        "{origin}/api/source/{id}",
+        "{origin}/api/source/{id}"
     )
-    private val genericTvApiPatterns = listOf(
+
+    private val genericTvPatterns = listOf(
         "{origin}/api/v2/tv/{id}?season={s}&episode={e}",
         "{origin}/api/v1/tv/{id}?season={s}&episode={e}",
         "{origin}/api/tv/{id}/{s}/{e}",
         "{origin}/api/b/tv/{id}/{s}/{e}",
         "{origin}/api/stream/tv/{id}/{s}/{e}",
         "{origin}/api/embed/tv/{id}/{s}/{e}",
-        "{origin}/ajax/embed/episode?id={id}&s={s}&e={e}",
+        "{origin}/ajax/embed/episode?id={id}&s={s}&e={e}"
     )
 
-    // ── HTTP client with ad-domain interceptor ────────────────────────────────
-    private val client = OkHttpClient.Builder()
+    private val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(TIMEOUT_MS, TimeUnit.MILLISECONDS)
         .readTimeout(TIMEOUT_MS, TimeUnit.MILLISECONDS)
         .followRedirects(true)
@@ -87,59 +84,58 @@ object StreamExtractor {
         override fun intercept(chain: Interceptor.Chain): Response {
             val host = chain.request().url.host.lowercase()
             if (blockedDomains.any { host.contains(it) }) {
-                Log.d(TAG, "Blocked: $host")
+                Log.d(TAG, "Blocked ad domain: $host")
+                val emptyBody = ByteArray(0).toResponseBody(null)
                 return Response.Builder()
                     .request(chain.request())
                     .protocol(Protocol.HTTP_1_1)
-                    .code(204).message("Blocked")
-                    .body(ResponseBody.create(null, ByteArray(0)))
+                    .code(204)
+                    .message("Blocked")
+                    .body(emptyBody)
                     .build()
             }
             return chain.proceed(chain.request())
         }
     }
 
-    // ── Main entry ────────────────────────────────────────────────────────────
+    // -------------------------------------------------------------------------
+    // Main entry point
+    // -------------------------------------------------------------------------
 
-    /**
-     * Given an embed URL, returns a direct .m3u8 or .mp4 URL ready for ExoPlayer.
-     * Returns null if nothing could be found within the timeout.
-     */
     suspend fun extract(embedUrl: String): String? = withContext(Dispatchers.IO) {
         try {
             val host = Uri.parse(embedUrl).host?.lowercase() ?: ""
-            Log.d(TAG, "Extracting: $embedUrl")
+            Log.d(TAG, "Extracting from: $embedUrl")
 
-            when {
-                // ── Tier 1: Known REST API servers ────────────────────────────
-                host.contains("vidlink")    -> extractVidLink(embedUrl)
-                host.contains("videasy")    -> extractVideasy(embedUrl)
-                host.contains("autoembed") && host.contains(".cc") -> extractAutoEmbed(embedUrl, "cc")
-                host.contains("autoembed") && host.contains(".co") -> extractAutoEmbed(embedUrl, "co")
-                host.contains("autoembed") -> extractAutoEmbed(embedUrl, "cc")
-                host.contains("vidbinge")  -> extractVidBinge(embedUrl)
-                host.contains("moviesapi") -> extractMoviesApi(embedUrl)
-
-                // ── Tier 2: VidSrc family (AJAX endpoints) ────────────────────
+            val result = when {
+                host.contains("vidlink")                            -> extractVidLink(embedUrl)
+                host.contains("videasy")                           -> extractVideasy(embedUrl)
+                host.contains("autoembed") && host.contains("cc") -> extractAutoEmbed(embedUrl, "cc")
+                host.contains("autoembed") && host.contains("co") -> extractAutoEmbed(embedUrl, "co")
+                host.contains("autoembed")                         -> extractAutoEmbed(embedUrl, "cc")
+                host.contains("vidbinge")                          -> extractVidBinge(embedUrl)
+                host.contains("moviesapi")                         -> extractMoviesApi(embedUrl)
                 host.contains("vidsrc.me") || host.contains("vsembed") -> extractVidSrcFamily(embedUrl)
-                host.contains("vidsrc.io") -> extractVidSrcFamily(embedUrl)
-                host.contains("vidsrc.pm") -> extractVidSrcFamily(embedUrl)
-                host.contains("vidsrc.to") -> extractVidSrcTo(embedUrl)
-                host.contains("vidsrc")    -> extractVidSrcFamily(embedUrl)
-
-                // ── Tier 3: Try generic patterns then scrape ───────────────────
-                else -> extractGeneric(embedUrl)
-            }.also { result ->
-                if (result != null) Log.d(TAG, "Found: $result")
-                else Log.d(TAG, "Nothing found for $embedUrl")
+                host.contains("vidsrc.io")                         -> extractVidSrcFamily(embedUrl)
+                host.contains("vidsrc.pm")                         -> extractVidSrcFamily(embedUrl)
+                host.contains("vidsrc.to")                         -> extractVidSrcTo(embedUrl)
+                host.contains("vidsrc")                            -> extractVidSrcFamily(embedUrl)
+                else                                               -> extractGeneric(embedUrl)
             }
+
+            if (result != null) Log.d(TAG, "Found stream: $result")
+            else Log.d(TAG, "No stream found for: $embedUrl")
+
+            result
         } catch (e: Exception) {
-            Log.e(TAG, "extract() crashed for $embedUrl: ${e.message}")
+            Log.e(TAG, "Extractor crashed for $embedUrl: ${e.message}")
             null
         }
     }
 
-    // ── Tier 1: REST API extractors ───────────────────────────────────────────
+    // -------------------------------------------------------------------------
+    // Tier 1 — known REST API servers
+    // -------------------------------------------------------------------------
 
     private fun extractVidLink(url: String): String? {
         val segs = Uri.parse(url).pathSegments
@@ -151,11 +147,13 @@ object StreamExtractor {
             segs.contains("tv") -> {
                 val i = segs.indexOf("tv")
                 val id = segs.getOrNull(i + 1) ?: return null
-                "https://vidlink.pro/api/b/tv/$id/${segs.getOrElse(i+2){"1"}}/${segs.getOrElse(i+3){"1"}}"
+                val s = segs.getOrElse(i + 2) { "1" }
+                val e = segs.getOrElse(i + 3) { "1" }
+                "https://vidlink.pro/api/b/tv/$id/$s/$e"
             }
             else -> return null
         }
-        Log.d(TAG, "VidLink API: $apiUrl")
+        Log.d(TAG, "VidLink -> $apiUrl")
         return fetchJson(apiUrl, referer = url)?.let { parseJson(it) }
     }
 
@@ -163,10 +161,14 @@ object StreamExtractor {
         val segs = Uri.parse(url).pathSegments
         val nums = segs.filter { it.all(Char::isDigit) }
         val id = nums.firstOrNull() ?: return null
-        val isMovie = url.contains("/movie/")
-        val apiUrl = if (isMovie) "https://player.videasy.net/api/movie/$id"
-        else "https://player.videasy.net/api/tv/$id/${nums.getOrElse(1){"1"}}/${nums.getOrElse(2){"1"}}"
-        Log.d(TAG, "Videasy API: $apiUrl")
+        val apiUrl = if (url.contains("/movie/")) {
+            "https://player.videasy.net/api/movie/$id"
+        } else {
+            val s = nums.getOrElse(1) { "1" }
+            val e = nums.getOrElse(2) { "1" }
+            "https://player.videasy.net/api/tv/$id/$s/$e"
+        }
+        Log.d(TAG, "Videasy -> $apiUrl")
         return fetchJson(apiUrl, referer = url)?.let { parseJson(it) }
     }
 
@@ -175,17 +177,18 @@ object StreamExtractor {
         val segs = uri.pathSegments
         val id = segs.lastOrNull { it.all(Char::isDigit) }
             ?: uri.getQueryParameter("id") ?: return null
-        val isMovie = segs.contains("movie")
-        val apiUrl = if (isMovie) {
+        val apiUrl = if (segs.contains("movie")) {
             "https://autoembed.$tld/api/v2/movie/$id"
         } else {
-            val s = uri.getQueryParameter("s") ?: uri.getQueryParameter("season")
+            val s = uri.getQueryParameter("s")
+                ?: uri.getQueryParameter("season")
                 ?: segs.filter { it.all(Char::isDigit) }.getOrElse(1) { "1" }
-            val e = uri.getQueryParameter("e") ?: uri.getQueryParameter("episode")
+            val e = uri.getQueryParameter("e")
+                ?: uri.getQueryParameter("episode")
                 ?: segs.filter { it.all(Char::isDigit) }.getOrElse(2) { "1" }
             "https://autoembed.$tld/api/v2/tv/$id?season=$s&episode=$e"
         }
-        Log.d(TAG, "AutoEmbed.$tld API: $apiUrl")
+        Log.d(TAG, "AutoEmbed.$tld -> $apiUrl")
         return fetchJson(apiUrl, referer = url)?.let { parseJson(it) }
     }
 
@@ -193,28 +196,34 @@ object StreamExtractor {
         val segs = Uri.parse(url).pathSegments
         val nums = segs.filter { it.all(Char::isDigit) }
         val id = nums.firstOrNull() ?: return null
-        val isMovie = url.contains("movie")
-        val apiUrl = if (isMovie) "https://vidbinge.dev/api/movie/$id"
-        else "https://vidbinge.dev/api/tv/$id/${nums.getOrElse(1){"1"}}/${nums.getOrElse(2){"1"}}"
-        Log.d(TAG, "VidBinge API: $apiUrl")
+        val apiUrl = if (url.contains("movie")) {
+            "https://vidbinge.dev/api/movie/$id"
+        } else {
+            val s = nums.getOrElse(1) { "1" }
+            val e = nums.getOrElse(2) { "1" }
+            "https://vidbinge.dev/api/tv/$id/$s/$e"
+        }
+        Log.d(TAG, "VidBinge -> $apiUrl")
         return fetchJson(apiUrl, referer = url)?.let { parseJson(it) }
     }
 
     private fun extractMoviesApi(url: String): String? {
         val uri = Uri.parse(url)
         val id = uri.pathSegments.lastOrNull { it.all(Char::isDigit) } ?: return null
-        val isMovie = url.contains("movie")
-        val apiUrl = if (isMovie) "https://moviesapi.club/api/v2/movie/$id"
-        else {
+        val apiUrl = if (url.contains("movie")) {
+            "https://moviesapi.club/api/v2/movie/$id"
+        } else {
             val s = uri.getQueryParameter("s") ?: "1"
             val e = uri.getQueryParameter("e") ?: "1"
             "https://moviesapi.club/api/v2/tv/$id?season=$s&episode=$e"
         }
-        Log.d(TAG, "MoviesAPI: $apiUrl")
+        Log.d(TAG, "MoviesAPI -> $apiUrl")
         return fetchJson(apiUrl, referer = url)?.let { parseJson(it) }
     }
 
-    // ── Tier 2: VidSrc family (AJAX) ─────────────────────────────────────────
+    // -------------------------------------------------------------------------
+    // Tier 2 — VidSrc family (AJAX endpoints)
+    // -------------------------------------------------------------------------
 
     private fun extractVidSrcFamily(url: String): String? {
         val html = fetch(url) ?: return null
@@ -225,15 +234,16 @@ object StreamExtractor {
             ?: return followIframes(html, url)
 
         val origin = url.toOrigin()
-        for (path in listOf(
+        val ajaxPaths = listOf(
             "$origin/ajax/embed/movie?id=$dataI",
             "$origin/ajax/embed/episode?id=$dataI",
             "$origin/ajax/v2/embed/movie?id=$dataI",
             "$origin/ajax/v2/embed/episode?id=$dataI",
             "$origin/ajax/sources/$dataI",
             "$origin/api/source/$dataI",
-            "$origin/api/v2/source/$dataI",
-        )) {
+            "$origin/api/v2/source/$dataI"
+        )
+        for (path in ajaxPaths) {
             fetchJson(path, referer = url)?.let { parseJson(it) }?.let { return it }
         }
         return followIframes(html, url)
@@ -246,36 +256,43 @@ object StreamExtractor {
         val dataI = Regex("""data-i\s*=\s*["']?(\w+)""").find(html)?.groupValues?.get(1)
         if (dataI != null) {
             val origin = url.toOrigin()
-            for (path in listOf(
+            val ajaxPaths = listOf(
                 "$origin/ajax/embed/movie?id=$dataI",
                 "$origin/ajax/embed/episode?id=$dataI",
                 "$origin/api/source/$dataI",
                 "https://vsembed.ru/ajax/embed/movie?id=$dataI",
                 "https://vsembed.ru/ajax/embed/episode?id=$dataI",
-                "https://vidsrc.me/ajax/embed/movie?id=$dataI",
-            )) {
+                "https://vidsrc.me/ajax/embed/movie?id=$dataI"
+            )
+            for (path in ajaxPaths) {
                 fetchJson(path, referer = url)?.let { parseJson(it) }?.let { return it }
             }
         }
         return followIframes(html, url)
     }
 
-    // ── Tier 3: Generic — try common API patterns then HTML scrape ────────────
+    // -------------------------------------------------------------------------
+    // Tier 3 — generic API probe + HTML scrape
+    // -------------------------------------------------------------------------
 
     private fun extractGeneric(url: String): String? {
         val uri = Uri.parse(url)
         val origin = url.toOrigin()
         val segs = uri.pathSegments
         val id = segs.lastOrNull { it.all(Char::isDigit) }
-            ?: uri.getQueryParameter("id") ?: uri.getQueryParameter("tmdb")
+            ?: uri.getQueryParameter("id")
+            ?: uri.getQueryParameter("tmdb")
+
         val isMovie = url.contains("movie", ignoreCase = true)
-        val s = uri.getQueryParameter("s") ?: uri.getQueryParameter("season")
+        val s = uri.getQueryParameter("s")
+            ?: uri.getQueryParameter("season")
             ?: segs.filter { it.all(Char::isDigit) }.getOrElse(1) { "1" }
-        val e = uri.getQueryParameter("e") ?: uri.getQueryParameter("episode")
+        val e = uri.getQueryParameter("e")
+            ?: uri.getQueryParameter("episode")
             ?: segs.filter { it.all(Char::isDigit) }.getOrElse(2) { "1" }
 
         if (id != null) {
-            val patterns = if (isMovie) genericMovieApiPatterns else genericTvApiPatterns
+            val patterns = if (isMovie) genericMoviePatterns else genericTvPatterns
             for (pattern in patterns) {
                 val apiUrl = pattern
                     .replace("{origin}", origin)
@@ -292,42 +309,57 @@ object StreamExtractor {
         return followIframes(html, url)
     }
 
-    // ── JSON parsing: recursive Gson traversal ────────────────────────────────
+    // -------------------------------------------------------------------------
+    // JSON parsing — recursive traversal
+    // -------------------------------------------------------------------------
 
-    private fun parseJson(raw: String): String? = try {
-        findInElement(JsonParser.parseString(raw))
-    } catch (_: JsonSyntaxException) {
-        findVideoInHtml(raw)
+    private fun parseJson(raw: String): String? {
+        return try {
+            findInElement(JsonParser.parseString(raw))
+        } catch (e: JsonSyntaxException) {
+            findVideoInHtml(raw)
+        }
     }
 
     private fun findInElement(el: JsonElement, depth: Int = 0): String? {
         if (depth > 12) return null
         return when {
-            el.isJsonPrimitive -> runCatching {
-                el.asString.takeIf { isValidVideo(it) }
-            }.getOrNull()
-
+            el.isJsonPrimitive -> {
+                try {
+                    val str = el.asString
+                    if (isValidVideo(str)) str else null
+                } catch (e: Exception) {
+                    null
+                }
+            }
             el.isJsonObject -> {
                 val obj = el.asJsonObject
                 for (key in priorityJsonKeys) {
-                    obj.get(key)?.let { findInElement(it, depth + 1) }?.let { return it }
+                    val found = obj.get(key)?.let { findInElement(it, depth + 1) }
+                    if (found != null) return found
                 }
                 for ((k, v) in obj.entrySet()) {
-                    if (k !in priorityJsonKeys) findInElement(v, depth + 1)?.let { return it }
+                    if (k !in priorityJsonKeys) {
+                        val found = findInElement(v, depth + 1)
+                        if (found != null) return found
+                    }
                 }
                 null
             }
-
             el.isJsonArray -> {
-                for (child in el.asJsonArray) findInElement(child, depth + 1)?.let { return it }
+                for (child in el.asJsonArray) {
+                    val found = findInElement(child, depth + 1)
+                    if (found != null) return found
+                }
                 null
             }
-
             else -> null
         }
     }
 
-    // ── HTML video URL extraction ─────────────────────────────────────────────
+    // -------------------------------------------------------------------------
+    // HTML scraping
+    // -------------------------------------------------------------------------
 
     private val htmlPatterns = listOf(
         Regex(""""file"\s*:\s*["']?(https?://[^"'\s,}\]]+\.m3u8[^"'\s,}\]]*)""", RegexOption.IGNORE_CASE),
@@ -340,7 +372,7 @@ object StreamExtractor {
         Regex("""data-(?:src|file|url|hls)\s*=\s*["'](https?://[^"']+\.m3u8)""", RegexOption.IGNORE_CASE),
         Regex("""["'](https?://[^"'\s]+/(?:master|index|playlist)\.m3u8[^"'\s]*)["']""", RegexOption.IGNORE_CASE),
         Regex("""(https?://[^\s"'<>()\]]+\.m3u8(?:\?[^\s"'<>()\]]*)?)""",        RegexOption.IGNORE_CASE),
-        Regex("""(https?://[^\s"'<>()\]]+\.mp4(?:\?[^\s"'<>()\]]*)?)""",         RegexOption.IGNORE_CASE),
+        Regex("""(https?://[^\s"'<>()\]]+\.mp4(?:\?[^\s"'<>()\]]*)?)""",         RegexOption.IGNORE_CASE)
     )
 
     private fun findVideoInHtml(html: String): String? {
@@ -353,36 +385,36 @@ object StreamExtractor {
         }
         for (pat in htmlPatterns) {
             for (m in pat.findAll(html)) {
-                val url = (m.groupValues.getOrNull(1)?.trim()?.takeIf { it.isNotBlank() }
-                    ?: m.value).trim()
-                if (isValidVideo(url)) return url
+                val candidate = m.groupValues.getOrNull(1)
+                    ?.trim()
+                    ?.takeIf { it.isNotBlank() }
+                    ?: m.value.trim()
+                if (isValidVideo(candidate)) return candidate
             }
         }
         return null
     }
 
     private fun tryBase64(html: String): String? {
-        Regex("""atob\(\s*["']([A-Za-z0-9+/=]{20,})["']\s*\)""").findAll(html).forEach {
-            runCatching {
-                val d = String(Base64.decode(it.groupValues[1], Base64.DEFAULT))
-                if (isValidVideo(d)) return d
-            }
+        Regex("""atob\(\s*["']([A-Za-z0-9+/=]{20,})["']\s*\)""").findAll(html).forEach { m ->
+            try {
+                val decoded = String(Base64.decode(m.groupValues[1], Base64.DEFAULT))
+                if (isValidVideo(decoded)) return decoded
+            } catch (e: Exception) { /* skip */ }
         }
-        Regex("""["']([A-Za-z0-9+/]{60,}={0,2})["']""").findAll(html).forEach {
-            runCatching {
-                val d = String(Base64.decode(it.groupValues[1], Base64.DEFAULT))
-                if (d.startsWith("http") && isValidVideo(d)) return d
-            }
+        Regex("""["']([A-Za-z0-9+/]{60,}={0,2})["']""").findAll(html).forEach { m ->
+            try {
+                val decoded = String(Base64.decode(m.groupValues[1], Base64.DEFAULT))
+                if (decoded.startsWith("http") && isValidVideo(decoded)) return decoded
+            } catch (e: Exception) { /* skip */ }
         }
         return null
     }
 
-    // ── iframe follower ───────────────────────────────────────────────────────
-
     private fun followIframes(html: String, parentUrl: String, depth: Int = 0): String? {
         if (depth > 2) return null
-        val re = Regex("""<iframe[^>]+src=["']?(https?://[^"'\s>]+)""", RegexOption.IGNORE_CASE)
-        for (m in re.findAll(html)) {
+        val iframeRe = Regex("""<iframe[^>]+src=["']?(https?://[^"'\s>]+)""", RegexOption.IGNORE_CASE)
+        for (m in iframeRe.findAll(html)) {
             val src = m.groupValues[1]
             val host = Uri.parse(src).host?.lowercase() ?: continue
             if (blockedDomains.any { host.contains(it) }) continue
@@ -394,11 +426,14 @@ object StreamExtractor {
         return null
     }
 
-    // ── HTTP helpers ──────────────────────────────────────────────────────────
+    // -------------------------------------------------------------------------
+    // HTTP helpers
+    // -------------------------------------------------------------------------
 
-    private fun fetch(url: String, referer: String? = null): String? = try {
-        val resp = client.newCall(
-            Request.Builder().url(url)
+    private fun fetch(url: String, referer: String? = null): String? {
+        return try {
+            val request = Request.Builder()
+                .url(url)
                 .header("User-Agent", UA)
                 .header("Referer", referer ?: url)
                 .header("Accept", "text/html,application/xhtml+xml,*/*;q=0.9")
@@ -407,15 +442,25 @@ object StreamExtractor {
                 .header("Sec-Fetch-Mode", "navigate")
                 .header("Sec-Fetch-Site", "cross-site")
                 .build()
-        ).execute()
-        val body = if (resp.isSuccessful) resp.body?.string()
-        else { Log.d(TAG, "fetch $url -> ${resp.code}"); null }
-        resp.close(); body
-    } catch (e: Exception) { Log.d(TAG, "fetch err $url: ${e.message}"); null }
+            val response = client.newCall(request).execute()
+            val body = if (response.isSuccessful) {
+                response.body?.string()
+            } else {
+                Log.d(TAG, "fetch $url -> ${response.code}")
+                null
+            }
+            response.close()
+            body
+        } catch (e: Exception) {
+            Log.d(TAG, "fetch error $url: ${e.message}")
+            null
+        }
+    }
 
-    private fun fetchJson(url: String, referer: String? = null): String? = try {
-        val resp = client.newCall(
-            Request.Builder().url(url)
+    private fun fetchJson(url: String, referer: String? = null): String? {
+        return try {
+            val request = Request.Builder()
+                .url(url)
                 .header("User-Agent", UA)
                 .header("Referer", referer ?: url)
                 .header("Accept", "application/json, text/plain, */*")
@@ -423,23 +468,39 @@ object StreamExtractor {
                 .header("X-Requested-With", "XMLHttpRequest")
                 .header("Origin", url.toOrigin())
                 .build()
-        ).execute()
-        val body = if (resp.isSuccessful) resp.body?.string()
-        else { Log.d(TAG, "fetchJson $url -> ${resp.code}"); null }
-        resp.close(); body
-    } catch (e: Exception) { Log.d(TAG, "fetchJson err $url: ${e.message}"); null }
+            val response = client.newCall(request).execute()
+            val body = if (response.isSuccessful) {
+                response.body?.string()
+            } else {
+                Log.d(TAG, "fetchJson $url -> ${response.code}")
+                null
+            }
+            response.close()
+            body
+        } catch (e: Exception) {
+            Log.d(TAG, "fetchJson error $url: ${e.message}")
+            null
+        }
+    }
 
-    // ── Validation ────────────────────────────────────────────────────────────
+    // -------------------------------------------------------------------------
+    // Helpers
+    // -------------------------------------------------------------------------
 
     private fun isValidVideo(url: String): Boolean {
         if (url.isBlank() || url.length < 20 || !url.startsWith("http")) return false
         val lower = url.lowercase()
         if (!lower.contains(".m3u8") && !lower.contains(".mp4")) return false
-        val host = runCatching { Uri.parse(url).host?.lowercase() ?: "" }.getOrDefault("")
+        val host = try { Uri.parse(url).host?.lowercase() ?: "" } catch (e: Exception) { "" }
         return blockedDomains.none { host.contains(it) }
     }
 
-    private fun String.toOrigin(): String = runCatching {
-        Uri.parse(this).let { "${it.scheme}://${it.host}" }
-    }.getOrDefault(this)
+    private fun String.toOrigin(): String {
+        return try {
+            val uri = Uri.parse(this)
+            "${uri.scheme}://${uri.host}"
+        } catch (e: Exception) {
+            this
+        }
+    }
 }
