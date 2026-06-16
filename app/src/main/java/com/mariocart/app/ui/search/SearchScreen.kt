@@ -1,7 +1,6 @@
 package com.mariocart.app.ui.search
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -39,7 +38,6 @@ fun SearchScreen(
             .background(Bg)
             .padding(16.dp)
     ) {
-        // Header
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
@@ -50,64 +48,38 @@ fun SearchScreen(
                 fontSize = 24.sp,
                 fontWeight = FontWeight.Bold
             )
-            Spacer(modifier = Modifier.weight(1f))
+            Spacer(Modifier.weight(1f))
             IconButton(onClick = onClose) {
-                Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
+                Icon(Icons.Default.Close, "Close", tint = Color.White)
             }
         }
 
-        // Search Field
         OutlinedTextField(
             value = query,
             onValueChange = { viewModel.updateQuery(it) },
-            placeholder = { Text("Search movies or TV shows...", color = TextMuted) },
+            placeholder = { Text("Search movies or shows...", color = TextMuted) },
             leadingIcon = { Icon(Icons.Default.Search, null, tint = TextMuted) },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 12.dp),
+            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = Red,
-                unfocusedBorderColor = Color.DarkGray,
                 focusedTextColor = Color.White,
                 unfocusedTextColor = Color.White
             )
         )
 
-        // Content
-        when {
-            isLoading -> {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator(color = Red)
+        if (isLoading) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = Red)
+            }
+        } else if (results.isNotEmpty()) {
+            LazyColumn {
+                items(results) { item ->
+                    ContentCard(item = item, onClick = { onItemClick(item) })
                 }
             }
-            results.isNotEmpty() -> {
-                LazyColumn {
-                    items(results) { item ->
-                        ContentCard(
-                            item = item,
-                            onClick = { onItemClick(item) }
-                        )
-                    }
-                }
-            }
-            query.length >= 2 -> {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("No results found", color = TextMuted, fontSize = 16.sp)
-                }
-            }
-            else -> {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("Start typing to search...", color = TextMuted, fontSize = 16.sp)
-                }
+        } else if (query.isNotBlank()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("No results", color = TextMuted, fontSize = 16.sp)
             }
         }
     }
