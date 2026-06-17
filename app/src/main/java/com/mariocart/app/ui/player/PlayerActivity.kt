@@ -336,19 +336,31 @@ class PlayerActivity : AppCompatActivity() {
             }
         }
 
+        override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+            val url = request?.url?.toString() ?: return false
+            val currentHost = Uri.parse(view?.url ?: "").host ?: ""
+            val targetHost = Uri.parse(url).host ?: ""
+            
+            // HARDENED: Block any navigation away from the video provider's domain (prevents redirects)
+            if (currentHost.isNotBlank() && targetHost != currentHost) {
+                Log.d("PlayerActivity", "Blocked redirect to: $url")
+                return true
+            }
+            return false
+        }
+
         override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
             val url = request?.url?.toString() ?: return null
             
-            // Block ads/trackers
+            // HARDENED: Aggressive Ad/Tracker Blocking
             if (isAdOrTracker(url)) {
                 return WebResourceResponse("text/plain", "utf-8", null)
             }
 
             // Intercept video streams
             if (!isVideoIntercepted && (url.contains(".m3u8") || url.contains(".mp4"))) {
-                // Relaxed filtering - some CDNs use "analytics" or "ads" in their stream URLs
-                // We'll prioritize the first .m3u8/.mp4 we find that isn't a known major ad provider
-                val isMajorAdProvider = url.contains("doubleclick.net") || url.contains("googleads") || url.contains("popads")
+                val isMajorAdProvider = url.contains("doubleclick.net") || url.contains("googleads") || 
+                                       url.contains("popads") || url.contains("propeller")
                 if (!isMajorAdProvider) {
                     runOnUiThread {
                         handleInterceptedVideo(url)
@@ -383,8 +395,12 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     private fun isAdOrTracker(url: String): Boolean {
-        val adDomains = listOf("google-analytics.com", "doubleclick.net", "adnxs.com", "popads.net", "propellerads.com")
-        return adDomains.any { url.contains(it) }
+        val adKeywords = listOf(
+            "google-analytics", "doubleclick", "adnxs", "popads", "propellerads", 
+            "adsterra", "exoclick", "juicyads", "onclickads", "ad-delivery", 
+            "trafficjunky", "mads", "adskeeper", "mgid", "taboola", "outbrain"
+        )
+        return adKeywords.any { url.contains(it) }
     }
 
     private fun buildWebChromeClient() = object : WebChromeClient() {
@@ -412,10 +428,12 @@ class PlayerActivity : AppCompatActivity() {
             domStorageEnabled = true
             databaseEnabled = true
             mediaPlaybackRequiresUserGesture = false
+            // HARDENED: Disable popups and new windows
+            setSupportMultipleWindows(false)
+            javaScriptCanOpenWindowsAutomatically = false
             mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
             userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
-        
         web.addJavascriptInterface(object {
             @android.webkit.JavascriptInterface
             fun onVideoFound(url: String) {
@@ -424,16 +442,32 @@ class PlayerActivity : AppCompatActivity() {
         }, "Android")
     }
 
-    private fun injectCleanupScript(view: WebView?) {
+        private fun injectCleanupScript(view: WebView?) {
         val script = """
             (function() {
+                // HARDENED: Kill all popups at the source
+                window.open = function() { return null; };
+                
                 const selectors = [
                     '[class*="ad-"]', '[id*="ad-"]', '.ad-unit', '.overlay', 
-                    '.pop-under', '.popup', '#popunder', '#pop-under'
+                    '.pop-under', '.popup', '#popunder', '#pop-under', '.modal',
+                    'iframe[src*="ads"]', 'iframe[id*="ads"]'
                 ];
-                selectors.forEach(s => {
-                    document.querySelectorAll(s).forEach(el => el.remove());
-                });
+                
+                function cleanup() {
+                    selectors.forEach(s => {
+                        document.querySelectorAll(s).forEach(el => el.remove());
+                    });
+                    
+                    // Auto-click "Play" buttons that might be fake loaders
+                    const buttons = document.querySelectorAll('button, div[class*="play"], a[class*="play"]');
+                    buttons.forEach(b => {
+                        if (b.innerText.toLowerCase().includes('play') || b.className.toLowerCase().includes('play')) {
+                            // Only click if it's visible
+                            if (b.offsetWidth > 0 || b.offsetHeight > 0) b.click();
+                        }
+                    });
+                }
 
                 function checkVideos() {
                     const videos = document.getElementsByTagName('video');
@@ -449,7 +483,10 @@ class PlayerActivity : AppCompatActivity() {
                         }
                     }
                 }
+                
+                setInterval(cleanup, 1000);
                 setInterval(checkVideos, 2000);
+                cleanup();
             })();
         """.trimIndent()
         view?.evaluateJavascript(script, null)
