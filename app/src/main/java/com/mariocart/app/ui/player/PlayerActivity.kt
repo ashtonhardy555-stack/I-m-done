@@ -185,7 +185,7 @@ class PlayerActivity : AppCompatActivity() {
         discoveryJob = lifecycleScope.launch {
             try {
                 loadingText.text = "Checking direct sources..."
-                val response = ApiClient.streamingBackendApi.getStream(tmdbId, contentType, season, episode)
+                val response = ApiClient.streamingBackendApi.getStream("vidlink", tmdbId, contentType, season, episode)
                 if (response.success && response.url != null) {
                     playNative(response.url)
                 } else {
