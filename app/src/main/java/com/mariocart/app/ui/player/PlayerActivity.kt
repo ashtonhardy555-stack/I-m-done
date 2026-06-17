@@ -74,6 +74,9 @@ class PlayerActivity : AppCompatActivity() {
     private var customView: View? = null
     private var customViewCallback: WebChromeClient.CustomViewCallback? = null
     private var isVideoIntercepted = false
+    private var currentServerIndex = -1
+    private var autoTryServers = true
+    private var discoveryJob: kotlinx.coroutines.Job? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -141,24 +144,71 @@ class PlayerActivity : AppCompatActivity() {
             addView(loadingText)
         }
 
+        // Server selection button (always available)
+        val serverButton = TextView(this).apply {
+            text = "Servers"
+            setTextColor(Color.WHITE)
+            setBackgroundColor(Color.parseColor("#80000000"))
+            setPadding(30, 15, 30, 15)
+            textSize = 14f
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                gravity = Gravity.TOP or Gravity.END
+                topMargin = 50
+                rightMargin = 50
+            }
+            setOnClickListener { showServerSelection() }
+        }
+
         root.addView(playerView)
         root.addView(webView)
         root.addView(loadingOverlay)
+        root.addView(serverButton)
         setContentView(root)
     }
 
     private fun startDiscovery() {
-        lifecycleScope.launch {
+        discoveryJob?.cancel()
+        discoveryJob = lifecycleScope.launch {
             try {
+                loadingText.text = "Checking direct sources..."
                 val response = ApiClient.streamingBackendApi.getStream(tmdbId, contentType, season, episode)
                 if (response.success && response.url != null) {
                     playNative(response.url)
                 } else {
-                    fallbackToWebView()
+                    tryNextServer()
                 }
             } catch (e: Exception) {
-                fallbackToWebView()
+                tryNextServer()
             }
+        }
+    }
+
+    private fun tryNextServer() {
+        if (!autoTryServers) return
+        
+        val servers = ServerManager.getOrderedServers()
+        currentServerIndex++
+        
+        if (currentServerIndex < servers.size) {
+            val server = servers[currentServerIndex]
+            loadingText.text = "Trying ${server.name} (${currentServerIndex + 1}/${servers.size})..."
+            loadServerInWebView(server)
+            
+            // Give each server 15 seconds to find a video before moving to the next
+            lifecycleScope.launch {
+                kotlinx.coroutines.delay(15000)
+                if (!isVideoIntercepted && autoTryServers && currentServerIndex < servers.size - 1) {
+                    tryNextServer()
+                } else if (!isVideoIntercepted && currentServerIndex >= servers.size - 1) {
+                    loadingText.text = "All servers tried. Please select manually."
+                    showServerSelection()
+                }
+            }
+        } else {
+            showServerSelection()
         }
     }
 
@@ -200,16 +250,17 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     private fun showServerSelection() {
+        autoTryServers = false // Stop auto-cycling if user interacts
         val servers = ServerManager.getOrderedServers()
         val serverNames = servers.map { it.name }.toTypedArray()
 
         AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
             .setTitle("Select Server")
-            .setCancelable(false)
             .setItems(serverNames) { _, which ->
+                currentServerIndex = which
                 loadServerInWebView(servers[which])
             }
-            .setNegativeButton("Cancel") { _, _ -> finish() }
+            .setNegativeButton("Cancel", null)
             .show()
     }
 
@@ -221,10 +272,16 @@ class PlayerActivity : AppCompatActivity() {
         }
 
         isVideoIntercepted = false
+        
+        // If we're playing something, stop it
+        exoPlayer?.stop()
+        playerView.visibility = View.GONE
+        
         loadingOverlay.visibility = View.VISIBLE
         loadingText.text = "Loading ${server.name}…"
 
         webView.visibility = View.VISIBLE
+        webView.stopLoading()
         webView.loadUrl(embedUrl)
         webView.webViewClient = buildWebViewClient()
         webView.webChromeClient = buildWebChromeClient()
