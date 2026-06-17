@@ -324,8 +324,16 @@ class PlayerActivity : AppCompatActivity() {
     private fun buildWebViewClient() = object : WebViewClient() {
         override fun onPageFinished(view: WebView?, url: String?) {
             super.onPageFinished(view, url)
-            // Don't hide overlay yet - wait for video interception or manual interaction
             injectCleanupScript(view)
+            
+            // Safety: If no video is intercepted within 8 seconds of the page finishing, 
+            // show the WebView anyway so the user can interact with it manually.
+            lifecycleScope.launch {
+                kotlinx.coroutines.delay(8000)
+                if (!isVideoIntercepted && webView.visibility == View.VISIBLE) {
+                    loadingOverlay.visibility = View.GONE
+                }
+            }
         }
 
         override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
@@ -338,10 +346,10 @@ class PlayerActivity : AppCompatActivity() {
 
             // Intercept video streams
             if (!isVideoIntercepted && (url.contains(".m3u8") || url.contains(".mp4"))) {
-                // More aggressive filtering for real streams
-                val isLikelyAd = url.contains("ads") || url.contains("google") || url.contains("doubleclick") || 
-                                url.contains("telemetry") || url.contains("analytics")
-                if (!isLikelyAd) {
+                // Relaxed filtering - some CDNs use "analytics" or "ads" in their stream URLs
+                // We'll prioritize the first .m3u8/.mp4 we find that isn't a known major ad provider
+                val isMajorAdProvider = url.contains("doubleclick.net") || url.contains("googleads") || url.contains("popads")
+                if (!isMajorAdProvider) {
                     runOnUiThread {
                         handleInterceptedVideo(url)
                     }
@@ -363,13 +371,13 @@ class PlayerActivity : AppCompatActivity() {
         }
 
         runOnUiThread {
-            // Hide overlay and WebView only when we actually have a video to play
-            loadingOverlay.visibility = View.GONE
+            // Stop WebView immediately to save resources
             webView.stopLoading()
             webView.loadUrl("about:blank")
             webView.visibility = View.GONE
             
-            // Play natively
+            // Hide overlay and play
+            loadingOverlay.visibility = View.GONE
             playNative(url)
         }
     }
