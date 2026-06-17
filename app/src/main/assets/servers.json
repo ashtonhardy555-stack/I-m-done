@@ -1,13 +1,13 @@
 [
-  { "name": "VidSrc (Primary)",       "baseUrl": "https://vidsrc.to/embed" },
-  { "name": "VidSrc (Mirror 1)",      "baseUrl": "https://vidsrc-embed.ru/embed" },
-  { "name": "VidSrc (Mirror 2)",      "baseUrl": "https://vsembed.ru/embed" },
-  { "name": "VidLink (Verified)",     "baseUrl": "https://vidlink.pro" },
-  { "name": "2Embed (Reliable)",      "baseUrl": "https://www.2embed.cc/embed" },
-  { "name": "VidSrc2.to",             "baseUrl": "https://vidsrc2.to/embed" },
-  { "name": "SmashyStream",           "baseUrl": "https://smashystream.com/embed" },
-  { "name": "AutoEmbed",              "baseUrl": "https://autoembed.cc/embed" },
-  { "name": "Embed.su",               "baseUrl": "https://embed.su/embed" },
-  { "name": "Videasy",                "baseUrl": "https://player.videasy.net/embed" },
-  { "name": "FileMoon",               "baseUrl": "https://filemoon.sx/embed" }
+  { "name": "VidLink (Clean & Fast)",     "baseUrl": "https://vidlink.pro" },
+  { "name": "VidSrc.to (Clean Mirror)",   "baseUrl": "https://vidsrc.to/embed" },
+  { "name": "VidSrc (Verified Mirror)",   "baseUrl": "https://vidsrc-embed.ru/embed" },
+  { "name": "2Embed (Verified Mirror)",   "baseUrl": "https://www.2embed.cc/embed" },
+  { "name": "Vsembed (Verified Mirror)",  "baseUrl": "https://vsembed.ru/embed" },
+  { "name": "VidSrc2.to",                 "baseUrl": "https://vidsrc2.to/embed" },
+  { "name": "SmashyStream",               "baseUrl": "https://smashystream.com/embed" },
+  { "name": "AutoEmbed",                  "baseUrl": "https://autoembed.cc/embed" },
+  { "name": "Embed.su",                   "baseUrl": "https://embed.su/embed" },
+  { "name": "Videasy",                    "baseUrl": "https://player.videasy.net/embed" },
+  { "name": "FileMoon",                   "baseUrl": "https://filemoon.sx/embed" }
 ]
