@@ -324,7 +324,7 @@ class PlayerActivity : AppCompatActivity() {
     private fun buildWebViewClient() = object : WebViewClient() {
         override fun onPageFinished(view: WebView?, url: String?) {
             super.onPageFinished(view, url)
-            loadingOverlay.visibility = View.GONE
+            // Don't hide overlay yet - wait for video interception or manual interaction
             injectCleanupScript(view)
         }
 
@@ -338,8 +338,10 @@ class PlayerActivity : AppCompatActivity() {
 
             // Intercept video streams
             if (!isVideoIntercepted && (url.contains(".m3u8") || url.contains(".mp4"))) {
-                // Check if it's likely a real video and not an ad
-                if (!url.contains("ads") && !url.contains("google") && !url.contains("doubleclick")) {
+                // More aggressive filtering for real streams
+                val isLikelyAd = url.contains("ads") || url.contains("google") || url.contains("doubleclick") || 
+                                url.contains("telemetry") || url.contains("analytics")
+                if (!isLikelyAd) {
                     runOnUiThread {
                         handleInterceptedVideo(url)
                     }
@@ -353,21 +355,23 @@ class PlayerActivity : AppCompatActivity() {
     private fun handleInterceptedVideo(url: String) {
         if (isVideoIntercepted) return
         isVideoIntercepted = true
-
         Log.d("PlayerActivity", "Intercepted video URL: $url")
-
+        
         // Mark the server that delivered this stream as successful
         if (currentServerName.isNotBlank()) {
             ServerManager.markServerSuccess(currentServerName)
         }
 
-        // Stop WebView
-        webView.stopLoading()
-        webView.loadUrl("about:blank")
-        webView.visibility = View.GONE
-
-        // Play natively
-        playNative(url)
+        runOnUiThread {
+            // Hide overlay and WebView only when we actually have a video to play
+            loadingOverlay.visibility = View.GONE
+            webView.stopLoading()
+            webView.loadUrl("about:blank")
+            webView.visibility = View.GONE
+            
+            // Play natively
+            playNative(url)
+        }
     }
 
     private fun isAdOrTracker(url: String): Boolean {
