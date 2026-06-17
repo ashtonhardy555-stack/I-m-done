@@ -262,6 +262,11 @@ class PlayerActivity : AppCompatActivity() {
             exoPlayer = null
         }
         
+        // HARDENED: Ensure WebView is killed when native playback starts
+        webView.stopLoading()
+        webView.loadUrl("about:blank")
+        webView.visibility = View.GONE
+        
         loadingOverlay.visibility = View.GONE
         playerView.visibility = View.VISIBLE
         serverButton.visibility = View.VISIBLE // Show server button once video starts
@@ -272,6 +277,7 @@ class PlayerActivity : AppCompatActivity() {
             playWhenReady = true
             addListener(object : Player.Listener {
                 override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                    Log.e("PlayerActivity", "ExoPlayer Error: ${error.message}")
                     // Only fallback if we haven't already intercepted something successfully
                     if (!isVideoIntercepted) {
                         fallbackToWebView()

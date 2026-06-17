@@ -44,21 +44,32 @@ class AdvancedStreamResolver:
         return None
 
     async def resolve_vidlink(self, tmdb_id: str, content_type: str = "movie", season: int = 1, episode: int = 1) -> Optional[Dict]:
-        """Resolve vidlink.pro direct stream."""
-        base_url = f"https://vidlink.pro/{content_type}/{tmdb_id}"
+        """Resolve vidlink.pro direct stream by attempting to find the actual .m3u8 file."""
+        api_url = f"https://vidlink.pro/api/b/{content_type}/{tmdb_id}"
         if content_type == "tv":
-            base_url += f"/{season}/{episode}"
+            api_url += f"/{season}/{episode}"
             
         try:
             async with httpx.AsyncClient(headers=self.headers, follow_redirects=True, timeout=10.0) as client:
-                resp = await client.get(base_url)
+                resp = await client.get(api_url)
                 if resp.status_code == 200:
-                    # VidLink is known for clean embeds
+                    data = resp.json()
+                    # Check for direct file in the JSON response
+                    if "stream" in data and data["stream"]:
+                        return {
+                            "url": data["stream"],
+                            "serverId": "vidlink_direct",
+                            "quality": "1080p",
+                            "clean": True,
+                            "isDirect": True
+                        }
+                    # Fallback to embed if direct not found in API
                     return {
-                        "url": base_url,
-                        "serverId": "vidlink",
+                        "url": f"https://vidlink.pro/{content_type}/{tmdb_id}" + (f"/{season}/{episode}" if content_type == "tv" else ""),
+                        "serverId": "vidlink_embed",
                         "quality": "Auto",
-                        "clean": True
+                        "clean": True,
+                        "isDirect": False
                     }
         except Exception:
             pass
@@ -85,19 +96,24 @@ class AdvancedStreamResolver:
         return None
 
     async def get_clean_stream(self, tmdb_id: int, content_type: str = "movie", season: int = 1, episode: int = 1) -> Optional[Dict]:
-        """Try all resolvers and return the cleanest working one."""
+        """Try all resolvers and return the cleanest working one, prioritizing direct links."""
         tmdb_str = str(tmdb_id)
         
-        # Priority list for cleanest experience
+        # Priority list for cleanest experience (Direct Links First)
         resolvers = [
             self.resolve_vidlink,
             self.resolve_vidsrc_to,
             self.resolve_vidsrc_embed_ru
         ]
         
+        results = []
         for resolver in resolvers:
             result = await resolver(tmdb_str, content_type, season, episode)
             if result:
-                return result
+                # If we found a direct link, return it immediately
+                if result.get("isDirect", False):
+                    return result
+                results.append(result)
         
-        return None
+        # If no direct link found, return the first available embed
+        return results[0] if results else None
