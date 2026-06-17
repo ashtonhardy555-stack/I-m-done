@@ -1,63 +1,40 @@
 # Video Playback Fixes & Improvements Summary
 
-## v6 — WebView-Only Playback & Manual Server Selection (latest)
+## v7 — 100% Native Playback (Latest)
 
 ### Goals
-- Videos play **only** through the embedded WebView — no native ExoPlayer, no direct stream extraction.
-- Server selection is **always manual** — the user picks from a list every time. There is no automatic selection, background probing, or ranking.
+- **Native-Only Playback**: Videos play exclusively through ExoPlayer. WebView has been completely removed from the playback path.
+- **Robust Extraction**: Improved `StreamExtractor` and backend `AdvancedStreamResolver` to find direct `.m3u8` and `.mp4` files.
+- **Backend Fixes**: Corrected Docker deployment to include all resolver logic.
 
 ### Changes
 
-#### `PlayerActivity.kt` (complete rewrite)
-- Removed all calls to the streaming backend API (`ApiClient.streamingBackendApi`).
-- Servers are now loaded directly from `assets/servers.json` via `ServerManager.initialize()`.
-- On launch the player immediately shows a manual server picker dialog (`AlertDialog`).
-- After the user selects a server the embed URL is constructed locally (`StreamingServer.movieUrl` / `tvUrl`) and loaded into the `WebView`.
-- `ServerTester` is no longer called from the player.
+#### `PlayerActivity.kt`
+- Confirmed native-only implementation using `ExoPlayer`.
+- Prioritizes direct stream URLs from the backend.
+- Falls back to local extraction via `StreamExtractor` if the backend returns an embed URL.
 
-#### `ServerTester.kt` (stub)
-- All probing and ranking logic removed.
-- `rankForContent()` is now a no-op stub that returns the input list unchanged.
-- Kept as a stub to avoid breaking any existing call-sites.
+#### `StreamExtractor.kt`
+- Added more robust regex patterns for video detection.
+- Increased timeout to 15s for better reliability on slow servers.
+- Updated extraction logic to use dedicated methods for top providers (VidLink, Vidsrc.pro, etc.).
 
-#### `stream_api_service.py` (backend v6)
-- `/api/servers` now returns `{ success, servers, total }` — the shape the Android `StreamingBackendClient` expects. Previously it returned a plain list.
-- Added `/api/embed` endpoint: accepts `serverId`, `tmdbId`, `type`, `season`, `episode` and returns `{ success, embedUrl, serverId }`. No extraction or probing — just URL construction.
-- Removed all auto-selection and parallel-probing code from the backend.
-- Query parameters now use camelCase (`serverId`, `tmdbId`, `type`) matching the Retrofit interface.
+#### `backend/stream-resolver/`
+- **`Dockerfile`**: Updated to include `advanced_resolver.py` in the build, ensuring the backend actually uses the advanced logic.
+- **`advanced_resolver.py`**: Prioritizes direct stream links and provides verified fallbacks.
+
+#### `app/build.gradle.kts`
+- Bumped version to `1.1.1` (build 3) to trigger a new GitHub release.
 
 ### How playback works now
-1. User taps a title → `PlayerActivity` launches.
-2. `ServerManager.initialize()` loads `assets/servers.json` (33 servers).
-3. An `AlertDialog` lists all servers — the user taps one.
-4. The embed URL is built locally and loaded into the `WebView`.
-5. The `WebView` renders the embed page; the user interacts with the player inside it.
-6. If a server doesn't work the user presses Back and picks another.
+1. User selects a title.
+2. `PlayerActivity` calls the backend `/api/stream`.
+3. Backend attempts to find a direct link using `AdvancedStreamResolver`.
+4. If a direct link is found, `PlayerActivity` plays it immediately in `ExoPlayer`.
+5. If only an embed URL is available, `PlayerActivity` uses `StreamExtractor` to scrape the direct video file from that page.
+6. If all automated attempts fail, the user can manually switch servers via the "Switch Server" button.
 
 ---
 
-## v5 — Previous (superseded)
-
-- Introduced hybrid extraction + WebView fallback.
-- Backend `/api/servers` returned a plain list (did not match Android contract).
-- `ServerTester` probed all servers in parallel and auto-ranked them.
-- `PlayerActivity` called the backend to fetch servers instead of using the local asset.
-
----
-
-## Files Modified in v6
-
-```
-app/src/main/java/com/mariocart/app/
-└── ui/
-    └── player/
-        └── PlayerActivity.kt  (complete rewrite — WebView-only, manual selection)
-└── data/
-    └── server/
-        └── ServerTester.kt    (all probing removed, stub only)
-
-backend/stream-resolver/
-└── stream_api_service.py      (fixed /api/servers shape, added /api/embed)
-
-FIXES_SUMMARY.md               (this file)
-```
+## v6 — WebView-Only (Obsolete)
+- This version was superseded by the native-only requirement.

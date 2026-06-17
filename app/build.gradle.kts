@@ -11,8 +11,8 @@ android {
         applicationId = "com.mariocart.app"
         minSdk = 21
         targetSdk = 34
-        versionCode = 2
-        versionName = "1.1.0"
+        versionCode = 3
+        versionName = "1.1.1"
 
         buildConfigField("String", "TMDB_API_KEY", "\"a15c24c2a5c00487b179f5d4b53b72b0\"")
     }

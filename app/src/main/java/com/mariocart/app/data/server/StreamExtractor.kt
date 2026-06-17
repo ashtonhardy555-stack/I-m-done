@@ -17,10 +17,9 @@ import java.util.concurrent.TimeUnit
 object StreamExtractor {
 
     private const val TAG = "StreamExtractor"
-    private const val TIMEOUT_S = 10L
+    private const val TIMEOUT_S = 15L
 
-    private val UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 " +
-            "(KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+    private val UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 
     private val cookieJar = JavaNetCookieJar(
         CookieManager().apply { setCookiePolicy(CookiePolicy.ACCEPT_ALL) }
@@ -57,42 +56,11 @@ object StreamExtractor {
         Log.d(TAG, "extractDirect id=$tmdbId type=$contentType s=$season e=$episode")
 
         val tasks = listOf(
-            // VidLink.pro (Reliable JSON API)
-            async {
-                val url = if (isMovie) "https://vidlink.pro/api/b/movie/$tmdbId"
-                          else         "https://vidlink.pro/api/b/tv/$tmdbId/$season/$episode"
-                fetchJson(url, referer = "https://vidlink.pro")?.let { r -> findVideoUrl(r) }
-            },
-            // Vidsrc.pro (New JSON API)
-            async {
-                val url = if (isMovie) "https://vidsrc.pro/api/source/movie/$tmdbId"
-                          else         "https://vidsrc.pro/api/source/tv/$tmdbId/$season/$episode"
-                fetchJson(url, referer = "https://vidsrc.pro")?.let { r -> findVideoUrl(r) }
-            },
-            // Videasy (Reliable JSON API)
-            async {
-                val url = if (isMovie) "https://player.videasy.net/api/movie/$tmdbId"
-                          else         "https://player.videasy.net/api/tv/$tmdbId/$season/$episode"
-                fetchJson(url, referer = "https://player.videasy.net")?.let { r -> findVideoUrl(r) }
-            },
-            // AutoEmbed (Reliable JSON API)
-            async {
-                val url = if (isMovie) "https://autoembed.cc/api/v2/movie/$tmdbId"
-                          else         "https://autoembed.cc/api/v2/tv/$tmdbId/$season/$episode"
-                fetchJson(url, referer = "https://autoembed.cc")?.let { findVideoUrl(it) }
-            },
-            // SuperEmbed (Reliable JSON API)
-            async {
-                val url = if (isMovie) "https://superembed.stream/api/v2/movie/$tmdbId"
-                          else         "https://superembed.stream/api/v2/tv/$tmdbId/$season/$episode"
-                fetchJson(url, referer = "https://superembed.stream")?.let { findVideoUrl(it) }
-            },
-            // Embed.su (Reliable JSON API)
-            async {
-                val url = if (isMovie) "https://embed.su/api/source/$tmdbId"
-                          else         "https://embed.su/api/source/tv/$tmdbId/$season/$episode"
-                fetchJson(url, referer = "https://embed.su")?.let { findVideoUrl(it) }
-            }
+            async { extractVidLink(tmdbId, contentType, season, episode) },
+            async { extractVidsrcPro(tmdbId, contentType, season, episode) },
+            async { extractVideasy(tmdbId, contentType, season, episode) },
+            async { extractAutoEmbed(tmdbId, contentType, season, episode) },
+            async { extractEmbedSu(tmdbId, contentType, season, episode) }
         )
 
         tasks.awaitAll().firstOrNull { it != null }
@@ -110,11 +78,11 @@ object StreamExtractor {
             Log.d(TAG, "extract (scrape fallback): $embedUrl")
 
             val result = when {
-                host.contains("vidlink")     -> extractVidLink(embedUrl, tmdbId, contentType, season, episode)
-                host.contains("vidsrc.pro")  -> extractVidsrcPro(embedUrl, tmdbId, contentType, season, episode)
-                host.contains("videasy")     -> extractVideasy(embedUrl, tmdbId, contentType, season, episode)
-                host.contains("autoembed")   -> extractAutoEmbed(embedUrl, tmdbId, contentType, season, episode)
-                host.contains("embed.su")    -> extractEmbedSu(embedUrl, tmdbId, contentType, season, episode)
+                host.contains("vidlink")     -> extractVidLink(tmdbId, contentType, season, episode)
+                host.contains("vidsrc.pro")  -> extractVidsrcPro(tmdbId, contentType, season, episode)
+                host.contains("videasy")     -> extractVideasy(tmdbId, contentType, season, episode)
+                host.contains("autoembed")   -> extractAutoEmbed(tmdbId, contentType, season, episode)
+                host.contains("embed.su")    -> extractEmbedSu(tmdbId, contentType, season, episode)
                 else                         -> scrapeUrl(embedUrl)
             }
             result
@@ -124,39 +92,39 @@ object StreamExtractor {
         }
     }
 
-    private fun extractVidLink(pageUrl: String, tmdbId: Int, contentType: String, season: Int, episode: Int): String? {
+    private fun extractVidLink(tmdbId: Int, contentType: String, season: Int, episode: Int): String? {
         val isMovie = contentType == "movie"
         val api = if (isMovie) "https://vidlink.pro/api/b/movie/$tmdbId"
                   else         "https://vidlink.pro/api/b/tv/$tmdbId/$season/$episode"
-        return fetchJson(api, referer = pageUrl)?.let { findVideoUrl(it) }
+        return fetchJson(api, referer = "https://vidlink.pro")?.let { findVideoUrl(it) }
     }
 
-    private fun extractVidsrcPro(pageUrl: String, tmdbId: Int, contentType: String, season: Int, episode: Int): String? {
+    private fun extractVidsrcPro(tmdbId: Int, contentType: String, season: Int, episode: Int): String? {
         val isMovie = contentType == "movie"
         val api = if (isMovie) "https://vidsrc.pro/api/source/movie/$tmdbId"
                   else         "https://vidsrc.pro/api/source/tv/$tmdbId/$season/$episode"
-        return fetchJson(api, referer = pageUrl)?.let { findVideoUrl(it) }
+        return fetchJson(api, referer = "https://vidsrc.pro")?.let { findVideoUrl(it) }
     }
 
-    private fun extractVideasy(pageUrl: String, tmdbId: Int, contentType: String, season: Int, episode: Int): String? {
+    private fun extractVideasy(tmdbId: Int, contentType: String, season: Int, episode: Int): String? {
         val isMovie = contentType == "movie"
         val api = if (isMovie) "https://player.videasy.net/api/movie/$tmdbId"
                   else         "https://player.videasy.net/api/tv/$tmdbId/$season/$episode"
-        return fetchJson(api, referer = pageUrl)?.let { findVideoUrl(it) }
+        return fetchJson(api, referer = "https://player.videasy.net")?.let { findVideoUrl(it) }
     }
 
-    private fun extractAutoEmbed(pageUrl: String, tmdbId: Int, contentType: String, season: Int, episode: Int): String? {
+    private fun extractAutoEmbed(tmdbId: Int, contentType: String, season: Int, episode: Int): String? {
         val isMovie = contentType == "movie"
         val api = if (isMovie) "https://autoembed.cc/api/v2/movie/$tmdbId"
                   else         "https://autoembed.cc/api/v2/tv/$tmdbId/$season/$episode"
-        return fetchJson(api, referer = pageUrl)?.let { findVideoUrl(it) }
+        return fetchJson(api, referer = "https://autoembed.cc")?.let { findVideoUrl(it) }
     }
 
-    private fun extractEmbedSu(pageUrl: String, tmdbId: Int, contentType: String, season: Int, episode: Int): String? {
+    private fun extractEmbedSu(tmdbId: Int, contentType: String, season: Int, episode: Int): String? {
         val isMovie = contentType == "movie"
         val api = if (isMovie) "https://embed.su/api/source/$tmdbId"
                   else         "https://embed.su/api/source/tv/$tmdbId/$season/$episode"
-        return fetchJson(api, referer = pageUrl)?.let { findVideoUrl(it) }
+        return fetchJson(api, referer = "https://embed.su")?.let { findVideoUrl(it) }
     }
 
     private fun scrapeUrl(url: String): String? {
@@ -203,8 +171,4 @@ object StreamExtractor {
         val lower = url.lowercase()
         return lower.contains(".m3u8") || lower.contains(".mp4")
     }
-
-    private fun String.toOrigin(): String = try {
-        val u = Uri.parse(this); "${u.scheme}://${u.host}"
-    } catch (_: Exception) { this }
 }
