@@ -216,26 +216,36 @@ class PlayerActivity : AppCompatActivity() {
 
     private fun continueWithServers(servers: List<StreamingServer>) {
         currentServerIndex++
-        
         if (currentServerIndex < servers.size) {
             val server = servers[currentServerIndex]
-            loadingText.text = "Trying ${server.name} (${currentServerIndex + 1}/${servers.size})..."
-            loadServerInWebView(server)
+            loadingText.text = "Extracting from ${server.name}..."
             
-            // Give each server 15 seconds to find a video before moving to the next
             lifecycleScope.launch {
-                kotlinx.coroutines.delay(15000)
-                if (!isVideoIntercepted) {
-                    // Server timed out — mark it dead so it is deprioritised in future
-                    if (server.name.isNotBlank()) {
-                        ServerManager.markServerDead(server.name)
-                    }
-                    if (autoTryServers && currentServerIndex < servers.size - 1) {
-                        tryNextServer()
-                    } else {
-                        loadingText.text = "All servers tried. Please select manually."
-                        serverButton.visibility = View.VISIBLE
-                        showServerSelection()
+                val embedUrl = if (contentType == "movie") server.movieUrl(tmdbId) 
+                              else server.tvUrl(tmdbId, season, episode)
+                
+                // KODI-STYLE: Attempt background extraction first to bypass WebView entirely
+                val directUrl = StreamExtractor.extract(embedUrl, tmdbId, contentType, season, episode)
+                
+                if (directUrl != null) {
+                    currentServerName = server.name
+                    handleInterceptedVideo(directUrl)
+                } else {
+                    // Fallback to WebView if background extraction fails
+                    loadingText.text = "Direct extraction failed. Loading ${server.name}..."
+                    loadServerInWebView(server)
+                    
+                    // Give WebView 15 seconds as a last resort
+                    kotlinx.coroutines.delay(15000)
+                    if (!isVideoIntercepted) {
+                        if (server.name.isNotBlank()) ServerManager.markServerDead(server.name)
+                        if (autoTryServers && currentServerIndex < servers.size - 1) {
+                            tryNextServer()
+                        } else {
+                            loadingText.text = "All servers tried. Please select manually."
+                            serverButton.visibility = View.VISIBLE
+                            showServerSelection()
+                        }
                     }
                 }
             }
