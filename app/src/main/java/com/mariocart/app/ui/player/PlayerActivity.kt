@@ -73,6 +73,7 @@ class PlayerActivity : AppCompatActivity() {
     
     private var customView: View? = null
     private var customViewCallback: WebChromeClient.CustomViewCallback? = null
+    private var isVideoIntercepted = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -162,6 +163,11 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     private fun playNative(url: String) {
+        if (exoPlayer != null) {
+            exoPlayer?.release()
+            exoPlayer = null
+        }
+        
         loadingOverlay.visibility = View.GONE
         playerView.visibility = View.VISIBLE
         
@@ -171,7 +177,10 @@ class PlayerActivity : AppCompatActivity() {
             playWhenReady = true
             addListener(object : Player.Listener {
                 override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                    fallbackToWebView()
+                    // Only fallback if we haven't already intercepted something successfully
+                    if (!isVideoIntercepted) {
+                        fallbackToWebView()
+                    }
                 }
             })
         }
@@ -211,6 +220,7 @@ class PlayerActivity : AppCompatActivity() {
             server.tvUrl(tmdbId, season, episode)
         }
 
+        isVideoIntercepted = false
         loadingOverlay.visibility = View.VISIBLE
         loadingText.text = "Loading ${server.name}…"
 
@@ -229,8 +239,39 @@ class PlayerActivity : AppCompatActivity() {
 
         override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
             val url = request?.url?.toString() ?: return null
-            return if (isAdOrTracker(url)) WebResourceResponse("text/plain", "utf-8", null) else null
+            
+            // Block ads/trackers
+            if (isAdOrTracker(url)) {
+                return WebResourceResponse("text/plain", "utf-8", null)
+            }
+
+            // Intercept video streams
+            if (!isVideoIntercepted && (url.contains(".m3u8") || url.contains(".mp4"))) {
+                // Check if it's likely a real video and not an ad
+                if (!url.contains("ads") && !url.contains("google") && !url.contains("doubleclick")) {
+                    runOnUiThread {
+                        handleInterceptedVideo(url)
+                    }
+                }
+            }
+
+            return null
         }
+    }
+
+    private fun handleInterceptedVideo(url: String) {
+        if (isVideoIntercepted) return
+        isVideoIntercepted = true
+        
+        Log.d("PlayerActivity", "Intercepted video URL: $url")
+        
+        // Stop WebView
+        webView.stopLoading()
+        webView.loadUrl("about:blank")
+        webView.visibility = View.GONE
+        
+        // Play natively
+        playNative(url)
     }
 
     private fun buildWebChromeClient() = object : WebChromeClient() {
@@ -256,18 +297,82 @@ class PlayerActivity : AppCompatActivity() {
         web.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
+            databaseEnabled = true
             mediaPlaybackRequiresUserGesture = false
-            userAgentString = "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36"
+            mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+            userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
+        
+        web.addJavascriptInterface(object {
+            @android.webkit.JavascriptInterface
+            fun onVideoFound(url: String) {
+                runOnUiThread { handleInterceptedVideo(url) }
+            }
+        }, "Android")
     }
 
     private fun injectCleanupScript(view: WebView?) {
-        val script = "(function() { /* Cleanup logic */ })();"
+        val script = """
+            (function() {
+                // 1. Remove common ad overlays and popups
+                const selectors = [
+                    '[class*="ad-"]', '[id*="ad-"]', '.ad-unit', '.overlay', 
+                    '.pop-under', '.popup', '#popunder', '#pop-under'
+                ];
+                selectors.forEach(s => {
+                    document.querySelectorAll(s).forEach(el => el.remove());
+                });
+
+                // 2. Monitor for video elements
+                function checkVideos() {
+                    const videos = document.getElementsByTagName('video');
+                    for (let v of videos) {
+                        if (v.src && v.src.startsWith('http')) {
+                            window.Android.onVideoFound(v.src);
+                        }
+                        const sources = v.getElementsByTagName('source');
+                        for (let s of sources) {
+                            if (s.src && s.src.startsWith('http')) {
+                                window.Android.onVideoFound(s.src);
+                            }
+                        }
+                    }
+                }
+                
+                // 3. Auto-click play buttons to trigger video loading
+                function triggerPlay() {
+                    const playButtons = [
+                        '.play-button', '.vjs-big-play-button', '.jw-display-icon-container',
+                        '[aria-label="Play"]', '.play-icon'
+                    ];
+                    playButtons.forEach(s => {
+                        const btn = document.querySelector(s);
+                        if (btn) btn.click();
+                    });
+                }
+
+                setInterval(checkVideos, 1000);
+                setTimeout(triggerPlay, 2000);
+                
+                // 4. Block window.open to prevent popups
+                window.open = function() { return null; };
+            })();
+        """.trimIndent()
         view?.evaluateJavascript(script, null)
     }
 
     private fun isAdOrTracker(url: String): Boolean {
-        return listOf("ads", "tracker", "analytics", "doubleclick").any { url.contains(it) }
+        val adDomains = listOf(
+            "ads", "tracker", "analytics", "doubleclick", "popads", "popcash",
+            "propellerads", "adsterra", "exoclick", "juicyads", "onclickads",
+            "ad-delivery", "mads", "trafficjunky", "clksite", "clknr", "clkrev"
+        )
+        val lowerUrl = url.lowercase()
+        
+        // Don't block video streams themselves
+        if (lowerUrl.contains(".m3u8") || lowerUrl.contains(".mp4")) return false
+        
+        return adDomains.any { lowerUrl.contains(it) }
     }
 
     private fun showError(message: String) {
