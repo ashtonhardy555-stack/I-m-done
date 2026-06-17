@@ -6,6 +6,10 @@ import com.mariocart.app.data.model.StreamingServer
 import com.mariocart.app.data.model.TmdbItem
 import com.mariocart.app.data.model.TmdbResponse
 import com.mariocart.app.data.model.TvSeasonsResponse
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.withContext
 
 class ContentRepository {
 
@@ -89,16 +93,16 @@ class ContentRepository {
             filterValidMovies(enriched)
         }.getOrDefault(emptyList())
 
-    private suspend fun enrichWithRuntime(items: List<TmdbItem>): List<TmdbItem> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+    private suspend fun enrichWithRuntime(items: List<TmdbItem>): List<TmdbItem> = withContext(Dispatchers.IO) {
         items.map { item ->
-            kotlinx.coroutines.async {
+            async {
                 if (item.isMovie && item.runtime == null) {
                     runCatching { api.getMovieDetails(item.id, key) }.getOrNull() ?: item
                 } else {
                     item
                 }
             }
-        }.kotlinx.coroutines.awaitAll()
+        }.awaitAll()
     }
 
     suspend fun getNowPlaying(page: Int = 1): List<TmdbItem> =

@@ -2,28 +2,25 @@ package com.mariocart.app.data.api
 
 import retrofit2.http.GET
 import retrofit2.http.Query
-import kotlinx.serialization.Serializable
+import com.google.gson.annotations.SerializedName
 
 /**
  * Streaming Backend API Client
  * Communicates with the I'm Done Streaming backend for video delivery
  */
 
-@Serializable
 data class StreamServer(
     val id: String,
     val name: String,
     val type: String, // "embed" or "direct"
 )
 
-@Serializable
 data class ServersResponse(
     val success: Boolean,
     val servers: List<StreamServer>,
     val total: Int,
 )
 
-@Serializable
 data class EmbedResponse(
     val success: Boolean,
     val embedUrl: String? = null,
@@ -32,7 +29,6 @@ data class EmbedResponse(
     val error: String? = null,
 )
 
-@Serializable
 data class StreamResponse(
     val success: Boolean,
     val url: String? = null,
@@ -42,7 +38,6 @@ data class StreamResponse(
     val error: String? = null,
 )
 
-@Serializable
 data class HealthResponse(
     val status: String,
     val timestamp: String,
