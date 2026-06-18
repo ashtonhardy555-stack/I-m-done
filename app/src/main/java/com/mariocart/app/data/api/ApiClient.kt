@@ -11,7 +11,7 @@ object ApiClient {
 
     // Points at the Emergent preview backend that's already running this code.
     // After deploying to your own host (Render / Railway / Fly), change this.
-    private const val STREAMING_BACKEND_BASE = "https://backend-deploy-prep.preview.emergentagent.com/"
+    private const val STREAMING_BACKEND_BASE = "https://imdone-stream-backend.onrender.com"
 
     private val okHttpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
