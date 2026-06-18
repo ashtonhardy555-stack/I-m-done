@@ -8,7 +8,7 @@ import java.util.concurrent.TimeUnit
 object ApiClient {
 
     private const val TMDB_BASE = "https://api.themoviedb.org/3/"
-    private const val STREAMING_BACKEND_BASE = "https://3000-i59hdrx6en2f31d2ghor8-c8b9202c.us1.manus.computer/"
+    private const val STREAMING_BACKEND_BASE = "https://imdone-stream-backend.onrender.com"
 
     private val okHttpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
