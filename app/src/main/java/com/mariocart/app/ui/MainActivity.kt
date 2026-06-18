@@ -43,7 +43,7 @@ import androidx.compose.ui.unit.sp
 import com.mariocart.app.data.model.TmdbItem
 import com.mariocart.app.ui.home.HomeScreen
 import com.mariocart.app.ui.movies.MoviesScreen
-import com.mariocart.app.ui.player.PlayerActivity
+import com.mariocart.app.ui.player.EmbedPlayerActivity
 import com.mariocart.app.ui.search.SearchScreen
 import com.mariocart.app.ui.theme.Bg
 import com.mariocart.app.ui.theme.MarioCartTheme
@@ -62,7 +62,7 @@ class MainActivity : ComponentActivity() {
                 MainApp(
                     onPlayContent = { item ->
                         startActivity(
-                            PlayerActivity.newIntent(
+                            EmbedPlayerActivity.newIntent(
                                 context = this,
                                 tmdbId = item.id,
                                 type = item.contentType,
