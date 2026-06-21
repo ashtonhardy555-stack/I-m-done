@@ -22,7 +22,7 @@ import androidx.media3.ui.PlayerView
 import com.mariocart.app.data.api.ApiClient
 import com.mariocart.app.data.model.StreamingServer
 import com.mariocart.app.data.server.ServerManager
-import com.mariocart.app.data.server.ServerTester
+// import com.mariocart.app.data.server.ServerTester
 import com.mariocart.app.data.server.StreamExtractor
 import kotlinx.coroutines.launch
 
@@ -220,12 +220,7 @@ class PlayerActivity : AppCompatActivity() {
         
         lifecycleScope.launch {
             val allServers = ServerManager.getOrderedServers()
-            val servers = if (currentServerIndex == -1) {
-                loadingText.text = "Searching all sources..."
-                ServerTester.rankForContent(allServers, tmdbId, contentType, season, episode)
-            } else {
-                allServers
-            }
+            val servers = allServers
             
             continueWithServers(servers)
         }
