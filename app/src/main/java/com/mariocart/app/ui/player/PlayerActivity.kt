@@ -207,15 +207,25 @@ class PlayerActivity : AppCompatActivity() {
             
             AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
                 .setTitle("Verification Required")
-                .setMessage("A security challenge (CAPTCHA) is required to continue. Please solve it in your browser and try again.")
-                .setPositiveButton("Open Browser") { _, _ ->
-                    val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(challengeUrl))
-                    startActivity(intent)
-                    finish() // Close player so they can restart after solving
+                .setMessage("A security challenge (CAPTCHA) is required to continue. Please solve it to access the video.")
+                .setPositiveButton("Solve Now") { _, _ ->
+                    startActivityForResult(VerificationActivity.newIntent(this, challengeUrl), 1001)
                 }
                 .setNegativeButton("Cancel") { _, _ -> finish() }
                 .setCancelable(false)
                 .show()
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == 1001 && resultCode == RESULT_OK) {
+            // User solved CAPTCHA, restart discovery
+            loadingOverlay.visibility = View.VISIBLE
+            loadingText.text = "Challenge solved! Retrying..."
+            startDiscovery()
+        } else if (requestCode == 1001) {
+            showError("Verification failed or cancelled.")
         }
     }
 

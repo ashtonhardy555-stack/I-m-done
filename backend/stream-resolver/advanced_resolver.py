@@ -169,9 +169,14 @@ class AdvancedStreamResolver:
                 resp = await client.get(probe_url)
                 url_str = str(resp.url).lower()
                 content = resp.text.lower()
-                if any(x in url_str for x in ["verify", "captcha", "checkpoint", "challenge"]) or \
+                
+                # Refined: Ignore common ad/clickbait domains
+                is_clickbait = any(x in url_str for x in ["click", "ads", "pop", "redirect", "bet", "game"])
+                
+                if not is_clickbait and (
+                   any(x in url_str for x in ["verify", "captcha", "checkpoint", "challenge"]) or \
                    any(x in content for x in ["captcha", "robot", "verify you are human", "cf-challenge"]) or \
-                   resp.status_code == 403:
+                   resp.status_code == 403):
                     return {
                         "url": str(resp.url),
                         "serverId": "vidsrc_to_challenge",

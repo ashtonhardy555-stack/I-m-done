@@ -190,10 +190,19 @@ object StreamExtractor {
     } catch (_: Exception) { null }
 
     private fun anyChallenge(url: String, content: String, code: Int): Boolean {
-        return url.contains("verify") || url.contains("captcha") || 
-               url.contains("checkpoint") || url.contains("challenge") ||
-               content.contains("captcha") || content.contains("robot") || 
-               content.contains("verify you are human") || content.contains("cf-challenge") ||
+        val lowerUrl = url.lowercase()
+        val lowerContent = content.lowercase()
+        
+        // Exclude common clickbait/ad patterns that aren't real challenges
+        val isClickbait = lowerUrl.contains("click") || lowerUrl.contains("ads") || 
+                          lowerUrl.contains("pop") || lowerUrl.contains("redirect")
+        
+        if (isClickbait) return false
+
+        return lowerUrl.contains("verify") || lowerUrl.contains("captcha") || 
+               lowerUrl.contains("checkpoint") || lowerUrl.contains("challenge") ||
+               lowerContent.contains("captcha") || lowerContent.contains("robot") || 
+               lowerContent.contains("verify you are human") || lowerContent.contains("cf-challenge") ||
                code == 403
     }
 
