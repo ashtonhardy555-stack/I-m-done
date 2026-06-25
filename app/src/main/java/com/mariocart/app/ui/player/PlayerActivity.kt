@@ -15,7 +15,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.ui.PlayerView
 import com.mariocart.app.data.server.StreamExtractor
 import com.mariocart.app.ui.theme.MarioCartTheme
 import kotlinx.coroutines.CoroutineScope
@@ -62,7 +61,7 @@ class PlayerActivity : ComponentActivity() {
         val title = intent.getStringExtra(EXTRA_TITLE) ?: "Playing"
 
         if (tmdbId == -1) {
-            Toast.makeText(this, "Invalid content", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Invalid content ID", Toast.LENGTH_SHORT).show()
             finish()
             return
         }
@@ -89,15 +88,15 @@ class PlayerActivity : ComponentActivity() {
                 )
 
                 if (streamUrl.isNullOrEmpty()) {
-                    Toast.makeText(this@PlayerActivity, "Failed to extract stream", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this@PlayerActivity, "Failed to get stream URL", Toast.LENGTH_LONG).show()
                     return@launch
                 }
 
-                Log.i("PlayerActivity", "✅ Playing: $streamUrl")
+                Log.i("PlayerActivity", "✅ Playing stream: $streamUrl")
                 initializePlayer(streamUrl)
             } catch (e: Exception) {
-                Log.e("PlayerActivity", "Playback error", e)
-                Toast.makeText(this@PlayerActivity, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+                Log.e("PlayerActivity", "Error extracting stream", e)
+                Toast.makeText(this@PlayerActivity, "Playback error: ${e.message}", Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -106,7 +105,9 @@ class PlayerActivity : ComponentActivity() {
         exoPlayer?.release()
 
         exoPlayer = ExoPlayer.Builder(this).build().apply {
-            val mediaItem = MediaItem.Builder().setUri(url).build()
+            val mediaItem = MediaItem.Builder()
+                .setUri(url)
+                .build()
             setMediaItem(mediaItem)
             prepare()
             playWhenReady = true
@@ -125,7 +126,6 @@ class PlayerActivity : ComponentActivity() {
     }
 }
 
-// Simple Player UI
 @Composable
 fun PlayerScreen(
     title: String,
@@ -139,17 +139,27 @@ fun PlayerScreen(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Text(text = title, style = MaterialTheme.typography.headlineMedium)
+        Text(
+            text = title,
+            style = MaterialTheme.typography.headlineMedium,
+            color = MaterialTheme.colorScheme.onBackground
+        )
 
         Spacer(modifier = Modifier.height(48.dp))
 
-        Button(onClick = onPlayClick, modifier = Modifier.fillMaxWidth(0.8f)) {
-            Text("▶ Play Video")
+        Button(
+            onClick = onPlayClick,
+            modifier = Modifier.fillMaxWidth(0.8f)
+        ) {
+            Text("▶ Play Stream")
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        OutlinedButton(onClick = onBackClick, modifier = Modifier.fillMaxWidth(0.8f)) {
+        OutlinedButton(
+            onClick = onBackClick,
+            modifier = Modifier.fillMaxWidth(0.8f)
+        ) {
             Text("Back")
         }
     }
