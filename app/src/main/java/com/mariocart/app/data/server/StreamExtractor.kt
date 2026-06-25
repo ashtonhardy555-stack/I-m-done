@@ -25,8 +25,13 @@ object StreamExtractor {
         "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
     )
 
-    // Only LookMovie — called from PlayerActivity
-    suspend fun extract(tmdbId: Any, contentType: Any = "movie", season: Any = 1, episode: Any = 1): String? {
+    // Main entry point — called from PlayerActivity
+    suspend fun extract(
+        tmdbId: Any,
+        contentType: Any = "movie",
+        season: Any = 1,
+        episode: Any = 1
+    ): String? {
         val id = tmdbId.toString().toIntOrNull() ?: return null
         val isMovie = contentType.toString().lowercase().contains("movie")
         val s = season.toString().toIntOrNull() ?: 1
@@ -34,7 +39,12 @@ object StreamExtractor {
         return extractLookMovieOnly(id, isMovie, s, e)
     }
 
-    private suspend fun extractLookMovieOnly(tmdbId: Int, isMovie: Boolean, season: Int, episode: Int): String? = withContext(Dispatchers.IO) {
+    private suspend fun extractLookMovieOnly(
+        tmdbId: Int,
+        isMovie: Boolean,
+        season: Int,
+        episode: Int
+    ): String? = withContext(Dispatchers.IO) {
         try {
             val base = "https://www.lookmovie2.to"
             val playUrl = if (isMovie) {
@@ -67,7 +77,7 @@ object StreamExtractor {
 
             val matcher = Pattern.compile(storagePattern, Pattern.DOTALL).matcher(html)
             if (!matcher.find()) {
-                Log.d(TAG, "Storage not found — fallback embed")
+                Log.d(TAG, "Storage not found — fallback to play URL")
                 return@withContext finalUrl
             }
 
@@ -101,7 +111,7 @@ object StreamExtractor {
 
             return@withContext finalUrl
         } catch (e: Exception) {
-            Log.e(TAG, "LookMovie failed", e)
+            Log.e(TAG, "LookMovie extraction failed", e)
             return@withContext null
         }
     }
