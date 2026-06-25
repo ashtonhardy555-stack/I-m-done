@@ -12,6 +12,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
@@ -65,7 +66,8 @@ class PlayerActivity : ComponentActivity() {
                     contentType = contentType,
                     season = season,
                     episode = episode,
-                    title = title
+                    title = title,
+                    onPlayerReady = { exoPlayer -> player = exoPlayer }
                 )
             }
         }
@@ -90,7 +92,8 @@ fun PlayerScreen(
     contentType: String,
     season: Int,
     episode: Int,
-    title: String
+    title: String,
+    onPlayerReady: (ExoPlayer) -> Unit
 ) {
     val context = LocalContext.current
     var streamUrl by remember { mutableStateOf<String?>(null) }
@@ -100,24 +103,32 @@ fun PlayerScreen(
     LaunchedEffect(tmdbId, contentType, season, episode) {
         try {
             val url = StreamExtractor.extract(tmdbId, contentType, season, episode)
-            streamUrl = url
             if (url.isNullOrBlank()) {
                 error = "No stream found for this content"
+            } else {
+                streamUrl = url
             }
         } catch (e: Exception) {
             error = "Failed to load stream: ${e.message}"
+            e.printStackTrace()
         } finally {
             isLoading = false
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
         when {
             isLoading -> {
                 CircularProgressIndicator()
             }
             error != null -> {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.padding(16.dp)
+                ) {
                     Text(text = error!!, color = MaterialTheme.colorScheme.error)
                     Spacer(modifier = Modifier.height(16.dp))
                     Button(onClick = { (context as? ComponentActivity)?.finish() }) {
@@ -129,12 +140,14 @@ fun PlayerScreen(
                 AndroidView(
                     factory = { ctx ->
                         PlayerView(ctx).apply {
-                            player = ExoPlayer.Builder(ctx).build().also { exo ->
-                                exo.setMediaItem(MediaItem.fromUri(streamUrl!!))
-                                exo.prepare()
-                                exo.playWhenReady = true
+                            val exoPlayer = ExoPlayer.Builder(ctx).build().apply {
+                                setMediaItem(MediaItem.fromUri(streamUrl!!))
+                                prepare()
+                                playWhenReady = true
                             }
+                            player = exoPlayer
                             useController = true
+                            onPlayerReady(exoPlayer)
                         }
                     },
                     modifier = Modifier.fillMaxSize()
