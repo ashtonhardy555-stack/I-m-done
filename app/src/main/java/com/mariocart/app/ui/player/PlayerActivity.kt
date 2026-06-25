@@ -12,6 +12,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
@@ -85,7 +86,7 @@ fun PlayerScreen(
 
     LaunchedEffect(tmdbId, contentType, season, episode) {
         try {
-            Log.d("StreamExtractor", "Extracting stream...")
+            Log.d("StreamExtractor", "Extracting stream for $tmdbId...")
             val url = StreamExtractor.extract(tmdbId, contentType, season, episode)
             if (!url.isNullOrBlank()) {
                 streamUrl = url
@@ -103,9 +104,14 @@ fun PlayerScreen(
 
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         when {
-            isLoading -> CircularProgressIndicator()
+            isLoading -> {
+                CircularProgressIndicator()
+            }
             error != null -> {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.padding(24.dp)
+                ) {
                     Text(error!!, color = MaterialTheme.colorScheme.error)
                     Spacer(Modifier.height(16.dp))
                     Button(onClick = { (context as? ComponentActivity)?.finish() }) {
@@ -126,10 +132,6 @@ fun PlayerScreen(
                         PlayerView(ctx).apply {
                             this.player = player
                             useController = true
-                            layoutParams = android.view.ViewGroup.LayoutParams(
-                                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-                                android.view.ViewGroup.LayoutParams.MATCH_PARENT
-                            )
                         }
                     },
                     modifier = Modifier.fillMaxSize()
