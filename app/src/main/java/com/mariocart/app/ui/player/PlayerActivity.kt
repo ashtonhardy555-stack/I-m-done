@@ -1,132 +1,153 @@
 package com.mariocart.app.ui.player
 
-import android.content.Context
-import android.content.Intent
-import android.graphics.Color
 import android.os.Bundle
 import android.util.Log
 import android.view.View
-import android.view.WindowManager
-import android.widget.FrameLayout
-import android.widget.TextView
-import androidx.appcompat.app.AppCompatActivity
-import androidx.lifecycle.lifecycleScope
+import android.widget.Toast
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import com.mariocart.app.data.server.StreamExtractor
+import com.mariocart.app.ui.theme.MarioCartTheme
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
-class PlayerActivity : AppCompatActivity() {
+class PlayerActivity : ComponentActivity() {
+
+    private var exoPlayer: ExoPlayer? = null
+    private val scope = CoroutineScope(Dispatchers.Main)
 
     companion object {
-        private const val EXTRA_TMDB_ID = "tmdb_id"
-        private const val EXTRA_TYPE = "type"
-        private const val EXTRA_TITLE = "title"
-        private const val EXTRA_SEASON = "season"
-        private const val EXTRA_EPISODE = "episode"
-
-        fun newIntent(
-            context: Context,
-            tmdbId: Int,
-            type: String,
-            title: String,
-            season: Int = 1,
-            episode: Int = 1
-        ): Intent = Intent(context, PlayerActivity::class.java).apply {
-            putExtra(EXTRA_TMDB_ID, tmdbId)
-            putExtra(EXTRA_TYPE, type)
-            putExtra(EXTRA_TITLE, title)
-            putExtra(EXTRA_SEASON, season)
-            putExtra(EXTRA_EPISODE, episode)
-        }
+        const val EXTRA_TMDB_ID = "tmdb_id"
+        const val EXTRA_CONTENT_TYPE = "content_type"
+        const val EXTRA_SEASON = "season"
+        const val EXTRA_EPISODE = "episode"
+        const val EXTRA_TITLE = "title"
     }
-
-    private var tmdbId = 0
-    private var contentType = "movie"
-    private var season = 1
-    private var episode = 1
-    private var title = ""
-
-    private lateinit var playerView: PlayerView
-    private var exoPlayer: ExoPlayer? = null
-    private lateinit var loadingText: TextView
-    private lateinit var loadingOverlay: FrameLayout
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-        tmdbId = intent.getIntExtra(EXTRA_TMDB_ID, 0)
-        contentType = intent.getStringExtra(EXTRA_TYPE) ?: "movie"
-        title = intent.getStringExtra(EXTRA_TITLE) ?: "Movie"
-        season = intent.getIntExtra(EXTRA_SEASON, 1)
-        episode = intent.getIntExtra(EXTRA_EPISODE, 1)
+        val tmdbId = intent.getIntExtra(EXTRA_TMDB_ID, -1)
+        val contentType = intent.getStringExtra(EXTRA_CONTENT_TYPE) ?: "movie"
+        val season = intent.getIntExtra(EXTRA_SEASON, 1)
+        val episode = intent.getIntExtra(EXTRA_EPISODE, 1)
+        val title = intent.getStringExtra(EXTRA_TITLE) ?: "Playing"
 
-        setupUI()
-        loadLookMovieOnly()
+        if (tmdbId == -1) {
+            finish()
+            return
+        }
+
+        setContent {
+            MarioCartTheme {
+                PlayerScreen(
+                    title = title,
+                    onPlayClick = { playStream(tmdbId, contentType, season, episode) },
+                    onBackClick = { finish() }
+                )
+            }
+        }
     }
 
-    private fun setupUI() {
-        val root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
+    private fun playStream(tmdbId: Int, contentType: String, season: Int, episode: Int) {
+        scope.launch {
+            try {
+                val streamUrl = StreamExtractor.extract(
+                    tmdbId = tmdbId,
+                    contentType = contentType,
+                    season = season,
+                    episode = episode
+                )
 
-        playerView = PlayerView(this).apply {
-            layoutParams = FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT
-            )
-            useController = true
-        }
-
-        loadingText = TextView(this).apply {
-            text = "Loading from LookMovie..."
-            setTextColor(Color.WHITE)
-            textSize = 18f
-        }
-
-        loadingOverlay = FrameLayout(this).apply {
-            setBackgroundColor(Color.BLACK)
-            addView(loadingText)
-        }
-
-        root.addView(playerView)
-        root.addView(loadingOverlay)
-        setContentView(root)
-    }
-
-    private fun loadLookMovieOnly() {
-        lifecycleScope.launch {
-            loadingText.text = "Fetching from LookMovie2.to..."
-            val streamUrl = StreamExtractor.extract(tmdbId, contentType, season, episode)
-
-            if (streamUrl != null) {
-                if (streamUrl.contains("challenge") || streamUrl.contains("verify")) {
-                    loadingText.text = "Verification needed on LookMovie. Try again later."
-                } else {
-                    playStream(streamUrl)
+                if (streamUrl.isNullOrEmpty()) {
+                    Toast.makeText(this@PlayerActivity, "Failed to get stream", Toast.LENGTH_LONG).show()
+                    return@launch
                 }
-            } else {
-                loadingText.text = "Failed to load from LookMovie. Check connection."
+
+                Log.i("PlayerActivity", "Playing stream: $streamUrl")
+
+                initializePlayer(streamUrl)
+            } catch (e: Exception) {
+                Log.e("PlayerActivity", "Error playing stream", e)
+                Toast.makeText(this@PlayerActivity, "Playback error: ${e.message}", Toast.LENGTH_LONG).show()
             }
         }
     }
 
-    private fun playStream(url: String) {
-        runOnUiThread {
-            loadingOverlay.visibility = View.GONE
-            playerView.visibility = View.VISIBLE
+    private fun initializePlayer(url: String) {
+        exoPlayer?.release()
 
-            exoPlayer = ExoPlayer.Builder(this).build().apply {
-                setMediaItem(MediaItem.fromUri(url))
-                prepare()
-                playWhenReady = true
-            }
-            playerView.player = exoPlayer
+        exoPlayer = ExoPlayer.Builder(this).build().apply {
+            val mediaItem = MediaItem.Builder()
+                .setUri(url)
+                .build()
+
+            setMediaItem(mediaItem)
+            prepare()
+            playWhenReady = true
         }
+
+        // You can add a PlayerView in your Composable if needed
+    }
+
+    override fun onPause() {
+        super.onPause()
+        exoPlayer?.playWhenReady = false
     }
 
     override fun onDestroy() {
         super.onDestroy()
         exoPlayer?.release()
+        exoPlayer = null
+    }
+}
+
+// Simple Composable UI for the player screen
+@Composable
+fun PlayerScreen(
+    title: String,
+    onPlayClick: () -> Unit,
+    onBackClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.headlineMedium
+        )
+
+        Spacer(modifier = Modifier.height(32.dp))
+
+        Button(
+            onClick = onPlayClick,
+            modifier = Modifier.fillMaxWidth(0.7f)
+        ) {
+            Text("▶ Play Stream")
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        OutlinedButton(
+            onClick = onBackClick,
+            modifier = Modifier.fillMaxWidth(0.7f)
+        ) {
+            Text("Back")
+        }
     }
 }
