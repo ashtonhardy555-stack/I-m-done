@@ -75,7 +75,7 @@ object ServerManager {
         } catch (e: Exception) {
             Log.e(TAG, "Failed to load $SERVERS_ASSET, using fallback: ${e.message}")
             servers = listOf(
-                StreamingServer("VidSrc.me (Mirror)", "https://www.lookmovie2.to/"),
+                StreamingServer("VidSrc.me (Mirror)", "https://www.lookmovie2.to/embed"),
                 StreamingServer("VidSrc.su (Mirror)", "https://vsrc.su/embed"),
                 StreamingServer("VidSrc2.to",         "https://vidsrc2.to/embed"),
                 StreamingServer("VidLink.pro",         "https://vidlink.pro/embed"),
