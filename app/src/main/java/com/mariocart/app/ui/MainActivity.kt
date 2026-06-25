@@ -51,12 +51,15 @@ class MainActivity : ComponentActivity() {
             MarioCartTheme {
                 MainApp(
                     onPlayContent = { item ->
-                        startActivity(
-                            PlayerActivity.newIntent(
-                                context = this@MainActivity,
-                                tmdbId = item.id,
-                                contentType = item.contentType,
-                                title = item.displayTitle
+    startActivity(
+        PlayerActivity.newIntent(
+            context = this@MainActivity,
+            tmdbId = item.id,
+            contentType = item.contentType,
+            title = item.displayTitle
+                                     )
+                                  )
+                               }
                             )
                         )
                     }
