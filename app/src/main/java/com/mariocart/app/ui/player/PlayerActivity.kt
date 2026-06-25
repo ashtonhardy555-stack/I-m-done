@@ -14,10 +14,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
-import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
@@ -160,7 +162,7 @@ class PlayerActivity : ComponentActivity() {
                 )
             }
 
-            // Loading indicator
+            // Loading
             if (isLoading) {
                 Box(
                     modifier = Modifier.fillMaxSize(),
@@ -170,7 +172,7 @@ class PlayerActivity : ComponentActivity() {
                 }
             }
 
-            // Error message
+            // Error
             if (errorMessage != null) {
                 Column(
                     modifier = Modifier
@@ -179,16 +181,9 @@ class PlayerActivity : ComponentActivity() {
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
-                    Text(
-                        text = "Playback Error",
-                        style = MaterialTheme.typography.headlineMedium,
-                        color = MaterialTheme.colorScheme.error
-                    )
+                    Text("Playback Error", style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.error)
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = errorMessage ?: "",
-                        color = MaterialTheme.colorScheme.onBackground
-                    )
+                    Text(errorMessage ?: "", color = MaterialTheme.colorScheme.onBackground)
                     Spacer(modifier = Modifier.height(24.dp))
                     Button(onClick = { finish() }) {
                         Text("Back")
@@ -196,7 +191,7 @@ class PlayerActivity : ComponentActivity() {
                 }
             }
 
-            // Top Bar with title and back button
+            // Top Bar
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
