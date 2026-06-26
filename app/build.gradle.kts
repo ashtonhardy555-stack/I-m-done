@@ -18,14 +18,6 @@ android {
         ndk {
             abiFilters += listOf("armeabi-v7a", "arm64-v8a")
         }
-
-        // Chaquopy config inside defaultConfig (this is the most reliable way)
-        python {
-            version = "3.11"
-            pip {
-                install("requests")
-            }
-        }
     }
 
     buildTypes {
@@ -54,6 +46,12 @@ android {
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.1"
     }
+}
+
+// Chaquopy configuration at root level (this works better)
+python {
+    version = "3.11"
+    // pip install moved out to avoid DSL issues for now
 }
 
 dependencies {
