@@ -6,99 +6,104 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.util.concurrent.TimeUnit
+import okhttp3.Response
 
 object StreamExtractor {
-
     private const val TAG = "StreamExtractor"
+    private const val BACKEND_BASE = "https://your-backend.example.com/api/stream" // Update if you have one; fallback to client scraping
+    private const val USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(20, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
         .followRedirects(true)
+        .followSslRedirects(true)
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
         .build()
 
     suspend fun extract(
         tmdbId: Int,
         contentType: String,
-        season: Int = 1,
-        episode: Int = 1
+        season: Int? = null,
+        episode: Int? = null
     ): String? = withContext(Dispatchers.IO) {
+        val title = "unknown" // You may want to pass or fetch title for better lookup
+        Log.d(TAG, "🔍 Starting extraction for TMDB $tmdbId ($contentType)")
+
+        // 1. Try backend first (recommended for reliability)
         try {
-            Log.d(TAG, "🔍 Starting extraction for TMDB $tmdbId ($contentType)")
-
-            // Priority 1: LookMovie2.to (as requested)
-            val lookmovieUrl = if (contentType.lowercase() == "tv") {
-                "https://www.lookmovie2.to/shows/play/$tmdbId/$season/$episode"
-            } else {
-                "https://www.lookmovie2.to/movies/play/$tmdbId"
-            }
-
-            Log.d(TAG, "Trying LookMovie2.to: $lookmovieUrl")
-
-            val request = Request.Builder()
-                .url(lookmovieUrl)
-                .header("User-Agent", "Mozilla/5.0 (Linux; Android 14; SM-S911B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36")
-                .header("Referer", "https://www.lookmovie2.to/")
-                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-                .header("Accept-Language", "en-US,en;q=0.9")
+            val backendUrl = "$BACKEND_BASE?tmdb=$tmdbId&type=$contentType&season=$season&episode=$episode"
+            val backendReq = Request.Builder()
+                .url(backendUrl)
+                .header("User-Agent", USER_AGENT)
                 .build()
-
-            val response = client.newCall(request).execute()
-            if (response.isSuccessful) {
-                val html = response.body?.string() ?: ""
-                response.close()
-
-                val directUrl = extractDirectUrl(html, "https://www.lookmovie2.to")
-                if (!directUrl.isNullOrBlank()) {
-                    Log.i(TAG, "✅ Found direct stream from LookMovie2.to: $directUrl")
-                    return@withContext directUrl
+            val backendResp = client.newCall(backendReq).execute()
+            if (backendResp.isSuccessful) {
+                val backendStream = backendResp.body?.string()?.trim()
+                if (!backendStream.isNullOrBlank() && isDirectPlayable(backendStream)) {
+                    Log.i(TAG, "✅ Backend direct URL: $backendStream")
+                    return@withContext backendStream
                 }
-            } else {
-                response.close()
             }
-
-            // Fallback to other servers
-            Log.w(TAG, "⚠️ LookMovie2.to failed, trying fallbacks")
-            val fallbackUrl = getFallbackUrl(tmdbId, contentType, season, episode)
-            return@withContext fallbackUrl
-
         } catch (e: Exception) {
-            Log.e(TAG, "Extraction failed", e)
-            null
+            Log.w(TAG, "Backend failed, falling back to scraping: ${e.message}")
         }
-    }
 
-    private fun extractDirectUrl(html: String, base: String): String? {
-        val patterns = listOf(
-            // Master HLS playlists
-            """["']([^"']*master\.m3u8[^"']*)["']""".toRegex(RegexOption.IGNORE_CASE),
-            """["']([^"']*\.m3u8[^"']*)["']""".toRegex(RegexOption.IGNORE_CASE),
-            // Direct MP4
-            """["']([^"']*\.mp4[^"']*)["']""".toRegex(RegexOption.IGNORE_CASE),
-            // JSON-like sources
-            """source["']\s*:\s*["']([^"']+)["']""".toRegex(RegexOption.IGNORE_CASE),
-            """file["']\s*:\s*["']([^"']+)["']""".toRegex(RegexOption.IGNORE_CASE),
-            """url["']\s*:\s*["']([^"']+)["']""".toRegex(RegexOption.IGNORE_CASE)
+        // 2. Fallback: Scrape LookMovie2.to (or mirrors)
+        val searchUrl = "https://lookmovie2.to/search/?q=$title" // Improve with actual title if possible
+        val urlsToTry = listOf(
+            "https://lookmovie2.to/movies/view/$tmdbId", // Adjust based on their URL pattern
+            // Add more specific player/watch URLs if known
         )
 
-        for (pattern in patterns) {
-            pattern.findAll(html).forEach { match ->
-                var url = match.groupValues[1]
-                if (url.startsWith("//")) url = "https:$url"
-                if (!url.startsWith("http")) url = "$base$url"
+        for (baseUrl in urlsToTry) {
+            try {
+                Log.d(TAG, "Scraping $baseUrl")
+                val request = Request.Builder()
+                    .url(baseUrl)
+                    .header("User-Agent", USER_AGENT)
+                    .header("Referer", "https://lookmovie2.to/")
+                    .header("Accept", "text/html,application/xhtml+xml")
+                    .build()
 
-                if (url.contains(".m3u8") || url.contains(".mp4")) {
-                    return url
+                val response: Response = client.newCall(request).execute()
+                val html = response.body?.string() ?: continue
+
+                // Expanded regex patterns for m3u8/mp4 (handle master, variants, sources in JS)
+                val streamPatterns = listOf(
+                    """["']?(https?://[^\s"']+\.m3u8[^\s"']*)["']?""".toRegex(RegexOption.IGNORE_CASE),
+                    """["']?(https?://[^\s"']+\.mp4[^\s"']*)["']?""".toRegex(RegexOption.IGNORE_CASE),
+                    """file["']\s*:\s*["']([^"']+\.m3u8[^"']*)["']""".toRegex(RegexOption.IGNORE_CASE),
+                    """source["']\s*:\s*["']([^"']+\.m3u8[^"']*)["']""".toRegex(RegexOption.IGNORE_CASE),
+                    """master\.m3u8""".toRegex(RegexOption.IGNORE_CASE), // Catch and reconstruct if partial
+                    // Add more if you inspect Network tab (e.g., data-url, src in player scripts)
+                )
+
+                for (pattern in streamPatterns) {
+                    val matches = pattern.findAll(html)
+                    for (match in matches) {
+                        val url = match.groupValues.getOrNull(1)?.trim() ?: match.value.trim()
+                        if (isDirectPlayable(url)) {
+                            Log.i(TAG, "✅ Found direct stream: $url")
+                            return@withContext url
+                        }
+                    }
                 }
+
+                // Fallback: Look for player init JS or data attributes
+                if (html.contains(".m3u8") || html.contains("hls.js")) {
+                    Log.d(TAG, "Player JS detected - may need advanced parsing or backend")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error scraping $baseUrl: ${e.message}")
             }
         }
-        return null
+
+        Log.e(TAG, "❌ No direct stream found")
+        null
     }
 
-    private fun getFallbackUrl(tmdbId: Int, contentType: String, season: Int, episode: Int): String? {
-        return when (contentType.lowercase()) {
-            "tv" -> "https://vidlink.pro/tv/$tmdbId/$season/$episode"
-            else -> "https://vidlink.pro/movie/$tmdbId"
-        }
+    private fun isDirectPlayable(url: String): Boolean {
+        return url.contains(".m3u8") || url.contains(".mp4") && 
+               !url.contains("embed") && !url.contains("player") && url.startsWith("http")
     }
 }
