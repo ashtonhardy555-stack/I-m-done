@@ -84,21 +84,21 @@ fun PlayerScreen(
         error = null
 
         try {
-            Log.d("Player", "🔍 Extracting for TMDB $tmdbId")
+            Log.d("Player", "🔍 Extracting TMDB $tmdbId ($contentType)")
             val url = StreamExtractor.extract(tmdbId, contentType, season, episode)
             if (!url.isNullOrBlank()) {
                 streamUrl = url
                 Log.i("Player", "✅ Stream ready")
             } else {
-                throw Exception("No stream URL returned")
+                throw Exception("No stream URL")
             }
         } catch (e: Exception) {
-            Log.e("Player", "Extraction failed", e)
+            Log.e("Player", "💥 Extraction failed", e)
             if (retryCount < maxRetries) {
                 retryCount++
                 delay(1500)
             } else {
-                error = "Failed to load stream. Try another title."
+                error = "Failed to load stream.\nError: ${e.message?.take(100) ?: e::class.simpleName}"
             }
         } finally {
             isLoading = false
@@ -111,7 +111,7 @@ fun PlayerScreen(
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     CircularProgressIndicator()
                     Spacer(Modifier.height(16.dp))
-                    Text("Loading stream...", color = MaterialTheme.colorScheme.onBackground)
+                    Text("Loading best stream...", color = MaterialTheme.colorScheme.onBackground)
                 }
             }
             error != null -> {
@@ -138,10 +138,6 @@ fun PlayerScreen(
                     },
                     modifier = Modifier.fillMaxSize()
                 )
-            }
-            else -> {
-                // Fallback
-                Text("Waiting for stream...", color = MaterialTheme.colorScheme.onBackground)
             }
         }
     }
