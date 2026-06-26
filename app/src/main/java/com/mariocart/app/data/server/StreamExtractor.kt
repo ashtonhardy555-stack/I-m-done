@@ -5,129 +5,93 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import org.json.JSONObject
 import java.util.concurrent.TimeUnit
-import java.util.regex.Pattern
 
 object StreamExtractor {
 
     private const val TAG = "StreamExtractor"
-    private const val LOOKMOVIE_BASE = "https://www.lookmovie2.to"
-
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(25, TimeUnit.SECONDS)
-        .followRedirects(true)
+        .readTimeout(20, TimeUnit.SECONDS)
         .build()
 
     suspend fun extract(
         tmdbId: Int,
-        contentType: String = "movie",
+        contentType: String,
         season: Int = 1,
         episode: Int = 1
     ): String? = withContext(Dispatchers.IO) {
-
-        val playUrl = if (contentType.lowercase() == "tv") {
-            "$LOOKMOVIE_BASE/shows/play/$tmdbId/$season/$episode"
-        } else {
-            "$LOOKMOVIE_BASE/movies/play/$tmdbId"
-        }
-
-        Log.d(TAG, "Loading LookMovie play page: $playUrl")
-
         try {
-            val pageRequest = Request.Builder()
-                .url(playUrl)
-                .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36")
-                .header("Referer", LOOKMOVIE_BASE)
-                .build()
+            // TODO: Uncomment and use your backend when deployed for best results
+            // val backendUrl = "https://your-backend.onrender.com/api/stream?tmdbId=$tmdbId&..."
+            // ... call backend first
 
-            val pageResponse = client.newCall(pageRequest).execute()
-            if (!pageResponse.isSuccessful) {
-                pageResponse.close()
-                return@withContext fallback()
-            }
+            val servers = listOf(
+                "https://vidlink.pro",
+                "https://vidsrc.to",
+                "https://vidsrc-embed.ru"
+            )
 
-            val html = pageResponse.body?.string() ?: ""
-            pageResponse.close()
+            for (base in servers) {
+                val url = when (contentType.lowercase()) {
+                    "tv" -> "$base/tv/$tmdbId/$season/$episode"
+                    else -> "$base/movie/$tmdbId"
+                }
 
-            // Extract storage data and hash
-            val storageRegex = if (contentType.lowercase() == "tv") {
-                "show_storage\"\\]\\s*=\\s*(\\{.*?\\})".toRegex(RegexOption.DOT_MATCHES_ALL)
-            } else {
-                "movie_storage\"\\]\\s*=\\s*(\\{.*?\\})".toRegex(RegexOption.DOT_MATCHES_ALL)
-            }
+                Log.d(TAG, "Trying server: $url")
 
-            val storageMatch = storageRegex.find(html)
-            if (storageMatch != null) {
-                val storageJson = storageMatch.groupValues[1]
-                val hashMatch = "hash\"\\s*:\\s*\"([^\"]+)\"".toRegex().find(storageJson)
-                val idMatch = if (contentType.lowercase() == "tv") {
-                    "id_episode\"\\s*:\\s*(\\d+)".toRegex().find(storageJson)
+                val request = Request.Builder()
+                    .url(url)
+                    .header("User-Agent", "Mozilla/5.0 (Linux; Android 14; SM-S911B) AppleWebKit/537.36")
+                    .build()
+
+                val response = client.newCall(request).execute()
+                if (response.isSuccessful) {
+                    val body = response.body?.string() ?: ""
+                    response.close()
+
+                    val directUrl = extractDirectUrl(body, base)
+                    if (!directUrl.isNullOrBlank()) {
+                        Log.i(TAG, "✅ Found direct stream: $directUrl")
+                        return@withContext directUrl
+                    }
                 } else {
-                    "id_movie\"\\s*:\\s*(\\d+)".toRegex().find(storageJson)
-                }
-
-                if (hashMatch != null && idMatch != null) {
-                    val hash = hashMatch.groupValues[1]
-                    val id = idMatch.groupValues[1]
-
-                    val apiUrl = if (contentType.lowercase() == "tv") {
-                        "$LOOKMOVIE_BASE/api/v1/security/episode-access"
-                    } else {
-                        "$LOOKMOVIE_BASE/api/v1/security/movie-access"
-                    }
-
-                    val apiRequest = Request.Builder()
-                        .url("$apiUrl?id=${if (contentType.lowercase() == "tv") "id_episode" else "id_movie"}=$id&hash=$hash")
-                        .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36")
-                        .build()
-
-                    val apiResponse = client.newCall(apiRequest).execute()
-                    if (apiResponse.isSuccessful) {
-                        val apiJson = apiResponse.body?.string() ?: ""
-                        apiResponse.close()
-
-                        val json = JSONObject(apiJson)
-                        val streams = json.optJSONObject("streams") ?: json.optJSONObject("data")?.optJSONObject("streams")
-
-                        if (streams != null && streams.length() > 0) {
-                            val bestStream = streams.keys().next() as String
-                            val streamUrl = streams.getString(bestStream)
-                            Log.i(TAG, "✅ LookMovie API direct stream: $streamUrl")
-                            return@withContext streamUrl
-                        }
-                    }
+                    response.close()
                 }
             }
 
-            // Fallback regex extraction from page
-            val direct = extractDirectUrl(html, LOOKMOVIE_BASE)
-            if (direct != null) return@withContext direct
+            // Fallback (embed) - will be caught as non-direct in PlayerScreen
+            val fallback = when (contentType.lowercase()) {
+                "tv" -> "https://vidlink.pro/tv/$tmdbId/$season/$episode"
+                else -> "https://vidlink.pro/movie/$tmdbId"
+            }
+            Log.w(TAG, "⚠️ No direct stream, using fallback: $fallback")
+            fallback
 
         } catch (e: Exception) {
-            Log.e(TAG, "LookMovie extraction error", e)
+            Log.e(TAG, "Extraction failed", e)
+            null
         }
-
-        return@withContext fallback()
-    }
-
-    private fun fallback(): String {
-        return "$LOOKMOVIE_BASE/movies/play/550" // Test with known ID
     }
 
     private fun extractDirectUrl(html: String, base: String): String? {
         val patterns = listOf(
-            """["']([^"']+\.m3u8[^"']*)["']""",
-            """["']([^"']+\.mp4[^"']*)["']"""
+            """["']([^"']*\.m3u8[^"']*)["']""".toRegex(),
+            """["']([^"']*\.mp4[^"']*)["']""".toRegex(),
+            """source["']\s*:\s*["']([^"']+)["']""".toRegex(RegexOption.IGNORE_CASE),
+            """file["']\s*:\s*["']([^"']+)["']""".toRegex(RegexOption.IGNORE_CASE),
+            """["']url["']\s*:\s*["']([^"']+)["']""".toRegex(RegexOption.IGNORE_CASE)
         )
-        for (p in patterns) {
-            val matcher = Pattern.compile(p, Pattern.CASE_INSENSITIVE).matcher(html)
-            while (matcher.find()) {
-                var url = matcher.group(1) ?: continue
+
+        for (regex in patterns) {
+            regex.findAll(html).forEach { match ->
+                var url = match.groupValues[1].trim()
                 if (url.startsWith("//")) url = "https:$url"
-                if (!url.startsWith("http")) url = "$base$url"
-                if (url.contains(".m3u8") || url.contains(".mp4")) return url
+                if (!url.startsWith("http")) url = "$base$url".replace("https://https://", "https://")
+
+                if (url.contains(".m3u8") || url.contains(".mp4") || url.contains("video")) {
+                    return url
+                }
             }
         }
         return null
