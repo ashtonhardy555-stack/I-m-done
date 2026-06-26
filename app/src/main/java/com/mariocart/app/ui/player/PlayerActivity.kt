@@ -51,6 +51,7 @@ class PlayerActivity : ComponentActivity() {
         val contentType = intent.getStringExtra("CONTENT_TYPE") ?: "movie"
         val season = intent.getIntExtra("SEASON", 1)
         val episode = intent.getIntExtra("EPISODE", 1)
+        val title = intent.getStringExtra("TITLE") ?: "Now Playing"
 
         if (tmdbId == -1) {
             Log.e("PlayerActivity", "Invalid TMDB ID")
@@ -60,7 +61,7 @@ class PlayerActivity : ComponentActivity() {
 
         setContent {
             MarioCartTheme {
-                PlayerScreen(tmdbId, contentType, season, episode)
+                PlayerScreen(tmdbId, contentType, season, episode, title)
             }
         }
     }
@@ -72,36 +73,38 @@ fun PlayerScreen(
     tmdbId: Int,
     contentType: String,
     season: Int,
-    episode: Int
+    episode: Int,
+    title: String
 ) {
     val localContext = LocalContext.current
     var streamUrl by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
-    var retryCount by remember { mutableStateOf(0) }
-    val maxRetries = 3
 
-    LaunchedEffect(tmdbId, contentType, season, episode, retryCount) {
+    LaunchedEffect(tmdbId, contentType, season, episode) {
         isLoading = true
         error = null
 
+        Log.d("Player", "🔍 Extracting stream for TMDB $tmdbId ($contentType S$season E$episode)")
+
         try {
-            Log.d("Player", "🔍 Starting extraction for TMDB $tmdbId ($contentType S$season E$episode)")
-            val url = StreamExtractor.extract(tmdbId, contentType, season, episode)
-            if (!url.isNullOrBlank() && (url.contains(".m3u8") || url.contains(".mp4"))) {
+            val url = StreamExtractor.extract(
+                context = localContext,
+                tmdbId = tmdbId,
+                contentType = contentType,
+                season = season,
+                episode = episode
+            )
+
+            if (!url.isNullOrBlank()) {
                 streamUrl = url
-                Log.i("Player", "✅ Direct playable URL: $url")
+                Log.i("Player", "✅ Direct stream ready: $url")
             } else {
-                throw Exception("No direct video URL found")
+                error = "No stream found for this title."
             }
         } catch (e: Exception) {
             Log.e("Player", "💥 Extraction failed", e)
-            if (retryCount < maxRetries) {
-                retryCount++
-                delay(2000)
-            } else {
-                error = "Failed to load stream.\n\nTry another title."
-            }
+            error = "Failed to load stream. ${e.message}"
         } finally {
             isLoading = false
         }
@@ -113,7 +116,7 @@ fun PlayerScreen(
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     CircularProgressIndicator()
                     Spacer(Modifier.height(16.dp))
-                    Text("Finding best stream...", color = MaterialTheme.colorScheme.onBackground)
+                    Text("Finding best stream from LookMovie...", color = MaterialTheme.colorScheme.onBackground)
                 }
             }
             error != null -> {
