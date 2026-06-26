@@ -72,6 +72,7 @@ fun PlayerScreen(
     season: Int,
     episode: Int
 ) {
+    val context = LocalContext.current
     var streamUrl by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -83,22 +84,21 @@ fun PlayerScreen(
         error = null
 
         try {
-            Log.d("Player", "Starting stream extraction for TMDB $tmdbId")
+            Log.d("Player", "Starting extraction for TMDB $tmdbId")
             val url = StreamExtractor.extract(tmdbId, contentType, season, episode)
-            
             if (!url.isNullOrBlank()) {
                 streamUrl = url
-                Log.i("Player", "✅ Got stream URL: $url")
+                Log.i("Player", "✅ Stream ready")
             } else {
-                throw Exception("StreamExtractor returned empty URL")
+                throw Exception("No stream URL")
             }
         } catch (e: Exception) {
             Log.e("Player", "Extraction failed", e)
             if (retryCount < maxRetries) {
                 retryCount++
-                delay(2000)
+                delay(1500)
             } else {
-                error = "Could not load stream.\n\nError: ${e.message?.take(100)}"
+                error = "Failed to load stream. Try another title."
             }
         } finally {
             isLoading = false
@@ -111,35 +111,29 @@ fun PlayerScreen(
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     CircularProgressIndicator()
                     Spacer(Modifier.height(16.dp))
-                    Text("Finding stream for TMDB $tmdbId...", color = MaterialTheme.colorScheme.onBackground)
+                    Text("Loading stream...", color = MaterialTheme.colorScheme.onBackground)
                 }
             }
             error != null -> {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
                     Text("⚠️ $error", color = MaterialTheme.colorScheme.error)
                     Spacer(Modifier.height(16.dp))
-                    Button(onClick = { finish() }) {
-                        Text("Back to Home")
+                    Button(onClick = { (context as? ComponentActivity)?.finish() }) {
+                        Text("Back")
                     }
                 }
             }
             streamUrl != null -> {
                 AndroidView(
                     factory = { ctx ->
-                        try {
-                            val player = ExoPlayer.Builder(ctx).build().apply {
-                                setMediaItem(MediaItem.fromUri(streamUrl!!))
-                                prepare()
-                                playWhenReady = true
-                            }
-                            PlayerView(ctx).apply {
-                                this.player = player
-                                useController = true
-                            }
-                        } catch (e: Exception) {
-                            Log.e("ExoPlayer", "Player init failed", e)
-                            error = "Player failed to start: ${e.message}"
-                            null
+                        val player = ExoPlayer.Builder(ctx).build().apply {
+                            setMediaItem(MediaItem.fromUri(streamUrl!!))
+                            prepare()
+                            playWhenReady = true
+                        }
+                        PlayerView(ctx).apply {
+                            this.player = player
+                            useController = true
                         }
                     },
                     modifier = Modifier.fillMaxSize()
