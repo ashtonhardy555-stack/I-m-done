@@ -6,6 +6,7 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.util.concurrent.TimeUnit
+import java.util.regex.Pattern
 
 object StreamExtractor {
 
@@ -13,85 +14,114 @@ object StreamExtractor {
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(20, TimeUnit.SECONDS)
+        .followRedirects(true)
         .build()
 
     suspend fun extract(
         tmdbId: Int,
-        contentType: String,
+        contentType: String = "movie",
         season: Int = 1,
         episode: Int = 1
     ): String? = withContext(Dispatchers.IO) {
-        val servers = listOf(
+
+        // === PRIORITY 1: LookMovie2.to (as requested) ===
+        val lookmovieUrl = buildLookMovieUrl(tmdbId, contentType, season, episode)
+        Log.d(TAG, "Trying primary server: $lookmovieUrl")
+
+        try {
+            val request = Request.Builder()
+                .url(lookmovieUrl)
+                .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36")
+                .header("Referer", "https://www.lookmovie2.to")
+                .build()
+
+            val response = client.newCall(request).execute()
+            if (response.isSuccessful) {
+                val html = response.body?.string() ?: ""
+                response.close()
+
+                val directUrl = extractDirectUrl(html, "https://www.lookmovie2.to")
+                if (!directUrl.isNullOrBlank()) {
+                    Log.i(TAG, "✅ LookMovie direct stream found: $directUrl")
+                    return@withContext directUrl
+                }
+            } else {
+                response.close()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "LookMovie primary failed", e)
+        }
+
+        // === FALLBACK: Other reliable servers ===
+        val fallbackServers = listOf(
             "https://vidlink.pro",
             "https://vidsrc.to",
-            "https://vidsrc-embed.ru",
-            "https://vsembed.ru",
-            "https://embed.su"
+            "https://vidsrc-embed.ru"
         )
 
-        for (base in servers) {
+        for (base in fallbackServers) {
             try {
-                val url = when (contentType.lowercase()) {
-                    "tv" -> "$base/tv/$tmdbId/$season/$episode"
-                    else -> "$base/movie/$tmdbId"
+                val url = if (contentType.lowercase() == "tv") {
+                    "$base/tv/$tmdbId/$season/$episode"
+                } else {
+                    "$base/movie/$tmdbId"
                 }
-
-                Log.d(TAG, "Trying server: $url")
 
                 val request = Request.Builder()
                     .url(url)
                     .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36")
-                    .header("Referer", base)
                     .build()
 
                 val response = client.newCall(request).execute()
-                if (!response.isSuccessful) {
+                if (response.isSuccessful) {
+                    val html = response.body?.string() ?: ""
                     response.close()
-                    continue
+
+                    val directUrl = extractDirectUrl(html, base)
+                    if (!directUrl.isNullOrBlank()) {
+                        Log.i(TAG, "✅ Fallback stream found from $base: $directUrl")
+                        return@withContext directUrl
+                    }
+                } else {
+                    response.close()
                 }
-
-                val body = response.body?.string() ?: ""
-                response.close()
-
-                // Try to extract direct video links
-                val directUrl = extractDirectUrl(body, base)
-                if (!directUrl.isNullOrBlank()) {
-                    Log.i(TAG, "✅ Found direct stream: $directUrl")
-                    return@withContext directUrl
-                }
-
             } catch (e: Exception) {
-                Log.w(TAG, "Server failed: $base", e)
+                Log.w(TAG, "Fallback server failed: $base", e)
             }
         }
 
-        Log.w(TAG, "No direct stream found, returning fallback embed")
-        // Return a good embed as last resort
-        val fallbackBase = "https://vidlink.pro"
-        return@withContext when (contentType.lowercase()) {
-            "tv" -> "$fallbackBase/tv/$tmdbId/$season/$episode"
-            else -> "$fallbackBase/movie/$tmdbId"
+        Log.w(TAG, "No direct stream found. Returning LookMovie embed as last resort.")
+        return@withContext lookmovieUrl
+    }
+
+    private fun buildLookMovieUrl(tmdbId: Int, contentType: String, season: Int, episode: Int): String {
+        return if (contentType.lowercase() == "tv") {
+            "https://www.lookmovie2.to/shows/play/$tmdbId/$season/$episode"
+        } else {
+            "https://www.lookmovie2.to/movies/play/$tmdbId"
         }
     }
 
     private fun extractDirectUrl(html: String, base: String): String? {
-        // m3u8 patterns
-        val m3u8Regex = """["']([^"']*\.m3u8[^"']*)["']""".toRegex(RegexOption.IGNORE_CASE)
-        m3u8Regex.find(html)?.let {
-            var url = it.groupValues[1]
-            if (!url.startsWith("http")) url = "$base$url"
-            return url
-        }
+        val patterns = listOf(
+            Pattern.compile("""["']([^"']+\.m3u8[^"']*)["']""", Pattern.CASE_INSENSITIVE),
+            Pattern.compile("""["']([^"']+\.mp4[^"']*)["']""", Pattern.CASE_INSENSITIVE),
+            Pattern.compile("""src=["']([^"']+\.(m3u8|mp4)[^"']*)["']""", Pattern.CASE_INSENSITIVE)
+        )
 
-        // mp4 patterns
-        val mp4Regex = """["']([^"']*\.mp4[^"']*)["']""".toRegex(RegexOption.IGNORE_CASE)
-        mp4Regex.find(html)?.let {
-            var url = it.groupValues[1]
-            if (!url.startsWith("http")) url = "$base$url"
-            return url
-        }
+        for (pattern in patterns) {
+            val matcher = pattern.matcher(html)
+            while (matcher.find()) {
+                var url = matcher.group(1) ?: continue
+                if (url.startsWith("//")) url = "https:$url"
+                if (!url.startsWith("http")) url = "$base$url".replace("//", "/")
 
+                if (url.contains(".m3u8") || url.contains(".mp4")) {
+                    return url
+                }
+            }
+        }
         return null
     }
 }
