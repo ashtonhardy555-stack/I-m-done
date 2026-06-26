@@ -26,8 +26,6 @@ import kotlinx.coroutines.delay
 class PlayerActivity : ComponentActivity() {
 
     companion object {
-        private const val TAG = "PlayerActivity"
-
         fun newIntent(
             context: Context,
             tmdbId: Int,
@@ -51,7 +49,6 @@ class PlayerActivity : ComponentActivity() {
         val contentType = intent.getStringExtra("CONTENT_TYPE") ?: "movie"
         val season = intent.getIntExtra("SEASON", 1)
         val episode = intent.getIntExtra("EPISODE", 1)
-        val title = intent.getStringExtra("TITLE") ?: "Playing"
 
         if (tmdbId == -1) {
             finish()
@@ -60,7 +57,7 @@ class PlayerActivity : ComponentActivity() {
 
         setContent {
             MarioCartTheme {
-                PlayerScreen(tmdbId, contentType, season, episode, title)
+                PlayerScreen(tmdbId, contentType, season, episode)
             }
         }
     }
@@ -72,8 +69,7 @@ fun PlayerScreen(
     tmdbId: Int,
     contentType: String,
     season: Int,
-    episode: Int,
-    title: String
+    episode: Int
 ) {
     val context = LocalContext.current
     var streamUrl by remember { mutableStateOf<String?>(null) }
@@ -87,45 +83,38 @@ fun PlayerScreen(
         error = null
 
         try {
-            Log.d("Player", "Extracting stream for TMDB $tmdbId ($contentType)")
+            Log.d("Player", "Trying to extract stream for $tmdbId")
             val url = StreamExtractor.extract(tmdbId, contentType, season, episode)
-
             if (!url.isNullOrBlank()) {
                 streamUrl = url
-                Log.i("Player", "✅ Stream URL ready")
+                Log.i("Player", "✅ Stream loaded")
             } else {
-                throw Exception("No stream URL returned from extractor")
+                throw Exception("No URL returned")
             }
         } catch (e: Exception) {
-            Log.e("Player", "Extraction failed (attempt ${retryCount + 1})", e)
+            Log.e("Player", "Extraction failed", e)
             if (retryCount < maxRetries) {
                 retryCount++
                 delay(1500)
             } else {
-                error = "Failed to load video stream. Try a different title."
+                error = "Failed to load video. Try another title."
             }
         } finally {
             isLoading = false
         }
     }
 
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
-    ) {
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         when {
             isLoading -> {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     CircularProgressIndicator()
                     Spacer(Modifier.height(16.dp))
-                    Text("Loading stream from servers...", color = MaterialTheme.colorScheme.onBackground)
+                    Text("Loading stream...", color = MaterialTheme.colorScheme.onBackground)
                 }
             }
             error != null -> {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.padding(24.dp)
-                ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
                     Text("⚠️ $error", color = MaterialTheme.colorScheme.error)
                     Spacer(Modifier.height(16.dp))
                     Button(onClick = { (context as? ComponentActivity)?.finish() }) {
