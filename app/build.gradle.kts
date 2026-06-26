@@ -1,7 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
-    id("com.chaquo.python") version "15.0.1" apply false
+    id("com.chaquo.python") version "15.0.1"
 }
 
 android {
@@ -17,6 +17,14 @@ android {
 
         ndk {
             abiFilters += listOf("armeabi-v7a", "arm64-v8a")
+        }
+
+        // Chaquopy config inside defaultConfig (this is the most reliable way)
+        python {
+            version = "3.11"
+            pip {
+                install("requests")
+            }
         }
     }
 
@@ -48,14 +56,6 @@ android {
     }
 }
 
-// Chaquopy configuration (must be at root level, outside android {})
-python {
-    version = "3.11"
-    pip {
-        install("requests")
-    }
-}
-
 dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.4")
@@ -66,16 +66,13 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
 
-    // Media3 ExoPlayer
     implementation("androidx.media3:media3-exoplayer:1.4.1")
     implementation("androidx.media3:media3-ui:1.4.1")
 
-    // Retrofit + Gson
     implementation("com.squareup.retrofit2:retrofit:2.11.0")
     implementation("com.squareup.retrofit2:converter-gson:2.11.0")
     implementation("com.google.code.gson:gson:2.11.0")
 
-    // Coil
     implementation("io.coil-kt:coil-compose:2.7.0")
 
     testImplementation("junit:junit:4.13.2")
