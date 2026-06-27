@@ -34,9 +34,7 @@ android {
     }
 
     composeOptions {
-        kotlinCompilerExtensionVersion '1.5.14'
-        // Suppress version mismatch (this is the correct Groovy syntax)
-        suppressKotlinVersionCompatibilityCheck = true
+        kotlinCompilerExtensionVersion '1.5.8'
     }
 
     compileOptions {
