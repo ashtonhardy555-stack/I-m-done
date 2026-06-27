@@ -18,8 +18,10 @@ android {
         applicationId "com.ashtonhardy.imdone"
         minSdk 21
         targetSdk 34
-        versionCode 260
-        versionName "1.1.1"
+        versionCode 261
+        versionName "1.1.2"
+
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
@@ -37,15 +39,10 @@ android {
 dependencies {
     implementation 'androidx.core:core-ktx:1.13.1'
     implementation 'androidx.appcompat:appcompat:1.7.0'
-
-    // Force consistent Kotlin version to fix duplicates
-    implementation 'org.jetbrains.kotlin:kotlin-stdlib:1.9.24'
-    implementation 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.24'
 }
 
 configurations {
     all {
         exclude group: 'org.jetbrains.kotlin', module: 'kotlin-stdlib-jdk7'
-        exclude group: 'org.jetbrains.kotlin', module: 'kotlin-stdlib-jdk8'
     }
 }
