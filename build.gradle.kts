@@ -7,6 +7,6 @@ allprojects {
     repositories {
         google()
         mavenCentral()
-        maven { url 'https://chaquo.com/maven' }   // ← Add this line
+        maven { url = uri("https://chaquo.com/maven") }
     }
 }
