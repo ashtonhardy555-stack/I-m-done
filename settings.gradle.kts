@@ -15,5 +15,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "MarioCart"
+rootProject.name = "I-m-done"
 include(":app")
