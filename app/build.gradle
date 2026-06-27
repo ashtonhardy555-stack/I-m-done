@@ -34,7 +34,7 @@ android {
     }
 
     composeOptions {
-        kotlinCompilerExtensionVersion '1.5.14'   // ← Updated to match Kotlin 1.9.23
+        kotlinCompilerExtensionVersion '1.5.14'
     }
 
     compileOptions {
@@ -77,4 +77,8 @@ dependencies {
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
     implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.7.0'
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+
+    // Chaquopy (Python support)
+    implementation 'com.chaquo.python:chaquopy:15.0.1'
+    implementation 'com.chaquo.python:chaquopy-runtime:15.0.1'
 }
