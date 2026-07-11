@@ -1,78 +1,45 @@
-plugins {
-    alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
-    alias(libs.plugins.chaquopy)
-}
-
 android {
-    namespace = "com.mariocart.app"
-    compileSdk = 34
+    namespace 'com.mariocart.app'
+    compileSdk 34
 
     defaultConfig {
-        applicationId = "com.mariocart.app"
-        minSdk = 24
-        targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        applicationId "com.mariocart.app"
+        minSdk 21
+        targetSdk 34
+        versionCode 260
+        versionName "1.1.1"
 
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        vectorDrawables {
-            useSupportLibrary = true
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+
+        // ✅ FIXED: Chaquopy requires this
+        ndk {
+            abiFilters "armeabi-v7a", "arm64-v8a"
         }
     }
 
-    buildFeatures {
-        compose = true
-    }
-
-    composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.1"
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
     }
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
     }
 
     kotlinOptions {
-        jvmTarget = "17"
+        jvmTarget = '17'
+    }
+
+    buildFeatures {
+        buildConfig true
     }
 
     packagingOptions {
-        exclude "META-INF/proguard/androidx-*.pro"
+        resources {
+            excludes += '/META-INF/{AL2.0,LGPL2.1}'
+        }
     }
-}
-
-dependencies {
-    implementation(libs.androidx.core.ktx)
-    implementation(libs.androidx.appcompat)
-    
-    // Compose
-    implementation(platform(libs.compose.bom))
-    implementation(libs.compose.ui)
-    implementation(libs.compose.material3)
-    implementation(libs.androidx.activity.compose)
-    
-    // ExoPlayer for video playback (no WebView)
-    implementation("androidx.media3:media3-exoplayer:1.1.1")
-    implementation("androidx.media3:media3-ui:1.1.1")
-    implementation("androidx.media3:media3-common:1.1.1")
-    
-    // Networking
-    implementation("com.squareup.okhttp3:okhttp:4.11.0")
-    
-    // JSON parsing
-    implementation("org.json:json:20230227")
-    
-    // Python integration (for scraping)
-    // implementation("com.chaquo.python:python:15.0.1") // Handled by plugin
-    
-    // Coroutines
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
-    
-    // Testing
-    testImplementation("junit:junit:4.13.2")
-    androidTestImplementation("androidx.test.ext:junit:1.1.5")
-    androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
 }
