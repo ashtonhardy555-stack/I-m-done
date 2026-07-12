@@ -11,9 +11,8 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        maven { url = uri("https://chaquo.com/maven") }
     }
 }
 
-rootProject.name = "I-m-done"
+rootProject.name = "MarioCart"
 include(":app")
