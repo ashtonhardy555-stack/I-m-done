@@ -59,19 +59,29 @@ data class StreamingServer(
     val baseUrl: String
 ) {
     fun movieUrl(tmdbId: Int): String {
-        // Updated for 2026: Use consistent path structure verified in testing
         return when {
-            baseUrl.contains("vidlink.pro") -> "$baseUrl/movie/$tmdbId"
+            // LookMovie uses an /embed/movie/{id} path (mirrors the lookmovietomb
+            // Kodi plugin approach) — the direct stream is fetched via the
+            // dedicated LookMovieStreamResolver security-API flow.
+            baseUrl.contains("lookmovie") -> "$baseUrl/movie/$tmdbId"
+            // VidLink / Videasy use a clean {base}/movie/{id} REST path.
+            baseUrl.contains("vidlink.pro") ||
+                baseUrl.contains("videasy.net") -> "$baseUrl/movie/$tmdbId"
             baseUrl.contains("frembed") -> "$baseUrl$tmdbId"
             else -> "$baseUrl/movie/$tmdbId"
         }
     }
 
     fun tvUrl(tmdbId: Int, season: Int, episode: Int): String {
-        // Updated for 2026: Use consistent path structure verified in testing
         return when {
-            baseUrl.contains("vidlink.pro") -> "$baseUrl/tv/$tmdbId/$season/$episode"
+            baseUrl.contains("lookmovie") -> "$baseUrl/show/$tmdbId/season-$season/episode-$episode"
+            baseUrl.contains("vidlink.pro") ||
+                baseUrl.contains("videasy.net") -> "$baseUrl/tv/$tmdbId/$season/$episode"
             else -> "$baseUrl/tv/$tmdbId/$season/$episode"
         }
     }
+
+    /** True when this server is LookMovie — used to trigger the direct
+     *  LookMovieStreamResolver path in the player (no WebView needed). */
+    val isLookMovie: Boolean get() = baseUrl.contains("lookmovie")
 }

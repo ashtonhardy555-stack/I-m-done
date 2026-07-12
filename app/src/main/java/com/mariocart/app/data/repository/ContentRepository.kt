@@ -18,8 +18,13 @@ class ContentRepository {
 
     val streamingServers: List<StreamingServer> = listOf(
 
+        // Tier 0: LookMovie — resolved to a DIRECT stream via the lookmovietomb
+        // security-API flow (LookMovieStreamResolver), so no embed WebView is
+        // needed.  Fastest possible start-to-play and no ad overlays.
+        StreamingServer("LookMovie",        "https://lookmovie2.to/embed"),
+
         // Tier 1: Direct REST JSON API — fastest, zero ads, always works
-        StreamingServer("VidLink",          "https://vidlink.pro/movie/786892"),
+        StreamingServer("VidLink",          "https://vidlink.pro"),
         StreamingServer("Videasy",          "https://player.videasy.net"),
         StreamingServer("AutoEmbed",        "https://autoembed.cc/embed"),
         StreamingServer("AutoEmbed.co",     "https://autoembed.co/embed"),

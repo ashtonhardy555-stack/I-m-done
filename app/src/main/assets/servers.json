@@ -1,4 +1,5 @@
 [
+  { "name": "LookMovie (Direct via lookmovietomb)",  "baseUrl": "https://lookmovie2.to/embed" },
   { "name": "VidLink (Clean & Fast)",     "baseUrl": "https://vidlink.pro" },
   { "name": "VidSrc.to (Clean Mirror)",   "baseUrl": "https://vidsrc.to/embed" },
   { "name": "VidSrc (Verified Mirror)",   "baseUrl": "https://vidsrc-embed.ru/embed" },
