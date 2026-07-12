@@ -11,7 +11,11 @@ android {
         applicationId = "com.mariocart.app"
         minSdk = 21
         targetSdk = 34
-        versionCode = 3
+        // versionCode is the CI run number (CI_BUILD_NUMBER env var) when
+        // building in GitHub Actions, so it matches the `-buildNNN` suffix on
+        // release tags and the in-app updater can compare builds correctly.
+        // For local builds it falls back to a small fixed number.
+        versionCode = (System.getenv("CI_BUILD_NUMBER") ?: "3").toIntOrNull() ?: 3
         versionName = "1.1.1"
 
         buildConfigField("String", "TMDB_API_KEY", "\"a15c24c2a5c00487b179f5d4b53b72b0\"")

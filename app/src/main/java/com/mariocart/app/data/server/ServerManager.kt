@@ -75,13 +75,14 @@ object ServerManager {
         } catch (e: Exception) {
             Log.e(TAG, "Failed to load $SERVERS_ASSET, using fallback: ${e.message}")
             servers = listOf(
-                StreamingServer("VidSrc.me (Mirror)", "https://www.lookmovie2.to/embed"),
-                StreamingServer("VidSrc.su (Mirror)", "https://vsrc.su/embed"),
-                StreamingServer("VidSrc2.to",         "https://vidsrc2.to/embed"),
-                StreamingServer("VidLink.pro",         "https://vidlink.pro/embed"),
-                StreamingServer("SmashyStream",        "https://smashystream.xyz/embed"),
-                StreamingServer("AutoEmbed",           "https://autoembed.cc/embed"),
-                StreamingServer("Embed.su",            "https://embed.su/embed")
+                StreamingServer("VidLink",     "https://vidlink.pro"),
+                StreamingServer("VidSrc.su",   "https://vidsrc.su"),
+                StreamingServer("2Embed.cc",   "https://www.2embed.cc"),
+                StreamingServer("2Embed.skin", "https://www.2embed.skin"),
+                StreamingServer("VidSrc.to",   "https://vidsrc.to"),
+                StreamingServer("Videasy",     "https://player.videasy.to"),
+                StreamingServer("VidSrc.in",   "https://vidsrc.in"),
+                StreamingServer("VidSrc.fyi",  "https://vidsrc.fyi")
             )
         }
     }

@@ -75,6 +75,11 @@ private fun AppRoot() {
     var selectedTv by remember { mutableStateOf<TmdbItem?>(null) }
     var searchGenre by remember { mutableStateOf<String?>(null) }
 
+
+    // Check for an update on launch (silent unless one is available)
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        com.mariocart.app.ui.AutoUpdater.checkAndPrompt(context)
+    }
     // ── Navigation helpers ──────────────────────────────────────────── //
     fun launchMovie(item: TmdbItem) {
         val intent = PlayerActivity.newIntent(

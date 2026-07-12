@@ -16,64 +16,28 @@ class ContentRepository {
     private val api = ApiClient.tmdbApi
     private val key = BuildConfig.TMDB_API_KEY
 
+    /**
+     * The verified, alive streaming servers. Mirrors the providers in
+     * [com.mariocart.app.data.server.StreamProviders.ALL] and the
+     * servers.json asset. Ordered clean-first (no-challenge providers
+     * before Cloudflare-protected ones).
+     *
+     * NOTE: The actual playback path uses [StreamProviders.ALL] via
+     * [com.mariocart.app.data.server.EmbedExtractor]; this list is kept
+     * in sync for any UI that wants to display/inspect the server roster.
+     */
     val streamingServers: List<StreamingServer> = listOf(
-
-        // Tier 1: Direct REST JSON API — fastest, zero ads, always works
-        StreamingServer("VidLink",          "https://vidlink.pro/movie/786892"),
-        StreamingServer("Videasy",          "https://player.videasy.net"),
-        StreamingServer("AutoEmbed",        "https://autoembed.cc/embed"),
-        StreamingServer("AutoEmbed.co",     "https://autoembed.co/embed"),
-        StreamingServer("VidBinge",         "https://vidbinge.dev/embed"),
-        StreamingServer("MoviesAPI",        "https://moviesapi.club/embed"),
-
-        // Tier 2: VidSrc family — all mirrors share same AJAX extractor
-        StreamingServer("VidSrc.me",        "https://vidsrc.me/embed"),
-        StreamingServer("VidSrc.io",        "https://vidsrc.io/embed"),
-        StreamingServer("VidSrc.pm",        "https://vidsrc.pm/embed"),
-        StreamingServer("VidSrc.to",        "https://vidsrc.to/embed"),
-        StreamingServer("VidSrc.xyz",       "https://vidsrc.xyz/embed"),
-        StreamingServer("VidSrc.dev",       "https://vidsrc.dev/embed"),
-        StreamingServer("VidSrc.in",        "https://vidsrc.in/embed"),
-        StreamingServer("VidSrc.nl",        "https://vidsrc.nl/embed"),
-        StreamingServer("VidSrc.su",        "https://vidsrc.su/embed"),
-        StreamingServer("VidSrc.lol",       "https://vidsrc.lol/embed"),
-        StreamingServer("VidSrc2",          "https://vidsrc2.to/embed"),
-
-        // Tier 3: Generic API probe + HTML scrape fallback
-        StreamingServer("Embed.su",         "https://embed.su/embed"),
-        StreamingServer("2Embed.cc",        "https://www.2embed.cc/embed"),
-        StreamingServer("2Embed.skin",      "https://www.2embed.skin/embed"),
-        StreamingServer("2Embed.org",       "https://2embed.org/embed"),
-        StreamingServer("EmbedStream",      "https://embedstream.me/embed"),
-        StreamingServer("SuperEmbed",       "https://superembed.stream/embed"),
-        StreamingServer("RiveStream",       "https://rivestream.live/embed"),
-        StreamingServer("Embedrise",        "https://embedrise.com/embed"),
-        StreamingServer("VidHub",           "https://vidhub.vip/embed"),
-        StreamingServer("PlayEmbed",        "https://playembed.online/embed"),
-        StreamingServer("CineHub",          "https://cinehub.pro/embed"),
-        StreamingServer("EmbedMe",          "https://embedme.top/embed"),
-        StreamingServer("FlixEmbed",        "https://flixembed.net/embed"),
-        StreamingServer("VidCloud",         "https://vidcloud.co/embed"),
-        StreamingServer("MultiEmbed",       "https://multiembed.mov/embed"),
-        StreamingServer("EmbedSito",        "https://embedsito.com/embed"),
-        StreamingServer("SmashyStream",     "https://smashystream.com/embed"),
-        StreamingServer("Flicky",           "https://flicky.host/embed"),
-        StreamingServer("NontonGo",         "https://www.nontongo.win/embed"),
-        StreamingServer("Embedder",         "https://embedder.net/e"),
-        StreamingServer("EmbedHub",         "https://embedhub.xyz/embed"),
-        StreamingServer("VidBinge.me",      "https://vidbinge.me/embed"),
-        StreamingServer("StreamWish",       "https://streamwish.to/embed"),
-        StreamingServer("FileMoon",         "https://filemoon.sx/embed"),
-        StreamingServer("Warezcdn",         "https://embed.warezcdn.net/filme"),
-        StreamingServer("Frembed",          "https://frembed.live/api/film.php?id="),
-        StreamingServer("EmbedRapo",        "https://embedrapo.com/embed"),
-        StreamingServer("NetStream",        "https://netstream.me/embed"),
-        StreamingServer("StreamM4u",        "https://streamm4u.app/embed"),
-        StreamingServer("CineWorld",        "https://cineworld.cc/embed"),
-        StreamingServer("MovEmbed",         "https://movembed.cc/embed"),
-        StreamingServer("Player.vip",       "https://player.vip/embed"),
-        StreamingServer("NovaCinema",       "https://novacinema.app/embed"),
-        StreamingServer("CineHD",           "https://cinehd.xyz/embed"),
+        // Tier 1 — clean, no challenge
+        StreamingServer("VidLink",          "https://vidlink.pro"),
+        StreamingServer("VidSrc.su",        "https://vidsrc.su"),
+        // Tier 2 — working, iframe chains / CF auto-solve
+        StreamingServer("2Embed.cc",        "https://www.2embed.cc"),
+        StreamingServer("2Embed.skin",      "https://www.2embed.skin"),
+        StreamingServer("VidSrc.to",        "https://vidsrc.to"),
+        // Tier 3 — Cloudflare, user captcha fallback
+        StreamingServer("Videasy",          "https://player.videasy.to"),
+        StreamingServer("VidSrc.in",        "https://vidsrc.in"),
+        StreamingServer("VidSrc.fyi",       "https://vidsrc.fyi")
     )
 
     // ── TMDB Content ───────────────────────────────────────────────────────────
