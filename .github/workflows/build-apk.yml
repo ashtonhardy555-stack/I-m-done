@@ -43,7 +43,7 @@ jobs:
       - name: Get version info
         id: version
         run: |
-          VERSION=$(grep 'versionName' app/build.gradle | sed 's/[^"]*"\([^"]*\)".*/\1/')
+          VERSION=$(grep 'versionName' app/build.gradle.kts | sed 's/[^"]*"\([^"]*\)".*/\1/')
           echo "tag=v${VERSION}-build${{ github.run_number }}" >> $GITHUB_OUTPUT
           echo "name=v${VERSION} (build ${{ github.run_number }})" >> $GITHUB_OUTPUT
 

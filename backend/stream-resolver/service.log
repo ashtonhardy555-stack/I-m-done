@@ -1,0 +1,23 @@
+nohup: ignoring input
+INFO:     Started server process [2643]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     10.228.26.1:34972 - "HEAD /api/servers?tmdb_id=550&content_type=movie HTTP/1.1" 405 Method Not Allowed
+INFO:     10.228.26.1:34976 - "HEAD /api/stream?server=vidlink&tmdb_id=550&content_type=movie HTTP/1.1" 405 Method Not Allowed
+INFO:     10.228.26.1:34984 - "HEAD /health HTTP/1.1" 405 Method Not Allowed
+INFO:     10.228.26.1:34996 - "GET /api/servers?tmdb_id=550&content_type=movie HTTP/1.1" 200 OK
+INFO:     10.228.26.1:35008 - "GET /health HTTP/1.1" 200 OK
+INFO:httpx:HTTP Request: GET https://vidlink.pro/movie/550 "HTTP/1.1 200 OK"
+INFO:     10.228.26.1:34992 - "GET /api/stream?server=vidlink&tmdb_id=550&content_type=movie HTTP/1.1" 200 OK
+INFO:     10.228.26.1:51150 - "GET /health HTTP/1.1" 200 OK
+INFO:     10.228.26.1:51162 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:     10.228.26.1:51164 - "GET /api/servers?tmdb_id=550&content_type=movie HTTP/1.1" 200 OK
+INFO:     10.228.26.1:51178 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:     10.228.26.1:51182 - "GET /api/servers?tmdb_id=550&content_type=movie HTTP/1.1" 200 OK
+INFO:     10.228.26.1:51186 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:httpx:HTTP Request: GET https://vidlink.pro/movie/550 "HTTP/1.1 200 OK"
+INFO:     10.228.26.1:51194 - "GET /api/stream?server=vidlink&tmdb_id=550&content_type=movie HTTP/1.1" 200 OK
+INFO:     10.228.26.1:47292 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:httpx:HTTP Request: GET https://vidlink.pro/movie/550 "HTTP/1.1 200 OK"
+INFO:     10.228.26.1:41410 - "GET /api/stream?server=vidlink&tmdb_id=550&content_type=movie HTTP/1.1" 200 OK
