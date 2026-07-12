@@ -18,7 +18,10 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.DataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import com.mariocart.app.data.server.StreamExtractor
 import com.mariocart.app.ui.theme.MarioCartTheme
@@ -34,13 +37,15 @@ class PlayerActivity : ComponentActivity() {
             contentType: String = "movie",
             season: Int = 1,
             episode: Int = 1,
-            title: String = "Now Playing"
+            title: String = "Now Playing",
+            year: String? = null
         ): Intent = Intent(context, PlayerActivity::class.java).apply {
             putExtra("TMDB_ID", tmdbId)
             putExtra("CONTENT_TYPE", contentType)
             putExtra("SEASON", season)
             putExtra("EPISODE", episode)
             putExtra("TITLE", title)
+            putExtra("YEAR", year)
         }
     }
 
@@ -51,6 +56,8 @@ class PlayerActivity : ComponentActivity() {
         val contentType = intent.getStringExtra("CONTENT_TYPE") ?: "movie"
         val season = intent.getIntExtra("SEASON", 1)
         val episode = intent.getIntExtra("EPISODE", 1)
+        val title = intent.getStringExtra("TITLE") ?: "Now Playing"
+        val year = intent.getStringExtra("YEAR")
 
         if (tmdbId == -1) {
             Log.e("PlayerActivity", "Invalid TMDB ID")
@@ -60,7 +67,7 @@ class PlayerActivity : ComponentActivity() {
 
         setContent {
             MarioCartTheme {
-                PlayerScreen(tmdbId, contentType, season, episode)
+                PlayerScreen(tmdbId, contentType, season, episode, title, year)
             }
         }
     }
@@ -72,7 +79,9 @@ fun PlayerScreen(
     tmdbId: Int,
     contentType: String,
     season: Int,
-    episode: Int
+    episode: Int,
+    title: String = "Now Playing",
+    year: String? = null
 ) {
     val localContext = LocalContext.current
     var streamUrl by remember { mutableStateOf<String?>(null) }
@@ -86,8 +95,10 @@ fun PlayerScreen(
         error = null
 
         try {
-            Log.d("Player", "🔍 Starting extraction for TMDB $tmdbId ($contentType S$season E$episode)")
-            val url = StreamExtractor.extract(tmdbId, contentType, season, episode)
+            Log.d("Player", "🔎 Starting extraction for \"$title\" ($year) $contentType S$season E$episode")
+            // LookMovie (matching the Kodi addon) is searched by title/year,
+            // not TMDB id, so we pass the title through to the extractor.
+            val url = StreamExtractor.extract(title, year, contentType, season, episode)
             if (!url.isNullOrBlank() && (url.contains(".m3u8") || url.contains(".mp4"))) {
                 streamUrl = url
                 Log.i("Player", "✅ Direct playable URL: $url")
@@ -130,20 +141,42 @@ fun PlayerScreen(
 
                 AndroidView(
                     factory = { ctx ->
-                        val exoPlayer = ExoPlayer.Builder(ctx).build().apply {
-                            addListener(object : Player.Listener {
-                                override fun onPlaybackStateChanged(state: Int) {
-                                    Log.d("ExoPlayer", "State: $state")
-                                }
+                        // LookMovie HLS manifests require a Referer + User-Agent,
+                        // otherwise the playlist/segments are rejected. Build a
+                        // DataSource factory that injects them, matching the
+                        // Kodi addon's proxy behaviour.
+                        val userAgent =
+                            "Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0"
+                        val httpFactory = DefaultHttpDataSource.Factory()
+                            .setUserAgent(userAgent)
+                            .setAllowCrossProtocolRedirects(true)
+                            .setDefaultRequestProperties(
+                                mapOf(
+                                    "Referer" to "https://www.lookmovie2.to/",
+                                    "User-Agent" to userAgent
+                                )
+                            )
 
-                                override fun onPlayerError(error: PlaybackException) {
-                                    Log.e("ExoPlayer", "Error: ${error.errorCodeName} - ${error.message}")
-                                }
-                            })
-                            setMediaItem(MediaItem.fromUri(streamUrl!!))
-                            prepare()
-                            playWhenReady = true
-                        }
+                        val dataSourceFactory: DataSource.Factory = httpFactory
+
+                        val exoPlayer = ExoPlayer.Builder(ctx)
+                            .setMediaSourceFactory(
+                                DefaultMediaSourceFactory(ctx).setDataSourceFactory(dataSourceFactory)
+                            )
+                            .build().apply {
+                                addListener(object : Player.Listener {
+                                    override fun onPlaybackStateChanged(state: Int) {
+                                        Log.d("ExoPlayer", "State: $state")
+                                    }
+
+                                    override fun onPlayerError(error: PlaybackException) {
+                                        Log.e("ExoPlayer", "Error: ${error.errorCodeName} - ${error.message}")
+                                    }
+                                })
+                                setMediaItem(MediaItem.fromUri(streamUrl!!))
+                                prepare()
+                                playWhenReady = true
+                            }
                         player = exoPlayer
 
                         PlayerView(ctx).apply {

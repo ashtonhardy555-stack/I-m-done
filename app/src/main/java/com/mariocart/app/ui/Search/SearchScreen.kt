@@ -33,6 +33,18 @@ fun SearchScreen(
     val results by viewModel.results.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
 
+    // When opened from a Home-screen "Quick Browse" chip, preload the
+    // discover feed for that genre (or trending for the "Trending" chip)
+    // until the user types their own query.
+    LaunchedEffect(initialGenre) {
+        // initialGenre is null only when the user opens search via the top
+        // search icon (no genre preset). Any non-null value — including the
+        // empty string used for "Trending" — should preload results.
+        if (initialGenre != null) {
+            viewModel.setInitialGenre(initialGenre)
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()

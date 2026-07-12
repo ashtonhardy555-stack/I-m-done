@@ -25,8 +25,42 @@ class SearchViewModel : ViewModel() {
 
     private var searchJob: Job? = null
 
+    // When a genre is preset (from the Home "Quick Browse" chips) the screen
+    // shows a discover feed for that genre until the user types a real query.
+    private var presetGenre: String? = null
+
+    /**
+     * Preload the screen with a genre browse instead of an empty search box.
+     * @param genreId TMDB genre id, or null/empty for trending.
+     */
+    fun setInitialGenre(genreId: String?) {
+        presetGenre = genreId?.takeIf { it.isNotBlank() }
+        searchJob?.cancel()
+        searchJob = viewModelScope.launch {
+            _isLoading.value = true
+            try {
+                if (presetGenre == null) {
+                    // No genre (the "Trending" chip) — show trending content.
+                    _results.value = repo.discover(type = "movie", genreId = null)
+                } else {
+                    // Determine whether it's a movie or TV genre id.
+                    val tvGenreIds = setOf("10759", "16", "35")
+                    val type = if (tvGenreIds.contains(presetGenre)) "tv" else "movie"
+                    _results.value = repo.discover(type = type, genreId = presetGenre)
+                }
+            } catch (e: Exception) {
+                _results.value = emptyList()
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+
     fun updateQuery(newQuery: String) {
         _query.value = newQuery
+        // Once the user starts typing, drop the genre preset.
+        if (newQuery.isNotBlank()) presetGenre = null
+
         if (newQuery.length < 2) {
             _results.value = emptyList()
             return

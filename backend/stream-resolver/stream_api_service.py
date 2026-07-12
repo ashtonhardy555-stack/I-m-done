@@ -149,14 +149,22 @@ async def get_stream(
     tmdbId: int,
     type: str = "movie",
     season: Optional[int] = 1,
-    episode: Optional[int] = 1
+    episode: Optional[int] = 1,
+    title: Optional[str] = None,
+    year: Optional[str] = None
 ):
     """
     Auto-detect working servers by probing them in parallel, 
     bypassing ads and redirects using the advanced resolver.
+
+    LookMovie (the advanced resolver) searches by title, not TMDB id, so the
+    title/year query params are forwarded to the resolver to match the
+    LookMovie Kodi addon behaviour exactly.
     """
     # 1. Try advanced resolver first for a clean experience
-    clean_result = await resolver.get_clean_stream(tmdbId, type, season or 1, episode or 1)
+    clean_result = await resolver.get_clean_stream(
+        tmdbId, type, season or 1, episode or 1, title=title, year=year
+    )
     if clean_result:
         logger.info(f"Clean stream detected via {clean_result['serverId']}")
         return {
