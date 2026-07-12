@@ -1,7 +1,7 @@
 plugins {
     id 'com.android.application'
     id 'org.jetbrains.kotlin.android'
-    id 'com.chaquo.python'
+    // id 'com.chaquo.python'  // Temporarily disabled to isolate build failure
     id 'org.jetbrains.kotlin.plugin.compose'
 }
 
@@ -57,14 +57,7 @@ android {
     }
 }
 
-chaquopy {
-    defaultConfig {
-        version = "3.11"
-        pip {
-            // No heavy deps, but ensure python stdlib
-        }
-    }
-}
+// chaquopy block removed for now
 
 dependencies {
     // AndroidX Core
