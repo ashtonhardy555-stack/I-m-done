@@ -34,18 +34,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
 
-      - name: Install Python & deps for Chaquopy
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y python3 python3-pip python3-venv
-          python3 --version
-          pip3 --version
+      - name: Install Python (for future Chaquopy)
+        run: sudo apt-get update && sudo apt-get install -y python3 python3-pip
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
-
-      - name: Debug Gradle setup
-        run: ./gradlew tasks --stacktrace || echo "Gradle tasks failed - continuing for details"
 
       - name: Build debug APK
         run: ./gradlew assembleDebug --stacktrace
@@ -63,7 +56,7 @@ jobs:
           tag_name: ${{ steps.version.outputs.tag }}
           name: ${{ steps.version.outputs.name }}
           body: |
-            Debug APK built automatically from the latest commit.
+            Debug APK built automatically from the latest commit (Chaquopy temporarily disabled for stability).
             Download the APK below and sideload it on your Android device.
             Enable "Install from unknown sources" in settings if prompted.
           files: app/build/outputs/apk/debug/app-debug.apk
