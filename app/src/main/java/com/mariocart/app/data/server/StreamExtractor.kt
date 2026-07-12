@@ -233,15 +233,29 @@ object StreamExtractor {
         val html = runCatching { client.newCall(req).execute().use { it.body?.string() } }
             .getOrNull() ?: return null
 
-        // The addon parses <div class="movie-item…"> blocks.
-        // Each contains an <a href="/movies/view/123"> (or /shows/view/) and a year.
-        val itemRegex = Regex("""<div\s+class="movie-item[^>]*>([\s\S]*?)(?=<div\s+class="movie-item|</div>\s*$)""")
+        // The addon finds all <div class="movie-item positions and slices the HTML
+        // between them. Each slice contains an <a href="/movies/view/123"> and a year.
+        // We replicate that approach because a single-regex with a lookahead fails on
+        // the last (or only) result when there is no following movie-item div.
+        val marker = "<div class=\"movie-item"
+        val positions = ArrayList<Int>()
+        var searchFrom = 0
+        while (true) {
+            val idx = html.indexOf(marker, searchFrom)
+            if (idx < 0) break
+            positions.add(idx)
+            searchFrom = idx + 1
+        }
+        if (positions.isEmpty()) return null
+        positions.add(html.length) // sentinel for slicing the last block
+
         val hrefRegex = Regex("""href="(/(?:movies|shows)/view/(\d+))"""")
-        val yearRegex = Regex("""year">(\d{4})<""")
+        val yearRegex = Regex("""year">(\d{4})<"""")
 
         var bestId: Int? = null
-        for (match in itemRegex.findAll(html)) {
-            val block = match.value
+        for (i in positions.indices) {
+            if (i == positions.size - 1) break // skip sentinel
+            val block = html.substring(positions[i], positions[i + 1])
             val href = hrefRegex.find(block) ?: continue
             val id = href.groupValues[2].toIntOrNull() ?: continue
 
