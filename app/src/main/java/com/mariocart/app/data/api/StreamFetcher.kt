@@ -1,2 +1,9 @@
-// Updated to use LookMovieScraper
-// (full content would be here in real push)
+package com.mariocart.app.data.api
+
+class StreamFetcher {
+    fun getStreams(query: String): List<String> {
+        // Delegate to LookMovieScraper
+        val scraper = LookMovieScraper()
+        return scraper.search(query)
+    }
+}
