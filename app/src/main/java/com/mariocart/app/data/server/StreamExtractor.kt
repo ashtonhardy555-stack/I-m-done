@@ -8,7 +8,6 @@ import okhttp3.CookieJar
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import okhttp3.toHttpUrl
 import org.json.JSONObject
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
@@ -200,7 +199,9 @@ object StreamExtractor {
         if (cookies.isEmpty()) return
 
         for (base in LOOKMOVIE_BASES) {
-            val url = base.toHttpUrl()
+            val uri = java.net.URI(base)
+            val host = uri.host ?: continue
+            val url = HttpUrl.Builder().scheme("https").host(host).build()
             // Rebuild each cookie with the correct domain for this host.
             val domainCookies = cookies.map { c ->
                 Cookie.Builder()
@@ -368,9 +369,23 @@ object StreamExtractor {
         base: String, apiUrl: String, params: Map<String, String>, referer: String
     ): String? {
         val fullUrl = run {
-            val b = apiUrl.toHttpUrl().newBuilder()
-            params.forEach { (k, v) -> b.addQueryParameter(k, v) }
-            b.build()
+            val parsed = java.net.URI(apiUrl)
+            val builder = HttpUrl.Builder()
+                .scheme(if (parsed.scheme == "http") "http" else "https")
+                .host(parsed.host ?: return null)
+            val port = parsed.port
+            if (port > 0) builder.port(port)
+            if (!parsed.path.isNullOrBlank()) builder.addPathSegments(parsed.path.trimStart('/'))
+            val query = parsed.rawQuery
+            if (!query.isNullOrBlank()) {
+                for (pair in query.split('&')) {
+                    val eq = pair.indexOf('=')
+                    if (eq > 0) builder.addQueryParameter(pair.substring(0, eq), pair.substring(eq + 1))
+                    else builder.addQueryParameter(pair, "")
+                }
+            }
+            params.forEach { (k, v) -> builder.addQueryParameter(k, v) }
+            builder.build()
         }
 
         val req = Request.Builder()
