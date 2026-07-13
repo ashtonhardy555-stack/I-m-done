@@ -87,7 +87,9 @@ private fun AppRoot() {
             tmdbId = item.id,
             contentType = "movie",
             title = item.displayTitle,
-            year = item.year
+            year = item.year,
+            posterUrl = item.posterUrl,
+            backdropUrl = item.backdropUrl
         )
         context.startActivity(intent)
     }
@@ -100,7 +102,9 @@ private fun AppRoot() {
             season = season,
             episode = episode,
             title = item.displayTitle,
-            year = item.year
+            year = item.year,
+            posterUrl = item.posterUrl,
+            backdropUrl = item.backdropUrl
         )
         context.startActivity(intent)
     }
