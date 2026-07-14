@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
@@ -38,8 +39,10 @@ import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import com.mariocart.app.data.server.EmbedExtractor
 import com.mariocart.app.data.server.LookMovieWebExtractor
+import com.mariocart.app.data.server.ServerConfig
 import com.mariocart.app.data.server.ServerManager
 import com.mariocart.app.data.server.StreamExtractor
+import com.mariocart.app.data.server.StreamProviders
 import com.mariocart.app.ui.theme.MarioCartTheme
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -253,6 +256,27 @@ fun PlayerScreen(
     var pendingChallengeUrl by remember { mutableStateOf<String?>(null) }
     var pendingReferer by remember { mutableStateOf("https://www.lookmovie2.to/") }
 
+    // --- Server picker ------------------------------------------------ //
+    // The user can choose a specific server ("Auto" = let ServerManager order).
+    // Make sure the server list is loaded so the picker has options.
+    LaunchedEffect(Unit) {
+        ServerManager.initialize(localContext)
+    }
+    val availableServers = remember { mutableStateOf<List<ServerConfig>>(emptyList()) }
+    var selectedServerId by remember { mutableStateOf<String?>(null) }
+    var showServerPicker by remember { mutableStateOf(false) }
+    // The name of the server that actually delivered the current stream.
+    var deliveringServerName by remember { mutableStateOf<String?>(null) }
+
+    // Refresh the server list + selected id whenever the picker might open.
+    LaunchedEffect(showServerPicker) {
+        if (showServerPicker) {
+            ServerManager.initialize(localContext)
+            availableServers.value = ServerManager.allServers()
+            selectedServerId = ServerManager.getSelectedServerId()
+        }
+    }
+
     // --------------------------------------------------------------- //
     //  Extraction LaunchedEffect                                       //
     // --------------------------------------------------------------- //
@@ -334,6 +358,7 @@ fun PlayerScreen(
                     streamHeaders = embedResult.headers.ifEmpty {
                         mapOf("User-Agent" to DEFAULT_UA)
                     }
+                    deliveringServerName = embedResult.providerName.ifBlank { "Embed" }
                     isLoading = false
                     return@LaunchedEffect
                 }
@@ -459,6 +484,108 @@ fun PlayerScreen(
                     posterUrl = posterUrl,
                     backdropUrl = backdropUrl
                 )
+            }
+        }
+
+        // ── Server picker overlay (always available) ── //
+        ServerPickerOverlay(
+            servers = availableServers.value,
+            selectedServerId = selectedServerId,
+            deliveringServerName = deliveringServerName,
+            expanded = showServerPicker,
+            onExpandChange = { showServerPicker = it },
+            onSelect = { id ->
+                ServerManager.setSelectedServerId(id)
+                selectedServerId = id
+                showServerPicker = false
+                // Re-trigger extraction with the newly selected server.
+                ServerManager.resetHealth()
+                verificationRounds = 0
+                streamUrl = null
+                deliveringServerName = null
+                error = null
+                infoMessage = null
+                isLoading = true
+                attempt++
+            }
+        )
+    }
+}
+
+/**
+ * Server picker overlay — lets the user choose which provider to try.
+ *
+ * Shown as a small button in the top-start corner: "Auto" or the selected
+ * server's name. Tapping it opens a dropdown listing every available server
+ * (from the auto-updating list) with its reliability percentage. The user
+ * picks one (or "Auto" to let ServerManager order by health/score) and
+ * extraction re-runs with that server tried first.
+ *
+ * When a stream is playing, the button also shows which server delivered it
+ * (e.g. "▶ VidLink"), so the user can see the result of their choice.
+ */
+@Composable
+private fun ServerPickerOverlay(
+    servers: List<ServerConfig>,
+    selectedServerId: String?,
+    deliveringServerName: String?,
+    expanded: Boolean,
+    onExpandChange: (Boolean) -> Unit,
+    onSelect: (String?) -> Unit
+) {
+    val selected = selectedServerId?.let { id -> servers.firstOrNull { it.id == id } }
+    val buttonLabel = when {
+        deliveringServerName != null -> "▶ $deliveringServerName"
+        selected != null -> "Ⓢ ${selected.pickerLabel}"
+        else -> "Ⓢ Auto"
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(top = 8.dp, start = 8.dp),
+        contentAlignment = Alignment.TopStart
+    ) {
+        Box {
+            TextButton(
+                onClick = { onExpandChange(!expanded) },
+                contentPadding = PaddingValues(0.dp)
+            ) {
+                Text(
+                    text = buttonLabel,
+                    color = Color.White,
+                    fontSize = 12.sp,
+                    modifier = Modifier
+                        .background(Color(0xCC000000), RoundedCornerShape(6.dp))
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                )
+            }
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { onExpandChange(false) }
+            ) {
+                DropdownMenuItem(
+                    text = { Text("Auto  (best available)") },
+                    onClick = { onSelect(null) }
+                )
+                if (servers.isNotEmpty()) {
+                    HorizontalDivider()
+                    servers.forEach { server ->
+                        DropdownMenuItem(
+                            text = {
+                                Column {
+                                    Text(server.pickerLabel)
+                                    Text(
+                                        text = if (server.cloudflare) "Cloudflare" else "Direct",
+                                        fontSize = 10.sp,
+                                        color = Color.Gray
+                                    )
+                                }
+                            },
+                            onClick = { onSelect(server.id) }
+                        )
+                    }
+                }
             }
         }
     }
@@ -719,16 +846,19 @@ private fun ExoPlayerView(
 
                 val dataSourceFactory: DataSource.Factory = httpFactory
 
-                // Detect HLS more broadly — not just .m3u8 in the URL, but
-                // also /hls/, /master, /playlist, manifest patterns that the
-                // extractor accepts.  Getting the mime type right is what lets
-                // ExoPlayer parse the manifest and report a real duration
-                // (without it the player shows 00:00 and can't seek).
-                val isHls = looksLikeHls(url)
-                val mediaItem = if (isHls) {
+                // Detect the stream type so ExoPlayer gets the right MIME type.
+                // This is the fix for the 00:00 duration bug: when a provider
+                // serves a progressive MP4 from a CDN path that does NOT end in
+                // ".mp4" (e.g. .../video/720p/abc123?token=xyz), ExoPlayer's
+                // content-type sniffing fails and it can't determine the
+                // container format, so it reports a 0 duration and can't seek.
+                // By setting the MIME type explicitly we tell ExoPlayer exactly
+                // how to parse the stream.
+                val mimeType = guessMimeType(url)
+                val mediaItem = if (mimeType != null) {
                     MediaItem.Builder()
                         .setUri(Uri.parse(url))
-                        .setMimeType("application/x-mpegurl")
+                        .setMimeType(mimeType)
                         .build()
                 } else {
                     MediaItem.fromUri(Uri.parse(url))
@@ -840,21 +970,56 @@ private fun ExoPlayerView(
 }
 
 /**
- * Returns true if the URL points at an HLS stream.  ExoPlayer can auto-detect
- * in many cases, but being explicit avoids sniffing failures on CDNs that
- * serve .m3u8 from extension-less paths — which is exactly what causes the
- * 00:00 duration bug when the mime type is missing.
+ * Returns the ExoPlayer MIME type for [url], or null if it can't be guessed
+ * (in which case ExoPlayer's built-in sniffing is used).
+ *
+ * This is the fix for the **00:00 duration bug**. Many providers serve a
+ * progressive MP4 (or HLS) from a CDN path that does NOT end in a recognisable
+ * file extension — e.g. `https://cdn.xyz/video/720p/abc123?token=xyz`. When
+ * no MIME type is set, ExoPlayer's content-type sniffing can fail for these
+ * extension-less URLs, and the player then:
+ *   • reports a 0 duration (the seek bar shows 00:00),
+ *   • cannot seek,
+ *   • in some cases never starts playback.
+ *
+ * By detecting the stream shape from the URL and path patterns and setting the
+ * MIME type explicitly, ExoPlayer always knows how to parse the stream and
+ * reports the real duration.
  */
-private fun looksLikeHls(url: String): Boolean {
+private fun guessMimeType(url: String): String? {
     val u = url.lowercase()
-    if (u.contains(".m3u8")) return true
-    if (u.contains("/hls/")) return true
-    if (u.contains("/master")) return true
-    if (u.contains("/playlist") && u.contains("m3u8")) return true
-    if (u.contains("manifest") && u.contains("m3u8")) return true
-    // Some providers use path-based HLS with no extension at all.
-    if (u.contains("/playlist.m3u8")) return true
-    return false
+
+    // HLS (.m3u8 or HLS path patterns).
+    if (u.contains(".m3u8")) return MimeTypes.APPLICATION_M3U8
+    if (u.contains("/hls/")) return MimeTypes.APPLICATION_M3U8
+    if (u.contains("/master")) return MimeTypes.APPLICATION_M3U8
+    if (u.contains("/playlist") && u.contains("m3u8")) return MimeTypes.APPLICATION_M3U8
+    if (u.contains("manifest") && (u.contains("m3u8") || u.contains("hls"))) return MimeTypes.APPLICATION_M3U8
+    if (u.contains("/playlist.m3u8")) return MimeTypes.APPLICATION_M3U8
+
+    // DASH (.mpd or manifest patterns).
+    if (u.contains(".mpd")) return MimeTypes.APPLICATION_MPD
+    if (u.contains("manifest") && u.contains("dash")) return MimeTypes.APPLICATION_MPD
+
+    // Progressive container files by extension.
+    if (u.endsWith(".mp4") || u.contains(".mp4?")) return MimeTypes.VIDEO_MP4
+    if (u.endsWith(".webm") || u.contains(".webm?")) return MimeTypes.VIDEO_WEBM
+    if (u.endsWith(".mkv") || u.contains(".mkv?")) return MimeTypes.VIDEO_MATROSKA
+
+    // Progressive MP4 from extension-less CDN paths. Many providers (VidLink,
+    // VidSrc CDNs) serve MP4 from paths containing "video", "mp4", "media",
+    // "play", or "/720p|1080p|480p" resolution segments with a query token.
+    // These are progressive MP4 streams, not HLS — setting VIDEO_MP4 lets
+    // ExoPlayer read the moov atom and report the real duration.
+    if (u.contains("/mp4/") || u.contains("/mp4?")) return MimeTypes.VIDEO_MP4
+    if (u.contains("/video/") && !u.contains(".m3u8")) return MimeTypes.VIDEO_MP4
+    if (u.contains("/media/") && !u.contains(".m3u8")) return MimeTypes.VIDEO_MP4
+    if (u.contains("/play/") && !u.contains(".m3u8")) return MimeTypes.VIDEO_MP4
+    if (Regex("""/(480|720|1080|1440|2160)p[/$?]""").containsMatchIn(u)) return MimeTypes.VIDEO_MP4
+    // VidLink-style direct resource path.
+    if (u.contains("/mp/resource/")) return MimeTypes.VIDEO_MP4
+
+    return null
 }
 
 /**

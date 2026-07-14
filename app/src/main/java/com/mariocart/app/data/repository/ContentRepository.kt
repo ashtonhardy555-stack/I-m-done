@@ -17,14 +17,14 @@ class ContentRepository {
     private val key = BuildConfig.TMDB_API_KEY
 
     /**
-     * The verified, alive streaming servers. Mirrors the providers in
-     * [com.mariocart.app.data.server.StreamProviders.ALL] and the
-     * servers.json asset. Ordered clean-first (no-challenge providers
-     * before Cloudflare-protected ones).
+     * The legacy streaming-server list kept for compatibility with
+     * [com.mariocart.app.ui.player.VideoDownloadService].
      *
-     * NOTE: The actual playback path uses [StreamProviders.ALL] via
-     * [com.mariocart.app.data.server.EmbedExtractor]; this list is kept
-     * in sync for any UI that wants to display/inspect the server roster.
+     * The actual playback path uses the auto-updating server list from
+     * [com.mariocart.app.data.server.RemoteServerListFetcher] (exposed via
+     * [com.mariocart.app.data.server.StreamProviders] and ordered by
+     * [com.mariocart.app.data.server.ServerManager]). This list is a static
+     * fallback and is NOT used for playback ordering.
      */
     val streamingServers: List<StreamingServer> = listOf(
         // Tier 1 — clean, no challenge

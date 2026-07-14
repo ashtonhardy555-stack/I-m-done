@@ -1,10 +1,21 @@
-[
-  { "name": "VidLink",     "baseUrl": "https://vidlink.pro" },
-  { "name": "VidSrc.su",   "baseUrl": "https://vidsrc.su" },
-  { "name": "2Embed.cc",   "baseUrl": "https://www.2embed.cc" },
-  { "name": "2Embed.skin", "baseUrl": "https://www.2embed.skin" },
-  { "name": "VidSrc.to",   "baseUrl": "https://vidsrc.to" },
-  { "name": "Videasy",     "baseUrl": "https://player.videasy.to" },
-  { "name": "VidSrc.in",   "baseUrl": "https://vidsrc.in" },
-  { "name": "VidSrc.fyi",  "baseUrl": "https://vidsrc.fyi" }
-]
+{
+  "version": 2,
+  "updated": "2026-07-14",
+  "description": "Bundled fallback server list. The app fetches a newer version from the GitHub raw URL at runtime; this is used offline.",
+  "servers": [
+    { "id": "vidlink", "name": "VidLink", "baseUrl": "https://vidlink.pro", "movieUrlTemplate": "{base}/movie/{id}", "tvUrlTemplate": "{base}/tv/{id}/{season}/{episode}", "tier": 1, "reliability": 95, "cloudflare": false, "enabled": true },
+    { "id": "2embed_cc", "name": "2Embed.cc", "baseUrl": "https://www.2embed.cc", "movieUrlTemplate": "{base}/embed/{id}", "tvUrlTemplate": "{base}/embed/tv/{id}/{season}/{episode}", "tier": 1, "reliability": 88, "cloudflare": false, "enabled": true },
+    { "id": "2embed_skin", "name": "2Embed.skin", "baseUrl": "https://www.2embed.skin", "movieUrlTemplate": "{base}/embed/{id}", "tvUrlTemplate": "{base}/embed/tv/{id}/{season}/{episode}", "tier": 1, "reliability": 85, "cloudflare": false, "enabled": true },
+    { "id": "dbgdriveplayer", "name": "GDrivePlayer", "baseUrl": "https://databasegdriveplayer.co", "movieUrlTemplate": "{base}/player.php?tmdb={id}", "tvUrlTemplate": "{base}/player.php?type=series&tmdb={id}&season={season}&episode={episode}", "tier": 1, "reliability": 80, "cloudflare": false, "enabled": true },
+    { "id": "vidsrc_me", "name": "VidSrc.me", "baseUrl": "https://vidsrc.me", "movieUrlTemplate": "{base}/embed/movie/{id}", "tvUrlTemplate": "{base}/embed/tv/{id}/{season}/{episode}", "tier": 2, "reliability": 78, "cloudflare": false, "enabled": true },
+    { "id": "vidsrc_io", "name": "VidSrc.io", "baseUrl": "https://vidsrc.io", "movieUrlTemplate": "{base}/embed/movie/{id}", "tvUrlTemplate": "{base}/embed/tv/{id}/{season}/{episode}", "tier": 2, "reliability": 76, "cloudflare": false, "enabled": true },
+    { "id": "vidsrc_in", "name": "VidSrc.in", "baseUrl": "https://vidsrc.in", "movieUrlTemplate": "{base}/embed/movie/{id}", "tvUrlTemplate": "{base}/embed/tv/{id}/{season}/{episode}", "tier": 2, "reliability": 74, "cloudflare": false, "enabled": true },
+    { "id": "vidsrc_su", "name": "VidSrc.su", "baseUrl": "https://vidsrc.su", "movieUrlTemplate": "{base}/embed/movie/{id}", "tvUrlTemplate": "{base}/embed/tv/{id}/{season}/{episode}", "tier": 2, "reliability": 72, "cloudflare": false, "enabled": true },
+    { "id": "smashystream", "name": "SmashyStream", "baseUrl": "https://embed.smashystream.com", "movieUrlTemplate": "{base}/playere.php?tmdb={id}", "tvUrlTemplate": "{base}/playere.php?tmdb={id}&season={season}&episode={episode}", "tier": 2, "reliability": 70, "cloudflare": true, "enabled": true },
+    { "id": "videasy", "name": "Videasy", "baseUrl": "https://player.videasy.to", "movieUrlTemplate": "{base}/movie/{id}", "tvUrlTemplate": "{base}/tv/{id}/{season}/{episode}", "tier": 2, "reliability": 68, "cloudflare": false, "enabled": true },
+    { "id": "vidsrc_fyi", "name": "VidSrc.fyi", "baseUrl": "https://vidsrc.fyi", "movieUrlTemplate": "{base}/embed/movie/{id}", "tvUrlTemplate": "{base}/embed/tv/{id}/{season}/{episode}", "tier": 3, "reliability": 55, "cloudflare": true, "enabled": true },
+    { "id": "vidsrc_to", "name": "VidSrc.to", "baseUrl": "https://vidsrc.to", "movieUrlTemplate": "{base}/embed/movie/{id}", "tvUrlTemplate": "{base}/embed/tv/{id}/{season}/{episode}", "tier": 3, "reliability": 50, "cloudflare": true, "enabled": true },
+    { "id": "vixsrc", "name": "VixSrc", "baseUrl": "https://vixsrc.to", "movieUrlTemplate": "{base}/movie/{id}", "tvUrlTemplate": "{base}/tv/{id}/{season}/{episode}", "tier": 3, "reliability": 45, "cloudflare": true, "enabled": true },
+    { "id": "multiembed", "name": "MultiEmbed", "baseUrl": "https://multiembed.mov", "movieUrlTemplate": "{base}/?video_id={id}", "tvUrlTemplate": "{base}/?video_id={id}&s={season}&e={episode}", "tier": 3, "reliability": 40, "cloudflare": true, "enabled": true }
+  ]
+}

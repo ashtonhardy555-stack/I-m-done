@@ -54,6 +54,11 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // Expose the application context to ViewModels for the stream-
+        // availability probe (so the browse grid can filter to only-streamable
+        // titles without an Activity-scoped reference).
+        com.mariocart.app.ui.browse.AppContextHolder.context = applicationContext
+
         setContent {
             MarioCartTheme {
                 Surface(

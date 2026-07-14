@@ -96,18 +96,27 @@ class EmbedExtractor private constructor(
         ): Result = EmbedExtractor(context, onChallengeNeeded).extractFromUrl(url)
 
         /**
-         * Try every provider in [StreamProviders.ALL] for a piece of
-         * content, returning the first direct playable URL found.
+         * Try every provider (from the auto-updating list, ordered by
+         * ServerManager) for a piece of content, returning the first direct
+         * playable URL found.
          *
-         * Challenge handling strategy: providers are ordered clean-first,
-         * so the no-challenge providers (VidLink, VidSrc.su) are tried
-         * before any Cloudflare-protected one. A [Result.Challenge] from a
-         * provider is NOT returned immediately — it is remembered and we
-         * keep trying the remaining providers. Only if NO provider yields a
-         * playable stream do we surface the best challenge we found to the
-         * user (so they can solve the captcha and we retry). This way a
-         * single Cloudflare-protected provider never blocks the user from
-         * getting a video that a clean provider could have delivered.
+         * The server list comes from [ServerManager.getOrderedServers], which
+         * (a) puts the user-selected server first if the user pinned one, and
+         * (b) orders by per-session health + persistent success scores +
+         * remote reliability. This means the user's chosen server is tried
+         * first, then historically-good servers, then fallbacks.
+         *
+         * Challenge handling strategy: providers are ordered clean-first, so
+         * the no-challenge providers (VidLink, 2Embed) are tried before any
+         * Cloudflare-protected one. A [Result.Challenge] from a provider is NOT
+         * returned immediately — it is remembered and we keep trying the
+         * remaining providers. Only if NO provider yields a playable stream do
+         * we surface the best challenge we found to the user. This way a single
+         * Cloudflare-protected provider never blocks the user from getting a
+         * video that a clean provider could have delivered.
+         *
+         * The id of the provider that delivered the stream is recorded on the
+         * returned [Result.Stream] so the UI can show which server worked.
          */
         suspend fun extractFromProviders(
             context: Context,
@@ -117,37 +126,41 @@ class EmbedExtractor private constructor(
             episode: Int = 1,
             onChallengeNeeded: (() -> Unit)? = null
         ): Result {
+            // Load the auto-updating, health-ordered server list.
+            ServerManager.initialize(context)
+            val providers = ServerManager.getOrderedServers()
+            if (providers.isEmpty()) {
+                Log.e(TAG, "No servers available — falling back to bundled list.")
+                ServerManager.initialize(context, forceRefresh = true)
+            }
+            val list = ServerManager.getOrderedServers()
+            if (list.isEmpty()) {
+                return Result.Error("No stream servers available.")
+            }
+
             var bestChallenge: Result.Challenge? = null
 
-            for (provider in StreamProviders.ALL) {
-                val url = StreamProviders.urlFor(provider, contentType, tmdbId, season, episode)
-                Log.d(TAG, "↻ Trying ${provider.name}: $url")
+            for (provider in list) {
+                val url = provider.urlFor(contentType, tmdbId, season, episode)
+                Log.d(TAG, "↻ Trying ${provider.name} (${provider.id}, tier=${provider.tier}): $url")
                 when (val r = extract(context, url, onChallengeNeeded)) {
                     is Result.Stream -> {
                         Log.i(TAG, "✅ ${provider.name} → ${r.url}")
-                        ServerManager.markServerSuccess(provider.name)
-                        return r
+                        ServerManager.markServerSuccess(provider.id)
+                        return r.copy(providerName = provider.name)
                     }
                     is Result.Challenge -> {
-                        // Remember the challenge but DON'T stop — a later
-                        // clean provider may still deliver a stream without
-                        // needing the user to solve anything.
                         Log.w(TAG, "🤖 ${provider.name} requires verification — deferring, trying next provider")
                         if (bestChallenge == null) bestChallenge = r
-                        // Do NOT mark dead — the provider is alive, just
-                        // challenged. It may auto-solve on a future attempt
-                        // after the user clears cookies.
+                        // Don't mark dead — the provider is alive, just challenged.
                     }
                     is Result.Error, Result.NotFound -> {
                         Log.w(TAG, "✗ ${provider.name}: ${(r as? Result.Error)?.message ?: "not found"}")
-                        ServerManager.markServerDead(provider.name)
-                        // try next provider
+                        ServerManager.markServerDead(provider.id)
                     }
                 }
             }
 
-            // No clean stream found. If we encountered a challenge along the
-            // way, surface it so the user can solve the captcha and we retry.
             if (bestChallenge != null) {
                 Log.w(TAG, "🤖 No clean stream; surfacing challenge for user verification.")
                 return bestChallenge
@@ -165,7 +178,9 @@ class EmbedExtractor private constructor(
         data class Stream(
             val url: String,
             val headers: Map<String, String> = emptyMap(),
-            val providerName: String = ""
+            val providerName: String = "",
+            /** The server id that delivered the stream (for the UI / scoring). */
+            val providerId: String = ""
         ) : Result()
 
         /**
@@ -634,7 +649,8 @@ class EmbedExtractor private constructor(
                     Result.Stream(
                         url = candidate,
                         headers = finalHeaders,
-                        providerName = ""
+                        providerName = "",
+                        providerId = ""
                     )
                 )
             }
