@@ -7,8 +7,6 @@ import com.mariocart.app.data.model.TmdbItem
 import com.mariocart.app.data.model.TmdbResponse
 import com.mariocart.app.data.model.TvSeasonsResponse
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.withContext
 
 class ContentRepository {
@@ -40,7 +38,7 @@ class ContentRepository {
         StreamingServer("VidSrc.fyi",       "https://vidsrc.fyi")
     )
 
-    // ── TMDB Content ───────────────────────────────────────────────────────────
+    // ── TMDB Content ─────────────────────────────────────────────────────────
 
     private fun filterEnglish(items: List<TmdbItem>): List<TmdbItem> =
         items.filter {
@@ -50,56 +48,49 @@ class ContentRepository {
     private fun filterValidMovies(items: List<TmdbItem>): List<TmdbItem> =
         items.filter { it.isValidMovie }
 
+    /**
+     * Drops items whose release / first-air date is in the future so the user
+     * never sees a title they can't actually watch yet. Items with no date
+     * are kept (treated as released). Date strings are ISO (YYYY-MM-DD) which
+     * sort lexicographically, so a simple string comparison is correct.
+     */
+    private fun filterReleased(items: List<TmdbItem>): List<TmdbItem> =
+        items.filter { it.isReleased }
+
     suspend fun getTrending(page: Int = 1): List<TmdbItem> =
         runCatching {
             val items = filterEnglish(api.getTrending(key, page = page).results)
-            val enriched = enrichWithRuntime(items)
-            filterValidMovies(enriched)
+            filterValidMovies(filterReleased(items))
         }.getOrDefault(emptyList())
-
-    private suspend fun enrichWithRuntime(items: List<TmdbItem>): List<TmdbItem> = withContext(Dispatchers.IO) {
-        items.map { item ->
-            async {
-                if (item.isMovie && item.runtime == null) {
-                    runCatching { api.getMovieDetails(item.id, key) }.getOrNull() ?: item
-                } else {
-                    item
-                }
-            }
-        }.awaitAll()
-    }
 
     suspend fun getNowPlaying(page: Int = 1): List<TmdbItem> =
         runCatching {
             val items = filterEnglish(api.getNowPlaying(key, page = page).results)
-            val enriched = enrichWithRuntime(items)
-            filterValidMovies(enriched)
+            filterValidMovies(filterReleased(items))
         }.getOrDefault(emptyList())
 
     suspend fun getPopularMovies(page: Int = 1): List<TmdbItem> =
         runCatching {
             val items = filterEnglish(api.getPopularMovies(key, page = page).results)
-            val enriched = enrichWithRuntime(items)
-            filterValidMovies(enriched)
+            filterValidMovies(filterReleased(items))
         }.getOrDefault(emptyList())
 
     suspend fun getTopRatedMovies(page: Int = 1): List<TmdbItem> =
         runCatching {
             val items = filterEnglish(api.getTopRatedMovies(key, page = page).results)
-            val enriched = enrichWithRuntime(items)
-            filterValidMovies(enriched)
+            filterValidMovies(filterReleased(items))
         }.getOrDefault(emptyList())
 
     suspend fun getPopularTV(page: Int = 1): List<TmdbItem> =
-        runCatching { filterEnglish(api.getPopularTV(key, page = page).results) }
+        runCatching { filterReleased(filterEnglish(api.getPopularTV(key, page = page).results)) }
             .getOrDefault(emptyList())
 
     suspend fun getAiringToday(page: Int = 1): List<TmdbItem> =
-        runCatching { filterEnglish(api.getAiringToday(key, page = page).results) }
+        runCatching { filterReleased(filterEnglish(api.getAiringToday(key, page = page).results)) }
             .getOrDefault(emptyList())
 
     suspend fun getTopRatedTV(page: Int = 1): List<TmdbItem> =
-        runCatching { filterEnglish(api.getTopRatedTV(key, page = page).results) }
+        runCatching { filterReleased(filterEnglish(api.getTopRatedTV(key, page = page).results)) }
             .getOrDefault(emptyList())
 
     suspend fun getTvDetails(tvId: Int): TvSeasonsResponse? =
@@ -113,8 +104,7 @@ class ContentRepository {
     ): List<TmdbItem> =
         runCatching {
             val items = filterEnglish(api.discover(type, key, genreId, sortBy = sortBy, page = page).results)
-            val enriched = enrichWithRuntime(items)
-            filterValidMovies(enriched)
+            filterValidMovies(filterReleased(items))
         }.getOrDefault(emptyList())
 
     suspend fun search(
@@ -125,7 +115,6 @@ class ContentRepository {
     ): List<TmdbItem> =
         runCatching {
             val items = filterEnglish(api.search(type, key, query, year = year, page = page).results)
-            val enriched = enrichWithRuntime(items)
-            filterValidMovies(enriched)
+            filterValidMovies(filterReleased(items))
         }.getOrDefault(emptyList())
 }

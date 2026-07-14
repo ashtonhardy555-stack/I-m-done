@@ -54,7 +54,17 @@ fun ContentRow(
             contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            items(items.size, key = { idx -> "${items[idx].id}_${items[idx].contentType}_$idx" }) { idx ->
+            items(
+                count = items.size,
+                // Stable key = the TMDB id + content type. Using the index in
+                // the key (as before) caused the entire LazyRow to recompose
+                // whenever load-more appended items, because every shifted
+                // position looked like a "new" item to the lazy list.
+                key = { idx ->
+                    val item = items[idx]
+                    "${item.id}_${item.contentType}"
+                }
+            ) { idx ->
                 val item = items[idx]
                 ContentCard(
                     item = item,

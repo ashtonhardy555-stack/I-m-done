@@ -96,6 +96,15 @@ class PlayerActivity : ComponentActivity() {
         // Guard so we only escalate to the user N times per playback session.
         const val MAX_VERIFICATION_ROUNDS = 2
 
+        // Extraction stage indices — used by PlayerScreen to skip stages
+        // (e.g. when the user picks a specific server we jump straight to
+        // the embed stage) and to resume from the right point when ExoPlayer
+        // reports a playback error on an already-resolved URL.
+        const val STAGE_VIDSTORM = 0
+        const val STAGE_LOOKMOVIE = 1
+        const val STAGE_EMBED = 2
+        const val STAGE_OKHTTP = 3
+
         /**
          * Factory used by [com.mariocart.app.ui.MainActivity].
          *
@@ -264,6 +273,20 @@ fun PlayerScreen(
     // --- Loop control ------------------------------------------------ //
     // attempt is the LaunchedEffect key; bumping it re-runs extraction.
     var attempt by remember { mutableStateOf(0) }
+    // Which stage extraction should START from on this attempt.
+    //  - STAGE_VIDSTORM (0): full auto pipeline (default).
+    //  - STAGE_EMBED   (2): user picked a specific server — skip VidStorm /
+    //    LookMovie and go straight to the embed stage so ServerManager's
+    //    ordered list (with their pick first) is honoured. This is the fix
+    //    for "if I interrupt the stream auto finder to choose my own it
+    //    stops working": previously the select just bumped `attempt`, which
+    //    re-ran the whole pipeline from VidStorm and ignored the pick.
+    var startStage by remember { mutableStateOf(0) }
+    // Tracks the stage that actually delivered the current streamUrl so that
+    // an ExoPlayer playback error can resume extraction from the NEXT stage
+    // instead of giving up (fix for "some titles like Interstellar don't
+    // play" — the URL resolves but ExoPlayer can't render it).
+    var currentStage by remember { mutableStateOf(0) }
     // How many times we've escalated to the user for human verification.
     var verificationRounds by remember { mutableStateOf(0) }
     // Track the pending challenge so we only launch the activity once.
@@ -302,17 +325,28 @@ fun PlayerScreen(
         // Clear per-session server health for a fresh ordering on new content.
         if (attempt == 0) ServerManager.resetHealth()
 
-        Log.d("Player", "🔎 Extraction attempt #$attempt for \"$title\" ($year) $contentType S$season E$episode")
+        // The stage to start from this attempt. Captured once so the whole
+        // pipeline runs against a consistent snapshot even if startStage
+        // changes mid-extraction.
+        val start = startStage
+
+        Log.d("Player", "🔎 Extraction attempt #$attempt (start stage $start) for \"$title\" ($year) $contentType S$season E$episode")
 
         val activity = localContext as? android.app.Activity
 
         // ── Stage 0: VidStorm direct API (PRIMARY — no WebView, no Cloudflare) ── //
+        // Skipped when the user manually picked a server (start == STAGE_EMBED):
+        // VidStorm ignores ServerManager ordering, so running it would defeat
+        // the user's explicit choice.
         // This is the same backend FilmCave's "cloud / servers" button uses.
         // It resolves a DIRECT .m3u8 / .mp4 URL for the TMDB id in one HTTP
         // call, so it is dramatically more reliable than every stage below.
         // This is the root-cause fix for "only The Rookie played": the
         // fragile LookMovie/embed stages silently fail for most titles,
         // whereas VidStorm resolves almost everything to a real direct URL.
+        if (start <= PlayerActivity.STAGE_VIDSTORM) {
+            currentStage = PlayerActivity.STAGE_VIDSTORM
+            infoMessage = "Finding best stream…"
         run {
             val vsResult = try {
                 VidStormExtractor.extract(
@@ -342,9 +376,12 @@ fun PlayerScreen(
                 }
             }
         }
+        }
 
         // ── Stage 1: LookMovie via WebView (FALLBACK — mirrors Kodi addon) ── //
-        if (activity != null) {
+        if (start <= PlayerActivity.STAGE_LOOKMOVIE && activity != null) {
+            if (start < PlayerActivity.STAGE_LOOKMOVIE) infoMessage = "Trying alternative sources…"
+            currentStage = PlayerActivity.STAGE_LOOKMOVIE
             val lookResult = try {
                 LookMovieWebExtractor.extract(
                     context = activity,
@@ -387,7 +424,14 @@ fun PlayerScreen(
         }
 
         // ── Stage 2: off-screen WebView embed extraction (FALLBACK) ── //
-        if (activity != null) {
+        // This is the stage that actually honours the user's server choice:
+        // EmbedExtractor calls ServerManager.getOrderedServers() which puts
+        // the user-selected server first. So when start == STAGE_EMBED we
+        // jump straight here.
+        if (start <= PlayerActivity.STAGE_EMBED && activity != null) {
+            if (start < PlayerActivity.STAGE_EMBED) infoMessage = "Searching embed providers…"
+            else infoMessage = "Trying ${ServerManager.allServers().firstOrNull { it.id == selectedServerId }?.name ?: "your server"}…"
+            currentStage = PlayerActivity.STAGE_EMBED
             val embedResult = try {
                 EmbedExtractor.extractFromProviders(
                     context = activity,
@@ -431,6 +475,9 @@ fun PlayerScreen(
         }
 
         // ── Stage 3: OkHttp LookMovie extractor (LAST RESORT) ── //
+        if (start <= PlayerActivity.STAGE_OKHTTP) {
+            infoMessage = "Trying last-resort source…"
+            currentStage = PlayerActivity.STAGE_OKHTTP
         try {
             val result = StreamExtractor.extract(title, year, contentType, season, episode)
 
@@ -464,6 +511,14 @@ fun PlayerScreen(
             error = e.message ?: "Failed to load stream."
         } finally {
             isLoading = false
+        }
+        } // end if (start <= STAGE_OKHTTP)
+
+        // If we reached here with start == STAGE_EMBED (user picked a server
+        // and the embed stage exhausted all providers), surface a clear error
+        // instead of silently showing a blank loading screen.
+        if (start == PlayerActivity.STAGE_EMBED && error == null) {
+            error = "Couldn't find a working stream on the selected server. Try another server or Auto."
         }
     }
 
@@ -515,6 +570,8 @@ fun PlayerScreen(
                     // user can re-attempt if the site is challenging again.
                     verificationRounds = 0
                     error = null
+                    // Retry from the top of the pipeline.
+                    startStage = PlayerActivity.STAGE_VIDSTORM
                     attempt++
                 },
                 onBack = { (localContext as? ComponentActivity)?.finish() }
@@ -533,7 +590,26 @@ fun PlayerScreen(
                     url = streamUrl!!,
                     headers = streamHeaders,
                     posterUrl = posterUrl,
-                    backdropUrl = backdropUrl
+                    backdropUrl = backdropUrl,
+                    onPlayerError = {
+                        // ── ExoPlayer fallback fix ──
+                        // The URL resolved but ExoPlayer can't render it (e.g.
+                        // a dead/broken source that passed the head-check but
+                        // 404s on the actual segments, or a geo-blocked CDN).
+                        // Instead of leaving the user stuck on a black screen,
+                        // clear this stream and resume extraction from the
+                        // NEXT stage after the one that delivered it.
+                        Log.w("Player", "🔄 ExoPlayer couldn't play the resolved URL — falling through to next stage.")
+                        streamUrl = null
+                        deliveringServerName = null
+                        error = null
+                        infoMessage = "That source didn't play — trying another…"
+                        // Resume from the stage after the one that delivered
+                        // the broken URL. +1 lands on the next fallback.
+                        startStage = (currentStage + 1).coerceAtMost(PlayerActivity.STAGE_OKHTTP)
+                        isLoading = true
+                        attempt++
+                    }
                 )
             }
         }
@@ -556,6 +632,19 @@ fun PlayerScreen(
                 deliveringServerName = null
                 error = null
                 infoMessage = null
+                // ── Server-selection fix ──
+                // When the user picks a SPECIFIC server, jump straight to the
+                // embed stage (STAGE_EMBED) so ServerManager's ordered list —
+                // which puts their pick first — is actually honoured. VidStorm
+                // and LookMovie ignore ServerManager ordering, so running them
+                // first would override the user's explicit choice and often
+                // land on a different (or dead) source, which is exactly the
+                // "it stops working and I have to close the movie" bug.
+                //
+                // When the user picks "Auto" (id == null), run the full
+                // pipeline from the top (VidStorm first).
+                startStage = if (id != null) PlayerActivity.STAGE_EMBED
+                             else PlayerActivity.STAGE_VIDSTORM
                 isLoading = true
                 attempt++
             }
@@ -851,7 +940,8 @@ private fun ExoPlayerView(
     url: String,
     headers: Map<String, String>,
     posterUrl: String? = null,
-    backdropUrl: String? = null
+    backdropUrl: String? = null,
+    onPlayerError: () -> Unit = {}
 ) {
     var player: ExoPlayer? by remember { mutableStateOf(null) }
     var trackSelector: DefaultTrackSelector? by remember { mutableStateOf(null) }
@@ -863,6 +953,10 @@ private fun ExoPlayerView(
 
     // Track when the first frame has rendered so we can hide the thumbnail.
     var isReady by remember { mutableStateOf(false) }
+
+    // Capture the error callback in a lambda we can invoke from the
+    // AndroidView factory (which runs outside of the Composition).
+    val errorHandler = rememberUpdatedState(onPlayerError)
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
 
@@ -949,6 +1043,10 @@ private fun ExoPlayerView(
 
                             override fun onPlayerError(error: PlaybackException) {
                                 Log.e("ExoPlayer", "Error: ${error.errorCodeName} - ${error.message}")
+                                // Surface the error so PlayerScreen can fall
+                                // through to the next extraction stage instead
+                                // of stranding the user on a black screen.
+                                errorHandler.value.invoke()
                             }
                         })
                         setMediaItem(mediaItem)

@@ -51,6 +51,17 @@ import javax.crypto.spec.SecretKeySpec
  * The direct URLs are proxied through Cloudflare Workers and require a
  * `Referer` of the VidStorm origin, which we attach so ExoPlayer can play
  * them directly.
+ *
+ * ## Dead-source handling
+ *
+ * Not every source the API returns is actually alive — some URLs are stale
+ * or return a 403/404. Previously we returned the *first* source we found and
+ * handed it straight to ExoPlayer; if it was dead the player would fail with
+ * a black screen and **no fallback** to the next extraction stage (this is
+ * why titles like "Interstellar" didn't play). Now every candidate URL is
+ * lightweight-verified (a 2-byte ranged GET) before it is returned, and we
+ * walk through *all* live sources until one verifies. Only if none verify do
+ * we yield nothing and let the caller fall through to the embed pipeline.
  */
 object VidStormExtractor {
 
@@ -83,9 +94,19 @@ object VidStormExtractor {
             .build()
     }
 
-    // ─────────────────────────────────────────────────────────────────── //
+    /** A tiny client used to verify a candidate media URL is alive. */
+    private val verifier by lazy {
+        OkHttpClient.Builder()
+            .followRedirects(true)
+            .followSslRedirects(true)
+            .connectTimeout(6, TimeUnit.SECONDS)
+            .readTimeout(6, TimeUnit.SECONDS)
+            .build()
+    }
+
+    // ────────────────────────────────────────────────────────────────────── //
     //  Result type                                                        //
-    // ─────────────────────────────────────────────────────────────────── //
+    // ────────────────────────────────────────────────────────────────────── //
 
     sealed class Result {
         /** A direct playable URL + headers ExoPlayer should send. */
@@ -99,9 +120,9 @@ object VidStormExtractor {
         data class Error(val message: String) : Result()
     }
 
-    // ─────────────────────────────────────────────────────────────────── //
+    // ────────────────────────────────────────────────────────────────────── //
     //  Public API                                                         //
-    // ─────────────────────────────────────────────────────────────────── //
+    // ────────────────────────────────────────────────────────────────────── //
 
     /**
      * Resolve a direct playable stream for the given TMDB content.
@@ -130,7 +151,7 @@ object VidStormExtractor {
         // encryptId() already returns base64url (A-Z a-z 0-9 '-' '_'),
         // which is URL-safe, so no further URLEncoder pass is needed.
         val apiUrl = "$API_BASE/$kind/$encrypted"
-        Log.d(TAG, "🔎 VidStorm API: $apiUrl  (plain=$plain)")
+        Log.d(TAG, "🔍 VidStorm API: $apiUrl  (plain=$plain)")
 
         val body = try {
             fetchJson(apiUrl)
@@ -142,15 +163,17 @@ object VidStormExtractor {
         resolveSources(body)
     }
 
-    // ─────────────────────────────────────────────────────────────────── //
+    // ────────────────────────────────────────────────────────────────────── //
     //  Source resolution                                                  //
-    // ─────────────────────────────────────────────────────────────────── //
+    // ────────────────────────────────────────────────────────────────────── //
 
     /**
-     * Parses the VidStorm API JSON object and returns the first playable
+     * Parses the VidStorm API JSON object and returns the first **verified**
      * direct URL. Tries every source that carries a `url`; for playlist
      * sources (hellstorm.lol) it fetches the playlist JSON and picks the
-     * highest-resolution direct file.
+     * highest-resolution direct file. Each candidate is lightweight-verified
+     * before being returned so we never hand ExoPlayer a dead URL (which was
+     * the root cause of "some titles like Interstellar don't play").
      */
     private fun resolveSources(body: String): Result {
         val root = try {
@@ -186,14 +209,18 @@ object VidStormExtractor {
         Log.d(TAG, "VidStorm live sources: ${liveSources.joinToString { it.first }}")
 
         // First pass: direct sources (type=hls / .m3u8 / .mp4 directly).
+        // Walk through ALL of them and return the first one that verifies.
         for ((name, src) in liveSources) {
             val url = src.optString("url", "")
             val type = src.optString("type", "")
             if (type == "hls" || url.contains(".m3u8") ||
                 (url.contains(".mp4") && !url.contains("hellstorm.lol"))
             ) {
-                Log.i(TAG, "✅ VidStorm direct: $name → $url")
-                return Result.Stream(url, headers, providerName = "VidStorm·$name")
+                if (verifyUrl(url, headers, name)) {
+                    Log.i(TAG, "✅ VidStorm direct: $name → $url")
+                    return Result.Stream(url, headers, providerName = "VidStorm·$name")
+                }
+                Log.w(TAG, "✗ VidStorm direct source $name failed verification, trying next")
             }
         }
 
@@ -202,11 +229,14 @@ object VidStormExtractor {
         for ((name, src) in liveSources) {
             val url = src.optString("url", "")
             val direct = resolvePlaylist(url, name) ?: continue
-            Log.i(TAG, "✅ VidStorm playlist: $name → $direct")
-            return Result.Stream(direct, headers, providerName = "VidStorm·$name")
+            if (verifyUrl(direct, headers, name)) {
+                Log.i(TAG, "✅ VidStorm playlist: $name → $direct")
+                return Result.Stream(direct, headers, providerName = "VidStorm·$name")
+            }
+            Log.w(TAG, "✗ VidStorm playlist source $name failed verification, trying next")
         }
 
-        Log.w(TAG, "VidStorm: all sources were null/empty for this title.")
+        Log.w(TAG, "VidStorm: all sources failed verification for this title.")
         return Result.Error("VidStorm: streams not yet available for this title")
     }
 
@@ -238,9 +268,43 @@ object VidStormExtractor {
         }
     }
 
-    // ─────────────────────────────────────────────────────────────────── //
+    /**
+     * Lightweight reachability check for a candidate media URL. Issues a
+     * 2-byte ranged GET with the VidStorm headers and returns true if the
+     * host responds with a non-5xx status (200/206/416/403 are all accepted
+     * — a 403 can still play in ExoPlayer because the CDN may expect the
+     * Referer header that ExoPlayer's DefaultHttpDataSource will carry).
+     *
+     * Only 5xx (server error) and connection failures count as "dead" —
+     * those mean the URL is genuinely broken and ExoPlayer would also fail.
+     */
+    private fun verifyUrl(
+        url: String,
+        headers: Map<String, String>,
+        name: String
+    ): Boolean {
+        return try {
+            val builder = Request.Builder().url(url)
+            headers.forEach { (k, v) -> builder.header(k, v) }
+            // Range request: read only the first 2 bytes to minimise data.
+            builder.header("Range", "bytes=0-1").get()
+            verifier.newCall(builder.build()).execute().use { resp ->
+                val code = resp.code
+                Log.d(TAG, "VidStorm verify $name: HTTP $code")
+                // 200/206 = reachable. 416 = range issue but host alive.
+                // 403/401 = may need headers ExoPlayer carries — don't discard.
+                // 404/5xx = genuinely dead.
+                code in 200..299 || code == 416 || code == 403 || code == 401 || code == 405
+            }
+        } catch (e: Exception) {
+            Log.d(TAG, "VidStorm verify $name: connection failed (${e.message})")
+            false
+        }
+    }
+
+    // ────────────────────────────────────────────────────────────────────── //
     //  AES encryption (mirrors the FilmCave `mZ` function)                //
-    // ─────────────────────────────────────────────────────────────────── //
+    // ────────────────────────────────────────────────────────────────────── //
 
     /**
      * AES-256-CBC encrypts [plaintext] and returns a base64url string with
@@ -261,9 +325,9 @@ object VidStormExtractor {
         return b64.replace("+", "-").replace("/", "_").replace("=+$".toRegex(), "")
     }
 
-    // ─────────────────────────────────────────────────────────────────── //
+    // ────────────────────────────────────────────────────────────────────── //
     //  HTTP helper                                                        //
-    // ─────────────────────────────────────────────────────────────────── //
+    // ────────────────────────────────────────────────────────────────────── //
 
     private fun fetchJson(url: String): String {
         val req = Request.Builder()

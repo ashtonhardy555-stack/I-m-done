@@ -193,7 +193,7 @@ private fun TopAppBar(currentTab: Tab, onSearchClick: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "I'm Done",
+                text = "Mario Cart",
                 color = Red,
                 fontSize = 22.sp,
                 fontWeight = FontWeight.Black,

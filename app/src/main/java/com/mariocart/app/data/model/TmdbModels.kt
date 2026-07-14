@@ -22,24 +22,58 @@ data class TmdbItem(
     @SerializedName("original_language") val originalLanguage: String? = null,
     @SerializedName("media_type") val mediaType: String? = null,
     @SerializedName("genre_ids") val genreIds: List<Int> = emptyList(),
-    val runtime: Int? = null             // movie runtime in minutes
+    val runtime: Int? = null             // movie runtime in minutes (unused by UI)
 ) {
     val displayTitle: String get() = title ?: name ?: "Unknown"
     val year: String get() = (releaseDate ?: firstAirDate ?: "").take(4)
     val isMovie: Boolean get() = title != null || mediaType == "movie"
     val contentType: String get() = if (isMovie) "movie" else "tv"
 
+    /**
+     * Poster URL — w185 is a small, fast-loading size that still looks crisp
+     * at the 140dp card width we display. Using w185 (≈50 KB per image)
+     * instead of w342 (≈120 KB) cuts the home screen's image payload by
+     * more than half, which is the single biggest win for scroll smoothness.
+     */
     val posterUrl: String?
-        get() = posterPath?.let { "https://image.tmdb.org/t/p/w342$it" }
+        get() = posterPath?.let { "https://image.tmdb.org/t/p/w185$it" }
 
+    /**
+     * Backdrop URL — w780 is large enough for the hero banner (420dp) and the
+     * player loading screen, but far smaller than "original" (which can be
+     * 3-5 MB per image and caused jank while the hero banner loaded).
+     */
     val backdropUrl: String?
-        get() = backdropPath?.let { "https://image.tmdb.org/t/p/original$it" }
+        get() = backdropPath?.let { "https://image.tmdb.org/t/p/w780$it" }
 
     val ratingText: String
         get() = if (voteAverage > 0) String.format("%.1f", voteAverage) else ""
 
     val isValidMovie: Boolean
         get() = isMovie // All videos identified as movies are valid
+
+    /**
+     * Whether the title has actually been released yet, based on its
+     * release / first-air date. Items with no date are treated as released.
+     *
+     * ISO date strings (YYYY-MM-DD) sort lexicographically, so a plain
+     * string comparison against today's date is correct.
+     */
+    val isReleased: Boolean
+        get() {
+            val date = releaseDate ?: firstAirDate ?: return true
+            if (date.length < 7) return true
+            val today = run {
+                val c = java.util.Calendar.getInstance()
+                String.format(
+                    "%04d-%02d-%02d",
+                    c.get(java.util.Calendar.YEAR),
+                    c.get(java.util.Calendar.MONTH) + 1,
+                    c.get(java.util.Calendar.DAY_OF_MONTH)
+                )
+            }
+            return date <= today
+        }
 }
 
 data class TvSeasonsResponse(
