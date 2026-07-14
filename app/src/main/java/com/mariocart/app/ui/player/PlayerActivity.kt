@@ -996,6 +996,12 @@ private fun guessMimeType(url: String): String? {
     if (u.contains("/playlist") && u.contains("m3u8")) return MimeTypes.APPLICATION_M3U8
     if (u.contains("manifest") && (u.contains("m3u8") || u.contains("hls"))) return MimeTypes.APPLICATION_M3U8
     if (u.contains("/playlist.m3u8")) return MimeTypes.APPLICATION_M3U8
+    // HLS served from subdomains/paths that imply a playlist (no .m3u8 ext).
+    if (u.contains("/index") && u.contains("m3u8")) return MimeTypes.APPLICATION_M3U8
+    if (u.contains("hls.m3u8")) return MimeTypes.APPLICATION_M3U8
+    if (u.contains("/stream/") && u.contains("m3u8")) return MimeTypes.APPLICATION_M3U8
+    // VidLink / common provider HLS: query param ?hls or /playlist without ext.
+    if (u.contains("?hls") || u.contains("&hls")) return MimeTypes.APPLICATION_M3U8
 
     // DASH (.mpd or manifest patterns).
     if (u.contains(".mpd")) return MimeTypes.APPLICATION_MPD
@@ -1005,6 +1011,9 @@ private fun guessMimeType(url: String): String? {
     if (u.endsWith(".mp4") || u.contains(".mp4?")) return MimeTypes.VIDEO_MP4
     if (u.endsWith(".webm") || u.contains(".webm?")) return MimeTypes.VIDEO_WEBM
     if (u.endsWith(".mkv") || u.contains(".mkv?")) return MimeTypes.VIDEO_MATROSKA
+    if (u.endsWith(".mov") || u.contains(".mov?")) return MimeTypes.VIDEO_MP4
+    if (u.endsWith(".avi") || u.contains(".avi?")) return "video/x-msvideo"
+    if (u.endsWith(".flv") || u.contains(".flv?")) return "video/x-flv"
 
     // Progressive MP4 from extension-less CDN paths. Many providers (VidLink,
     // VidSrc CDNs) serve MP4 from paths containing "video", "mp4", "media",
@@ -1018,6 +1027,12 @@ private fun guessMimeType(url: String): String? {
     if (Regex("""/(480|720|1080|1440|2160)p[/$?]""").containsMatchIn(u)) return MimeTypes.VIDEO_MP4
     // VidLink-style direct resource path.
     if (u.contains("/mp/resource/")) return MimeTypes.VIDEO_MP4
+    // Generic direct-stream CDN paths (token-authenticated, no extension).
+    if (u.contains("/directstream")) return MimeTypes.VIDEO_MP4
+    if (u.contains("/download/") && u.contains("mp4")) return MimeTypes.VIDEO_MP4
+    if (u.contains("/raw/") && !u.contains(".m3u8")) return MimeTypes.VIDEO_MP4
+    // Cloud storage / file CDN progressive streams.
+    if (u.contains("/file/") && !u.contains(".m3u8") && !u.contains(".mpd")) return MimeTypes.VIDEO_MP4
 
     return null
 }

@@ -1,7 +1,7 @@
 {
-  "version": 2,
+  "version": 3,
   "updated": "2026-07-14",
-  "description": "Auto-updated list of working TMDB-based stream providers for I-m Done. Fetched by the app at runtime from this file's raw GitHub URL. Edit this file and push to update every install.",
+  "description": "Auto-updated list of working TMDB-based stream providers for I-m Done. Fetched by the app at runtime from this file's raw GitHub URL. Edit this file and push to update every install. Dead servers removed; VidSrc.mov added.",
   "servers": [
     {
       "id": "vidlink",
@@ -10,7 +10,7 @@
       "movieUrlTemplate": "{base}/movie/{id}",
       "tvUrlTemplate": "{base}/tv/{id}/{season}/{episode}",
       "tier": 1,
-      "reliability": 95,
+      "reliability": 96,
       "cloudflare": false,
       "enabled": true
     },
@@ -21,7 +21,7 @@
       "movieUrlTemplate": "{base}/embed/{id}",
       "tvUrlTemplate": "{base}/embed/tv/{id}/{season}/{episode}",
       "tier": 1,
-      "reliability": 88,
+      "reliability": 90,
       "cloudflare": false,
       "enabled": true
     },
@@ -32,7 +32,7 @@
       "movieUrlTemplate": "{base}/embed/{id}",
       "tvUrlTemplate": "{base}/embed/tv/{id}/{season}/{episode}",
       "tier": 1,
-      "reliability": 85,
+      "reliability": 86,
       "cloudflare": false,
       "enabled": true
     },
@@ -43,7 +43,7 @@
       "movieUrlTemplate": "{base}/player.php?tmdb={id}",
       "tvUrlTemplate": "{base}/player.php?type=series&tmdb={id}&season={season}&episode={episode}",
       "tier": 1,
-      "reliability": 80,
+      "reliability": 82,
       "cloudflare": false,
       "enabled": true
     },
@@ -54,7 +54,7 @@
       "movieUrlTemplate": "{base}/embed/movie/{id}",
       "tvUrlTemplate": "{base}/embed/tv/{id}/{season}/{episode}",
       "tier": 2,
-      "reliability": 78,
+      "reliability": 80,
       "cloudflare": false,
       "enabled": true
     },
@@ -65,7 +65,7 @@
       "movieUrlTemplate": "{base}/embed/movie/{id}",
       "tvUrlTemplate": "{base}/embed/tv/{id}/{season}/{episode}",
       "tier": 2,
-      "reliability": 76,
+      "reliability": 78,
       "cloudflare": false,
       "enabled": true
     },
@@ -76,7 +76,7 @@
       "movieUrlTemplate": "{base}/embed/movie/{id}",
       "tvUrlTemplate": "{base}/embed/tv/{id}/{season}/{episode}",
       "tier": 2,
-      "reliability": 74,
+      "reliability": 76,
       "cloudflare": false,
       "enabled": true
     },
@@ -114,6 +114,17 @@
       "enabled": true
     },
     {
+      "id": "vidsrc_mov",
+      "name": "VidSrc.mov",
+      "baseUrl": "https://vidsrc.mov",
+      "movieUrlTemplate": "{base}/embed/movie/{id}",
+      "tvUrlTemplate": "{base}/embed/tv/{id}/{season}/{episode}",
+      "tier": 2,
+      "reliability": 65,
+      "cloudflare": true,
+      "enabled": true
+    },
+    {
       "id": "vidsrc_fyi",
       "name": "VidSrc.fyi",
       "baseUrl": "https://vidsrc.fyi",
@@ -121,39 +132,6 @@
       "tvUrlTemplate": "{base}/embed/tv/{id}/{season}/{episode}",
       "tier": 3,
       "reliability": 55,
-      "cloudflare": true,
-      "enabled": true
-    },
-    {
-      "id": "vidsrc_to",
-      "name": "VidSrc.to",
-      "baseUrl": "https://vidsrc.to",
-      "movieUrlTemplate": "{base}/embed/movie/{id}",
-      "tvUrlTemplate": "{base}/embed/tv/{id}/{season}/{episode}",
-      "tier": 3,
-      "reliability": 50,
-      "cloudflare": true,
-      "enabled": true
-    },
-    {
-      "id": "vixsrc",
-      "name": "VixSrc",
-      "baseUrl": "https://vixsrc.to",
-      "movieUrlTemplate": "{base}/movie/{id}",
-      "tvUrlTemplate": "{base}/tv/{id}/{season}/{episode}",
-      "tier": 3,
-      "reliability": 45,
-      "cloudflare": true,
-      "enabled": true
-    },
-    {
-      "id": "multiembed",
-      "name": "MultiEmbed",
-      "baseUrl": "https://multiembed.mov",
-      "movieUrlTemplate": "{base}/?video_id={id}",
-      "tvUrlTemplate": "{base}/?video_id={id}&s={season}&e={episode}",
-      "tier": 3,
-      "reliability": 40,
       "cloudflare": true,
       "enabled": true
     }

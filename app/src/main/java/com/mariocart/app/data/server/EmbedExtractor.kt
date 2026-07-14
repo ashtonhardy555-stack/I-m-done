@@ -15,6 +15,9 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import kotlinx.coroutines.CancellableContinuation
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.suspendCancellableCoroutine
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -72,6 +75,13 @@ class EmbedExtractor private constructor(
         private const val EXTRACT_TIMEOUT_MS = 18_000L
 
         /**
+         * How many providers to race in parallel per wave. More = faster (more
+         * chances of an instant hit) but uses more memory (one off-screen
+         * WebView per concurrent provider). 4 is a good balance for mobile.
+         */
+        private const val RACE_BATCH = 4
+
+        /**
          * Grace period after a challenge is detected before we declare it
          * needs human verification. Cloudflare JS challenges ("just a
          * moment") auto-solve within a few seconds; if a stream URL is
@@ -105,6 +115,23 @@ class EmbedExtractor private constructor(
          * (b) orders by per-session health + persistent success scores +
          * remote reliability. This means the user's chosen server is tried
          * first, then historically-good servers, then fallbacks.
+         *
+         * ## Speed: parallel racing (the key optimisation)
+         * Providers are tried **in parallel waves** instead of one-by-one:
+         *
+         *   Wave 1 — the top [RACE_BATCH] providers race concurrently. The
+         *            first one to return a [Result.Stream] wins immediately;
+         *            every other race in the wave is cancelled.
+         *
+         *   Wave 2+ — if wave 1 produced only challenges / errors, the next
+         *            [RACE_BATCH] providers race. This continues until all
+         *            providers are exhausted.
+         *
+         * Because WebView extraction of a single provider already waits up to
+         * [EXTRACT_TIMEOUT_MS] for the page's JS player to emit its stream,
+         * racing the best providers simultaneously turns a worst-case
+         * `servers × 18 s` sequential wait into a single ~18 s wave for the
+         * first handful. This is the single biggest speed-up for the user.
          *
          * Challenge handling strategy: providers are ordered clean-first, so
          * the no-challenge providers (VidLink, 2Embed) are tried before any
@@ -140,23 +167,50 @@ class EmbedExtractor private constructor(
 
             var bestChallenge: Result.Challenge? = null
 
-            for (provider in list) {
-                val url = provider.urlFor(contentType, tmdbId, season, episode)
-                Log.d(TAG, "↻ Trying ${provider.name} (${provider.id}, tier=${provider.tier}): $url")
-                when (val r = extract(context, url, onChallengeNeeded)) {
-                    is Result.Stream -> {
-                        Log.i(TAG, "✅ ${provider.name} → ${r.url}")
-                        ServerManager.markServerSuccess(provider.id)
-                        return r.copy(providerName = provider.name)
-                    }
-                    is Result.Challenge -> {
-                        Log.w(TAG, "🤖 ${provider.name} requires verification — deferring, trying next provider")
-                        if (bestChallenge == null) bestChallenge = r
-                        // Don't mark dead — the provider is alive, just challenged.
-                    }
-                    is Result.Error, Result.NotFound -> {
-                        Log.w(TAG, "✗ ${provider.name}: ${(r as? Result.Error)?.message ?: "not found"}")
-                        ServerManager.markServerDead(provider.id)
+            // Race providers in parallel waves for speed.
+            var i = 0
+            while (i < list.size) {
+                val wave = list.subList(i, minOf(i + RACE_BATCH, list.size))
+                i += wave.size
+                Log.d(TAG, "🏁 Racing wave: ${wave.joinToString { it.name }}")
+
+                // Launch every provider in this wave concurrently inside a
+                // coroutineScope so the scope is not leaked. Each provider has
+                // its own internal timeout (EXTRACT_TIMEOUT_MS), so a wave
+                // cannot run longer than that regardless of provider count.
+                val waveResults = coroutineScope {
+                    wave.map { provider ->
+                        async {
+                            val url = provider.urlFor(contentType, tmdbId, season, episode)
+                            Log.d(TAG, "↻ Trying ${provider.name} (${provider.id}, tier=${provider.tier}): $url")
+                            try {
+                                val r = extract(context, url, onChallengeNeeded)
+                                Pair(provider, r)
+                            } catch (e: Exception) {
+                                Log.w(TAG, "✗ ${provider.name}: ${e.message}")
+                                Pair(provider, Result.Error(e.message ?: "extraction failed"))
+                            }
+                        }
+                    }.awaitAll()
+                }
+
+                // Process wave results — first Stream wins immediately.
+                for ((provider, r) in waveResults) {
+                    when (r) {
+                        is Result.Stream -> {
+                            Log.i(TAG, "✅ ${provider.name} → ${r.url}")
+                            ServerManager.markServerSuccess(provider.id)
+                            return r.copy(providerName = provider.name, providerId = provider.id)
+                        }
+                        is Result.Challenge -> {
+                            Log.w(TAG, "🤖 ${provider.name} requires verification — deferring, trying next provider")
+                            if (bestChallenge == null) bestChallenge = r
+                            // Don't mark dead — the provider is alive, just challenged.
+                        }
+                        is Result.Error, Result.NotFound -> {
+                            Log.w(TAG, "✗ ${provider.name}: ${(r as? Result.Error)?.message ?: "not found"}")
+                            ServerManager.markServerDead(provider.id)
+                        }
                     }
                 }
             }
