@@ -43,6 +43,7 @@ import com.mariocart.app.data.server.ServerConfig
 import com.mariocart.app.data.server.ServerManager
 import com.mariocart.app.data.server.StreamExtractor
 import com.mariocart.app.data.server.StreamProviders
+import com.mariocart.app.data.server.VidStormExtractor
 import com.mariocart.app.ui.theme.MarioCartTheme
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -53,7 +54,17 @@ import kotlinx.coroutines.flow.asStateFlow
  * This is the single activity that actually plays videos. It owns a fully
  * on-device extraction pipeline (no backend server involved):
  *
- *   1. [LookMovieWebExtractor] (PRIMARY) — runs the exact Kodi-addon flow
+ *   0. [VidStormExtractor] (PRIMARY) — calls the VidStorm streaming API
+ *      (vidstorm.ru/api), the same backend FilmCave's "cloud / servers"
+ *      button uses, and resolves a **direct** `.m3u8` / `.mp4` URL for the
+ *      given TMDB id in a single HTTP call — no WebView, no embed scraping,
+ *      no Cloudflare challenge. This is by far the most reliable stage and
+ *      is the root-cause fix for "only The Rookie played": virtually every
+ *      other title fell through the fragile WebView stages below because
+ *      LookMovie is Cloudflare-blocked and embed players don't always
+ *      auto-request their media inside the extraction timeout, whereas the
+ *      VidStorm API returns a real direct URL for almost everything.
+ *   1. [LookMovieWebExtractor] (FALLBACK) — runs the exact Kodi-addon flow
  *      (search -> play page -> storage object -> security API -> .m3u8)
  *      inside an off-screen WebView so the Cloudflare JS challenge is solved
  *      automatically and the `cf_clearance` cookie is carried into the
@@ -211,6 +222,9 @@ class PlayerActivity : ComponentActivity() {
  * The player screen.
  *
  * Extraction pipeline (in order, all on-device — no backend):
+ *  0. [VidStormExtractor] — direct VidStorm API call (the FilmCave "cloud
+ *     servers" backend). Resolves a direct .m3u8/.mp4 URL for a TMDB id
+ *     with no WebView and no Cloudflare challenge. PRIMARY stage.
  *  1. [LookMovieWebExtractor] — the Kodi-addon flow inside a WebView
  *     (search -> play page -> storage object -> security API -> .m3u8).
  *     Bypasses Cloudflare because the WebView executes the JS challenge.
@@ -292,7 +306,44 @@ fun PlayerScreen(
 
         val activity = localContext as? android.app.Activity
 
-        // ── Stage 1: LookMovie via WebView (PRIMARY — mirrors Kodi addon) ── //
+        // ── Stage 0: VidStorm direct API (PRIMARY — no WebView, no Cloudflare) ── //
+        // This is the same backend FilmCave's "cloud / servers" button uses.
+        // It resolves a DIRECT .m3u8 / .mp4 URL for the TMDB id in one HTTP
+        // call, so it is dramatically more reliable than every stage below.
+        // This is the root-cause fix for "only The Rookie played": the
+        // fragile LookMovie/embed stages silently fail for most titles,
+        // whereas VidStorm resolves almost everything to a real direct URL.
+        run {
+            val vsResult = try {
+                VidStormExtractor.extract(
+                    tmdbId = tmdbId,
+                    contentType = contentType,
+                    season = season,
+                    episode = episode
+                )
+            } catch (e: Exception) {
+                Log.e("Player", "💥 VidStorm extraction failed", e)
+                VidStormExtractor.Result.Error(e.message ?: "VidStorm extraction failed")
+            }
+
+            when (vsResult) {
+                is VidStormExtractor.Result.Stream -> {
+                    Log.i("Player", "✅ VidStorm stream (${vsResult.providerName}): ${vsResult.url}")
+                    streamUrl = vsResult.url
+                    streamHeaders = vsResult.headers.ifEmpty {
+                        mapOf("User-Agent" to DEFAULT_UA)
+                    }
+                    deliveringServerName = vsResult.providerName.ifBlank { "VidStorm" }
+                    isLoading = false
+                    return@LaunchedEffect
+                }
+                is VidStormExtractor.Result.Error -> {
+                    Log.w("Player", "VidStorm yielded nothing (${vsResult.message}); falling back to LookMovie/embed pipeline.")
+                }
+            }
+        }
+
+        // ── Stage 1: LookMovie via WebView (FALLBACK — mirrors Kodi addon) ── //
         if (activity != null) {
             val lookResult = try {
                 LookMovieWebExtractor.extract(
