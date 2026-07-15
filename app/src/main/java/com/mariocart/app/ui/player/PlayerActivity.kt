@@ -101,8 +101,8 @@ class PlayerActivity : ComponentActivity() {
         // the embed stage) and to resume from the right point when ExoPlayer
         // reports a playback error on an already-resolved URL.
         const val STAGE_VIDSTORM = 0
-        const val STAGE_LOOKMOVIE = 1
-        const val STAGE_EMBED = 2
+        const val STAGE_EMBED = 1
+        const val STAGE_LOOKMOVIE = 2
         const val STAGE_OKHTTP = 3
 
         /**
@@ -275,12 +275,15 @@ fun PlayerScreen(
     var attempt by remember { mutableStateOf(0) }
     // Which stage extraction should START from on this attempt.
     //  - STAGE_VIDSTORM (0): full auto pipeline (default).
-    //  - STAGE_EMBED   (2): user picked a specific server — skip VidStorm /
+    //  - STAGE_EMBED   (1): user picked a specific server — skip VidStorm /
     //    LookMovie and go straight to the embed stage so ServerManager's
     //    ordered list (with their pick first) is honoured. This is the fix
     //    for "if I interrupt the stream auto finder to choose my own it
     //    stops working": previously the select just bumped `attempt`, which
     //    re-ran the whole pipeline from VidStorm and ignored the pick.
+    //    NOTE: embed is now stage 1 (before LookMovie) so when VidStorm
+    //    fails the parallel embed racing stage runs first, giving faster
+    //    and more reliable fallback to working providers.
     var startStage by remember { mutableStateOf(0) }
     // Tracks the stage that actually delivered the current streamUrl so that
     // an ExoPlayer playback error can resume extraction from the NEXT stage
@@ -378,52 +381,7 @@ fun PlayerScreen(
         }
         }
 
-        // ── Stage 1: LookMovie via WebView (FALLBACK — mirrors Kodi addon) ── //
-        if (start <= PlayerActivity.STAGE_LOOKMOVIE && activity != null) {
-            if (start < PlayerActivity.STAGE_LOOKMOVIE) infoMessage = "Trying alternative sources…"
-            currentStage = PlayerActivity.STAGE_LOOKMOVIE
-            val lookResult = try {
-                LookMovieWebExtractor.extract(
-                    context = activity,
-                    title = title,
-                    year = year,
-                    contentType = contentType,
-                    season = season,
-                    episode = episode
-                )
-            } catch (e: Exception) {
-                Log.e("Player", "💥 LookMovie WebView extraction failed", e)
-                LookMovieWebExtractor.Result.Error(e.message ?: "LookMovie extraction failed")
-            }
-
-            when (lookResult) {
-                is LookMovieWebExtractor.Result.Stream -> {
-                    Log.i("Player", "✅ LookMovie stream: ${lookResult.url}")
-                    streamUrl = lookResult.url
-                    streamHeaders = lookResult.headers.ifEmpty {
-                        mapOf("User-Agent" to DEFAULT_UA)
-                    }
-                    isLoading = false
-                    return@LaunchedEffect
-                }
-                is LookMovieWebExtractor.Result.Challenge -> {
-                    if (verificationRounds < PlayerActivity.MAX_VERIFICATION_ROUNDS) {
-                        verificationRounds++
-                        pendingChallengeUrl = lookResult.challengeUrl
-                        pendingReferer = lookResult.referer
-                        infoMessage = "Human verification required. Please complete the challenge, then tap Done."
-                        isLoading = false
-                        return@LaunchedEffect
-                    }
-                    Log.w("Player", "LookMovie still blocked after verification; trying embeds.")
-                }
-                is LookMovieWebExtractor.Result.Error -> {
-                    Log.w("Player", "LookMovie WebView yielded nothing (${lookResult.message}); trying embeds.")
-                }
-            }
-        }
-
-        // ── Stage 2: off-screen WebView embed extraction (FALLBACK) ── //
+        // ── Stage 1: off-screen WebView embed extraction (PARALLEL — races multiple providers) (FALLBACK) ── //
         // This is the stage that actually honours the user's server choice:
         // EmbedExtractor calls ServerManager.getOrderedServers() which puts
         // the user-selected server first. So when start == STAGE_EMBED we
@@ -466,10 +424,55 @@ fun PlayerScreen(
                         isLoading = false
                         return@LaunchedEffect
                     }
-                    Log.w("Player", "Embeds still blocked after verification; trying OkHttp fallback.")
+                    Log.w("Player", "Embeds still blocked after verification; trying LookMovie fallback.")
                 }
                 is EmbedExtractor.Result.NotFound, is EmbedExtractor.Result.Error -> {
-                    Log.w("Player", "Embed extraction yielded nothing; trying OkHttp LookMovie fallback.")
+                    Log.w("Player", "Embed extraction yielded nothing; trying LookMovie WebView fallback.")
+                }
+            }
+        }
+
+        // ── Stage 2: LookMovie via WebView (FALLBACK — mirrors Kodi addon) ── //
+        if (start <= PlayerActivity.STAGE_LOOKMOVIE && activity != null) {
+            if (start < PlayerActivity.STAGE_LOOKMOVIE) infoMessage = "Trying alternative sources…"
+            currentStage = PlayerActivity.STAGE_LOOKMOVIE
+            val lookResult = try {
+                LookMovieWebExtractor.extract(
+                    context = activity,
+                    title = title,
+                    year = year,
+                    contentType = contentType,
+                    season = season,
+                    episode = episode
+                )
+            } catch (e: Exception) {
+                Log.e("Player", "💥 LookMovie WebView extraction failed", e)
+                LookMovieWebExtractor.Result.Error(e.message ?: "LookMovie extraction failed")
+            }
+
+            when (lookResult) {
+                is LookMovieWebExtractor.Result.Stream -> {
+                    Log.i("Player", "✅ LookMovie stream: ${lookResult.url}")
+                    streamUrl = lookResult.url
+                    streamHeaders = lookResult.headers.ifEmpty {
+                        mapOf("User-Agent" to DEFAULT_UA)
+                    }
+                    isLoading = false
+                    return@LaunchedEffect
+                }
+                is LookMovieWebExtractor.Result.Challenge -> {
+                    if (verificationRounds < PlayerActivity.MAX_VERIFICATION_ROUNDS) {
+                        verificationRounds++
+                        pendingChallengeUrl = lookResult.challengeUrl
+                        pendingReferer = lookResult.referer
+                        infoMessage = "Human verification required. Please complete the challenge, then tap Done."
+                        isLoading = false
+                        return@LaunchedEffect
+                    }
+                    Log.w("Player", "LookMovie still blocked after verification; trying OkHttp fallback.")
+                }
+                is LookMovieWebExtractor.Result.Error -> {
+                    Log.w("Player", "LookMovie WebView yielded nothing (${lookResult.message}); trying OkHttp fallback.")
                 }
             }
         }
