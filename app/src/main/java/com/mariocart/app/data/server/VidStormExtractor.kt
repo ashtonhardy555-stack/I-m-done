@@ -269,34 +269,6 @@ object VidStormExtractor {
     }
 
     /**
-     * Lightweight reachability + content check for a candidate media URL.
-     *
-     * ## Why we validate content, not just the status code (the Interstellar bug)
-     *
-     * The previous version only checked the HTTP status of a 2-byte ranged
-     * GET. That was fooled by dead VidStorm CDN URLs: a stale source can
-     * respond **HTTP 206** to a `Range: bytes=0-1` request (so it "looked
-     * alive") while the *full* manifest body is actually a 1-byte error
-     * sentinel (a single `.`) returned with `HTTP 404` on a normal GET.
-     *
-     * Concretely, Interstellar (TMDB 157336) had exactly this: the VidStorm
-     * "Boron" source's `.m3u8` passed the 206 status check, was handed to
-     * ExoPlayer, and ExoPlayer immediately choked on the garbage manifest —
-     * leaving the user on a black screen. Because that dead URL was returned
-     * as "the stream", none of the working VidStorm sources (or the embed
-     * fallback) were ever tried for that title. Many other popular titles
-     * hit the same path.
-     *
-     * Now:
-     *  - For `.m3u8` / HLS candidates we do a small **full** GET and require
-     *    the body to contain `#EXTM3U` (the HLS signature). A 404-as-`.`
-     *    body is rejected, so the extractor moves on to the next source
-     *    instead of returning a broken URL.
-     *  - For `.mp4` / progressive candidates we keep the ranged status check
-     *    (a 200/206/416 from a real media host is sufficient — the moov atom
-     *    is read by ExoPlayer at playback time).
-     *  - 5xx and connection failures still count as "dead".
-     */
     private fun verifyUrl(
         url: String,
         headers: Map<String, String>,
@@ -332,19 +304,66 @@ object VidStormExtractor {
             }
         }
 
-        // ── Progressive (.mp4 etc.): ranged status check ──
+        // ── Progressive (.mp4 etc.): ranged status + content-type sniff ──
+        //
+        // CRITICAL: a 2-byte ranged GET returning 206 is NOT enough proof a
+        // media URL is playable. VidStorm's hellstorm.lol playlist sources
+        // resolve to CDN `.mp4` URLs that gate on a browser session and reply
+        // with **HTTP 403 + an HTML "ERROR: ACCESS DENIED" body** to any
+        // OkHttp request (no session cookie/token exists outside vidstorm.ru
+        // itself). ExoPlayer cannot play an HTML error page, so returning
+        // such a URL produces a black screen and — worse — blocks the
+        // fallthrough to the VidSrc stage, which *does* resolve TV shows to
+        // real #EXTM3U streams.
+        //
+        // This was the root cause of "shows don't load": VidStorm returned
+        // a 403 hellstorm mp4 as "the stream" for every TV episode, the
+        // player died on it, and VidSrc was never reached. Now we:
+        //  - Reject 403/401/405 outright for progressive URLs. A real media
+        //    host answers 200/206/416 to a ranged GET; a CDN that 403s an
+        //    unauthenticated OkHttp client will 403 ExoPlayer too.
+        //  - Additionally sniff the response: if the body/Content-Type looks
+        //    like HTML or text (an error page), reject it even on a 200/206.
+        //    Some CDNs wrap "ACCESS DENIED" inside a 200 with text/html.
         return try {
             val builder = Request.Builder().url(url)
             headers.forEach { (k, v) -> builder.header(k, v) }
-            // Range request: read only the first 2 bytes to minimise data.
-            builder.header("Range", "bytes=0-1").get()
+            // Range request: read only the first bytes to minimise data.
+            builder.header("Range", "bytes=0-3").get()
             verifier.newCall(builder.build()).execute().use { resp ->
                 val code = resp.code
-                Log.d(TAG, "VidStorm verify $name: progressive HTTP $code")
-                // 200/206 = reachable. 416 = range issue but host alive.
-                // 403/401 = may need headers ExoPlayer carries — don't discard.
-                // 404/5xx = genuinely dead.
-                code in 200..299 || code == 416 || code == 403 || code == 401 || code == 405
+                // A real media host: 200/206/416. 416 = range not satisfiable
+                // but the resource exists (host alive, file may be empty/tiny).
+                // 403/401/405/404/5xx = not playable by ExoPlayer over plain
+                // OkHttp -> reject so we move on / fall through to VidSrc.
+                if (code != 200 && code != 206 && code != 416) {
+                    Log.d(TAG, "VidStorm verify $name: progressive HTTP $code -> reject (not 200/206/416)")
+                    return false
+                }
+                // Content-type sniff: an HTML/text body is an error page, not
+                // media. Real mp4/m3u8-progressive responses are video/* or
+                // application/octet-stream (or have no content-type but binary
+                // bytes). A few media CDNs omit Content-Type, so only reject
+                // when it *explicitly* declares text/html or text/plain.
+                val ct = resp.header("Content-Type")?.lowercase().orEmpty()
+                if (ct.startsWith("text/html") || ct.startsWith("text/plain")) {
+                    // Peek the body to be sure it's an error page and not a
+                    // mislabeled media file (some hosts serve video as
+                    // text/plain). If the first bytes are "<" (HTML) or the
+                    // classic "ERROR:" sentinel, it's an error page.
+                    val peek = resp.peekBody(64L).string()
+                    val looksLikeErrorPage =
+                        peek.contains("<html", ignoreCase = true) ||
+                            peek.contains("<!doctype", ignoreCase = true) ||
+                            peek.contains("ERROR:", ignoreCase = true) ||
+                            peek.contains("access denied", ignoreCase = true)
+                    if (looksLikeErrorPage) {
+                        Log.d(TAG, "VidStorm verify $name: progressive HTTP $code but body is an HTML/error page (ct=$ct) -> reject")
+                        return false
+                    }
+                }
+                Log.d(TAG, "VidStorm verify $name: progressive HTTP $code OK (ct=$ct)")
+                true
             }
         } catch (e: Exception) {
             Log.d(TAG, "VidStorm verify $name: progressive connection failed (${e.message})")

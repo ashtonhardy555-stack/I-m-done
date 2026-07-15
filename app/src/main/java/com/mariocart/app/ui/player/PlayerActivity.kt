@@ -46,8 +46,11 @@ import com.mariocart.app.data.server.StreamProviders
 import com.mariocart.app.data.server.VidSrcExtractor
 import com.mariocart.app.data.server.VidStormExtractor
 import com.mariocart.app.ui.theme.MarioCartTheme
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.selects.select
 
 /**
  * PlayerActivity — the on-device video player.
@@ -353,90 +356,135 @@ fun PlayerScreen(
 
         val activity = localContext as? android.app.Activity
 
-        // ── Stage 0: VidStorm direct API (PRIMARY — no WebView, no Cloudflare) ── //
+        // ── Stage 0+1: VidStorm + VidSrc raced in PARALLEL (auto mode) ── //
         // Skipped when the user manually picked a server (start == STAGE_EMBED):
-        // VidStorm ignores ServerManager ordering, so running it would defeat
-        // the user's explicit choice.
-        // This is the same backend FilmCave's "cloud / servers" button uses.
-        // It resolves a DIRECT .m3u8 / .mp4 URL for the TMDB id in one HTTP
-        // call, so it is dramatically more reliable than every stage below.
-        // This is the root-cause fix for "only The Rookie played": the
-        // fragile LookMovie/embed stages silently fail for most titles,
-        // whereas VidStorm resolves almost everything to a real direct URL.
-        if (start <= PlayerActivity.STAGE_VIDSTORM) {
+        // VidStorm/VidSrc ignore ServerManager ordering, so running them would
+        // defeat the user's explicit choice (the embed stage below honours it).
+        //
+        // ## Why race instead of sequential (the "shows are super slow" fix)
+        //
+        // VidStorm and VidSrc are *complementary*, not redundant:
+        //  - VidStorm (the FilmCave "cloud/servers" backend) returns a DIRECT
+        //    .m3u8/.mp4 in ONE HTTP call. For a subset of popular MOVIES
+        //    (Avatar, Spider-Man NWH, Top Gun Maverick…) this is a live,
+        //    verified URL → playback in ~0.5 s. That is why "movies play very
+        //    fast". But for most titles it returns a dead source (a 404-as-`.`
+        //    HLS body, or a hellstorm.lol mp4 that 403s an OkHttp client), so
+        //    VidStorm alone yields nothing.
+        //  - VidSrc (vidsrc.me → cloudorchestranova RCP/PRORCP) resolves
+        //    almost EVERYTHING — including all the movies VidStorm misses AND
+        //    every TV episode — to a live #EXTM3U, in ~2.4 s over plain
+        //    OkHttp. No WebView, no JS challenge.
+        //
+        // Previously these ran strictly sequentially: Stage 0 VidStorm first,
+        // and only if it *errored* did we run Stage 1 VidSrc. Two problems:
+        //   1. VidStorm's dead-source detection (esp. the hellstorm playlist
+        //      path used by TV) added ~0.7 s of pure overhead before VidSrc
+        //      could even start — so TV took ~3.1 s while fast movies took
+        //      ~0.5 s. "Shows play super slow vs movies."
+        //   2. The old verifyUrl() treated a 403 hellstorm mp4 as "works",
+        //      so for TV VidStorm returned a DEAD url as the stream, ExoPlayer
+        //      choked on the HTML "ACCESS DENIED" body, and VidSrc was NEVER
+        //      reached → "shows wouldn't play at all" (now fixed in
+        //      VidStormExtractor.verifyUrl).
+        //
+        // Racing them in parallel fixes both: whichever resolves first wins.
+        // A fast-movie VidStorm hit still wins in ~0.5 s (unchanged), while TV
+        // now resolves via VidSrc in ~2.4 s *without* waiting on VidStorm's
+        // dead-end. Both run on Dispatchers.IO so they truly run at once.
+        //
+        // If BOTH error (rare), we fall through to the embed/LookMovie stages.
+        if (start <= PlayerActivity.STAGE_VIDSRC) {
             currentStage = PlayerActivity.STAGE_VIDSTORM
             infoMessage = "Finding best stream…"
-        run {
-            val vsResult = try {
-                VidStormExtractor.extract(
-                    tmdbId = tmdbId,
-                    contentType = contentType,
-                    season = season,
-                    episode = episode
-                )
+
+            // Race the two direct extractors. The first to return a verified
+            // Stream wins; the loser is cancelled. Both run concurrently on IO.
+            val winner: Any? = try {
+                coroutineScope {
+                    val vidStorm = async {
+                        try {
+                            VidStormExtractor.extract(tmdbId, contentType, season, episode)
+                        } catch (e: Exception) {
+                            Log.e("Player", "💥 VidStorm extraction failed", e)
+                            VidStormExtractor.Result.Error(e.message ?: "VidStorm extraction failed")
+                        }
+                    }
+                    val vidSrc = async {
+                        try {
+                            VidSrcExtractor.extract(tmdbId, contentType, season, episode)
+                        } catch (e: Exception) {
+                            Log.e("Player", "💥 VidSrc extraction failed", e)
+                            VidSrcExtractor.Result.Error(e.message ?: "VidSrc extraction failed")
+                        }
+                    }
+                    // select{} suspends until the FIRST async completes; we
+                    // then inspect its result. We keep polling as long as a
+                    // completed branch is an Error (so a real Stream from the
+                    // other branch can still win), and stop on the first
+                    // Stream or when both have completed.
+                    var stormResult: VidStormExtractor.Result? = null
+                    var srcResult: VidSrcExtractor.Result? = null
+                    var raceWinner: Any? = null
+                    while (raceWinner == null && (stormResult == null || srcResult == null)) {
+                        raceWinner = select<Any?> {
+                            if (stormResult == null) {
+                                vidStorm.onAwait { r ->
+                                    stormResult = r
+                                    if (r is VidStormExtractor.Result.Stream) r
+                                    else if (srcResult is VidSrcExtractor.Result.Stream) srcResult
+                                    else null // wait for the other (or fall through below)
+                                }
+                            }
+                            if (srcResult == null) {
+                                vidSrc.onAwait { r ->
+                                    srcResult = r
+                                    if (r is VidSrcExtractor.Result.Stream) r
+                                    else if (stormResult is VidStormExtractor.Result.Stream) stormResult
+                                    else null // wait for the other (or fall through below)
+                                }
+                            }
+                        }
+                    }
+                    // If neither produced a Stream, normalise to the last
+                    // error so the caller can fall through. This expression
+                    // is the coroutineScope return value -> assigned to the
+                    // outer `winner`.
+                    raceWinner ?: run {
+                        val se = (stormResult as? VidStormExtractor.Result.Error)?.message
+                        val xe = (srcResult as? VidSrcExtractor.Result.Error)?.message
+                        VidStormExtractor.Result.Error(se ?: xe ?: "VidStorm & VidSrc yielded nothing")
+                    }
+                }
             } catch (e: Exception) {
-                Log.e("Player", "💥 VidStorm extraction failed", e)
-                VidStormExtractor.Result.Error(e.message ?: "VidStorm extraction failed")
+                Log.e("Player", "💥 Parallel VidStorm/VidSrc race failed", e)
+                VidStormExtractor.Result.Error(e.message ?: "extraction race failed")
             }
 
-            when (vsResult) {
+            // Apply the winner.
+            when (winner) {
                 is VidStormExtractor.Result.Stream -> {
-                    Log.i("Player", "✅ VidStorm stream (${vsResult.providerName}): ${vsResult.url}")
-                    streamUrl = vsResult.url
-                    streamHeaders = vsResult.headers.ifEmpty {
+                    Log.i("Player", "✅ VidStorm stream (${winner.providerName}): ${winner.url}")
+                    streamUrl = winner.url
+                    streamHeaders = winner.headers.ifEmpty {
                         mapOf("User-Agent" to DEFAULT_UA)
                     }
-                    deliveringServerName = vsResult.providerName.ifBlank { "VidStorm" }
+                    deliveringServerName = winner.providerName.ifBlank { "VidStorm" }
+                    isLoading = false
+                    return@LaunchedEffect
+                }
+                is VidSrcExtractor.Result.Stream -> {
+                    Log.i("Player", "✅ VidSrc stream (${winner.providerName}): ${winner.url}")
+                    streamUrl = winner.url
+                    streamHeaders = winner.headers.ifEmpty {
+                        mapOf("User-Agent" to DEFAULT_UA)
+                    }
+                    deliveringServerName = winner.providerName.ifBlank { "VidSrc" }
                     isLoading = false
                     return@LaunchedEffect
                 }
                 is VidStormExtractor.Result.Error -> {
-                    Log.w("Player", "VidStorm yielded nothing (${vsResult.message}); falling back to LookMovie/embed pipeline.")
-                }
-            }
-        }
-        }
-
-        // ── Stage 1: VidSrc direct HLS extraction (FALLBACK after VidStorm) ── //
-        // VidStorm is broken for a large set of popular titles (Interstellar,
-        // The Green Mile, …): it returns only a dead "Boron" CDN URL and
-        // nulls for every other named source. The VidSrc pipeline
-        // (vidsrc.me → cloudorchestranova.com RCP/PRORCP) consistently
-        // resolves those same titles to live #EXTM3U manifests at
-        // 360p/720p/1080p over plain OkHttp — no WebView, no JS challenge.
-        // This is the "hidden servers in the exoplayer" that aggregator
-        // sites keep behind their RCP indirection. It runs fast (a few
-        // round-trips) so we try it before the slow 18 s embed WebView stage.
-        if (start <= PlayerActivity.STAGE_VIDSRC) {
-            currentStage = PlayerActivity.STAGE_VIDSRC
-            infoMessage = "Finding best stream…"
-            run {
-                val vsResult = try {
-                    VidSrcExtractor.extract(
-                        tmdbId = tmdbId,
-                        contentType = contentType,
-                        season = season,
-                        episode = episode
-                    )
-                } catch (e: Exception) {
-                    Log.e("Player", "💥 VidSrc extraction failed", e)
-                    VidSrcExtractor.Result.Error(e.message ?: "VidSrc extraction failed")
-                }
-
-                when (vsResult) {
-                    is VidSrcExtractor.Result.Stream -> {
-                        Log.i("Player", "✅ VidSrc stream (${vsResult.providerName}): ${vsResult.url}")
-                        streamUrl = vsResult.url
-                        streamHeaders = vsResult.headers.ifEmpty {
-                            mapOf("User-Agent" to DEFAULT_UA)
-                        }
-                        deliveringServerName = vsResult.providerName.ifBlank { "VidSrc" }
-                        isLoading = false
-                        return@LaunchedEffect
-                    }
-                    is VidSrcExtractor.Result.Error -> {
-                        Log.w("Player", "VidSrc yielded nothing (${vsResult.message}); falling back to embed pipeline.")
-                    }
+                    Log.w("Player", "VidStorm+VidSrc both yielded nothing (${winner.message}); falling back to embed pipeline.")
                 }
             }
         }

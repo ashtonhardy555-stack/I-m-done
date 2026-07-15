@@ -503,8 +503,11 @@ object VidSrcExtractor {
     private val M3U8_QUOTED_PATTERN =
         Pattern.compile("\"(https?://[^\"]+\\.m3u8[^\"]*)\"")
 
+    // Matches both $.get("https://HOST/generate.php") and $.ajax("...").
+    // Some VidSrc-family pages use $.ajax instead of $.get for the token
+    // endpoint, so we accept either to avoid missing a generate.php host.
     private val GEN_HOST_PATTERN =
-        Pattern.compile("\\$\\.get\\(\"https?://([^/]+)/generate\\.php\"")
+        Pattern.compile("\\$\\.(?:get|ajax)\\(\"https?://([^/]+)/generate\\.php\"")
 
     private val REPLACEALL_PATTERN =
         Pattern.compile("replaceAll\\(\"(__\\w+__)\"")
