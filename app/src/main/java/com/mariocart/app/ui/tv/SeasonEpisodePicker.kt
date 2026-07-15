@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -98,7 +99,12 @@ fun SeasonEpisodePicker(
             return@Column
         }
 
-        // ── Season selector (horizontal chips) ─────────────────────────── //
+        // -- Season selector (horizontally scrollable chips -- ALL seasons) -- //
+        // Previously this rendered only the first 8 seasons in a fixed Row
+        // and a second Row for the rest, with NO scrolling, so long-running
+        // shows (20+ seasons) could not be scrolled through. Now every
+        // season lives in a single LazyRow that scrolls horizontally, so the
+        // user can reach any season no matter how many there are.
         Text(
             "Season",
             color = TextPrimary,
@@ -106,30 +112,23 @@ fun SeasonEpisodePicker(
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(start = 16.dp, top = 4.dp, bottom = 8.dp)
         )
-        Row(
+        LazyRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(horizontal = 4.dp)
         ) {
-            // Render at most the available seasons in one row block.
-            val visibleSeasons = seasons.take(8)
-            visibleSeasons.forEach { season ->
+            items(
+                items = seasons,
+                key = { season -> season.seasonNumber }
+            ) { season ->
                 SeasonChip(
                     label = season.name ?: "Season ${season.seasonNumber}",
                     isSelected = season.seasonNumber == selectedSeason,
                     onClick = { viewModel.selectSeason(season.seasonNumber) }
                 )
             }
-        }
-
-        // If there are more than 8 seasons, show a compact wrap grid below.
-        if (seasons.size > 8) {
-            MoreSeasonsRow(
-                seasons = seasons.drop(8),
-                selectedSeason = selectedSeason,
-                onSelect = { viewModel.selectSeason(it) }
-            )
         }
 
         // ── Episode list ───────────────────────────────────────────────── //
@@ -178,28 +177,6 @@ private fun SeasonChip(label: String, isSelected: Boolean, onClick: () -> Unit) 
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 8.dp)
     )
-}
-
-@Composable
-private fun MoreSeasonsRow(
-    seasons: List<TvSeason>,
-    selectedSeason: Int,
-    onSelect: (Int) -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        seasons.forEach { season ->
-            SeasonChip(
-                label = "${season.seasonNumber}",
-                isSelected = season.seasonNumber == selectedSeason,
-                onClick = { onSelect(season.seasonNumber) }
-            )
-        }
-    }
 }
 
 @Composable

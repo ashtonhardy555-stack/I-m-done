@@ -269,20 +269,70 @@ object VidStormExtractor {
     }
 
     /**
-     * Lightweight reachability check for a candidate media URL. Issues a
-     * 2-byte ranged GET with the VidStorm headers and returns true if the
-     * host responds with a non-5xx status (200/206/416/403 are all accepted
-     * — a 403 can still play in ExoPlayer because the CDN may expect the
-     * Referer header that ExoPlayer's DefaultHttpDataSource will carry).
+     * Lightweight reachability + content check for a candidate media URL.
      *
-     * Only 5xx (server error) and connection failures count as "dead" —
-     * those mean the URL is genuinely broken and ExoPlayer would also fail.
+     * ## Why we validate content, not just the status code (the Interstellar bug)
+     *
+     * The previous version only checked the HTTP status of a 2-byte ranged
+     * GET. That was fooled by dead VidStorm CDN URLs: a stale source can
+     * respond **HTTP 206** to a `Range: bytes=0-1` request (so it "looked
+     * alive") while the *full* manifest body is actually a 1-byte error
+     * sentinel (a single `.`) returned with `HTTP 404` on a normal GET.
+     *
+     * Concretely, Interstellar (TMDB 157336) had exactly this: the VidStorm
+     * "Boron" source's `.m3u8` passed the 206 status check, was handed to
+     * ExoPlayer, and ExoPlayer immediately choked on the garbage manifest —
+     * leaving the user on a black screen. Because that dead URL was returned
+     * as "the stream", none of the working VidStorm sources (or the embed
+     * fallback) were ever tried for that title. Many other popular titles
+     * hit the same path.
+     *
+     * Now:
+     *  - For `.m3u8` / HLS candidates we do a small **full** GET and require
+     *    the body to contain `#EXTM3U` (the HLS signature). A 404-as-`.`
+     *    body is rejected, so the extractor moves on to the next source
+     *    instead of returning a broken URL.
+     *  - For `.mp4` / progressive candidates we keep the ranged status check
+     *    (a 200/206/416 from a real media host is sufficient — the moov atom
+     *    is read by ExoPlayer at playback time).
+     *  - 5xx and connection failures still count as "dead".
      */
     private fun verifyUrl(
         url: String,
         headers: Map<String, String>,
         name: String
     ): Boolean {
+        val lowerUrl = url.lowercase()
+        val isHls = lowerUrl.contains(".m3u8") || lowerUrl.contains("/hls/") ||
+            lowerUrl.contains("/master") || lowerUrl.contains("manifest")
+
+        // ── HLS / .m3u8: validate the manifest content ──
+        if (isHls) {
+            return try {
+                val builder = Request.Builder().url(url)
+                headers.forEach { (k, v) -> builder.header(k, v) }
+                // Limit how much we read — a master playlist is a few KB.
+                // We don't send a Range header here on purpose: a ranged GET
+                // returns 206 for the dead-`.` bodies we want to reject.
+                builder.get()
+                verifier.newCall(builder.build()).execute().use { resp ->
+                    val code = resp.code
+                    if (code !in 200..299) {
+                        Log.d(TAG, "VidStorm verify $name: HLS HTTP $code -> reject")
+                        return false
+                    }
+                    val body = resp.body?.string().orEmpty()
+                    val ok = body.contains("#EXTM3U")
+                    Log.d(TAG, "VidStorm verify $name: HLS body ${body.length} chars, EXTM3U=$ok")
+                    ok
+                }
+            } catch (e: Exception) {
+                Log.d(TAG, "VidStorm verify $name: HLS connection failed (${e.message})")
+                false
+            }
+        }
+
+        // ── Progressive (.mp4 etc.): ranged status check ──
         return try {
             val builder = Request.Builder().url(url)
             headers.forEach { (k, v) -> builder.header(k, v) }
@@ -290,14 +340,14 @@ object VidStormExtractor {
             builder.header("Range", "bytes=0-1").get()
             verifier.newCall(builder.build()).execute().use { resp ->
                 val code = resp.code
-                Log.d(TAG, "VidStorm verify $name: HTTP $code")
+                Log.d(TAG, "VidStorm verify $name: progressive HTTP $code")
                 // 200/206 = reachable. 416 = range issue but host alive.
                 // 403/401 = may need headers ExoPlayer carries — don't discard.
                 // 404/5xx = genuinely dead.
                 code in 200..299 || code == 416 || code == 403 || code == 401 || code == 405
             }
         } catch (e: Exception) {
-            Log.d(TAG, "VidStorm verify $name: connection failed (${e.message})")
+            Log.d(TAG, "VidStorm verify $name: progressive connection failed (${e.message})")
             false
         }
     }
