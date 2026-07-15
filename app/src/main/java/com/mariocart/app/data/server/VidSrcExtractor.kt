@@ -221,10 +221,21 @@ object VidSrcExtractor {
         val urls = resolved.split(" or ").map { it.trim() }.filter { it.startsWith("http") }
         Log.d(TAG, "VidSrc ${urls.size} candidate URL(s) after token resolve")
 
+        // Track the best "looks valid but unverified" URL as a last-resort
+        // fallback. If every verifyHls() fails (e.g. a transient SSL/timeout
+        // hiccup on a mobile network, or a CDN that 200s a non-EXTM3U body on
+        // a ranged GET), we still prefer a well-formed VidSrc URL over
+        // falling through to the embed stage — the user confirmed embed
+        // servers "usually never work".
+        var bestUnverified: String? = null
+
         for ((ui, url) in urls.withIndex()) {
             if (url.contains("__")) {
                 Log.d(TAG, "VidSrc URL ${ui + 1} still has placeholder, skipping")
                 continue
+            }
+            if (looksLikeValidHls(url) && bestUnverified == null) {
+                bestUnverified = url
             }
             if (verifyHls(url, headers)) {
                 return Result.Stream(
@@ -235,7 +246,31 @@ object VidSrcExtractor {
             }
             Log.d(TAG, "VidSrc URL ${ui + 1} failed HLS verification")
         }
+        // Last resort: return the best-looking unverified URL. ExoPlayer will
+        // attempt to play it; if the CDN is truly down it will error out, but
+        // that is still better than skipping to the embed stage which the user
+        // says almost never works.
+        if (bestUnverified != null) {
+            Log.w(TAG, "VidSrc: no URL passed HLS verify; returning best unverified: ${bestUnverified!!.take(80)}")
+            return Result.Stream(
+                url = bestUnverified!!,
+                headers = headers,
+                providerName = "VidSrc·${idx + 1}·unverified"
+            )
+        }
         return null
+    }
+
+    /**
+     * Heuristic: does this resolved URL look like a real HLS master playlist?
+     * Used to pick a last-resort URL when live verification fails. A valid
+     * VidSrc stream URL ends in `.m3u8` (possibly with a `?token=...` query)
+     * and has no remaining `__PLACEHOLDER__` tokens.
+     */
+    private fun looksLikeValidHls(url: String): Boolean {
+        if (url.contains("__")) return false
+        val noQuery = url.substringBefore('?')
+        return noQuery.endsWith(".m3u8", ignoreCase = true)
     }
 
     // ─────────────────────────────────────────────────────────────────────── //
@@ -315,21 +350,36 @@ object VidSrcExtractor {
             }
         }
 
-        // Fallback: if __TOKEN__ is still present, try each URL's own host.
-        if (result.contains("__TOKEN__")) {
+        // Fallback: if any __TOKEN*__ placeholder is still present, try each
+        // URL's own host (the CDN that serves the m3u8 also serves
+        // generate.php). This mirrors the third JS call:
+        //   $.get("https://"+host+"/generate.php", function(token){ ... })
+        // and is the most reliable pairing because the host that the URL
+        // points at is always the host that issued its token.
+        if (result.contains("__")) {
             for (raw in result.split(" or ")) {
                 val url = raw.trim()
-                if (!url.startsWith("http") || !url.contains("__TOKEN__")) continue
+                if (!url.startsWith("http") || !url.contains("__")) continue
                 val host = extractHost(url) ?: continue
                 if (host in usedHosts) continue
                 val token = try {
                     fetch("https://$host/generate.php", referer = "$baseDom/").trim()
                 } catch (e: Exception) { "" }
                 if (token.isNotBlank()) {
-                    Log.d(TAG, "VidSrc fallback token from $host: ${token.take(40)}…")
-                    result = result.replace("__TOKEN__", token)
+                    Log.d(TAG, "VidSrc per-URL fallback token from $host: ${token.take(40)}…")
+                    // Replace every remaining placeholder in this URL with
+                    // this host's token (a given CDN host only ever uses one
+                    // token type for its own URLs).
+                    val phsInUrl = PLACEHOLDER_PATTERN.matcher(url).let { m ->
+                        val set = linkedSetOf<String>()
+                        while (m.find()) set += m.group(1)!!
+                        set
+                    }
+                    for (ph in phsInUrl) {
+                        result = result.replace("__${ph}__", token)
+                    }
                     usedHosts += host
-                    if (!result.contains("__TOKEN__")) break
+                    if (!result.contains("__")) break
                 }
             }
         }
@@ -370,15 +420,33 @@ object VidSrcExtractor {
 
     private fun findIframeOrigin(html: String): String? {
         val m = IFRAME_SRC_PATTERN.matcher(html)
-        if (!m.find()) return null
-        var src = m.group(1)!!
-        if (src.startsWith("//")) src = "https:$src"
-        val schemeEnd = src.indexOf("://")
-        if (schemeEnd < 0) return null
-        val hostStart = schemeEnd + 3
-        val pathStart = src.indexOf('/', hostStart)
-        val origin = if (pathStart > 0) src.substring(0, pathStart) else src
-        return origin
+        if (m.find()) {
+            var src = m.group(1)!!
+            if (src.startsWith("//")) src = "https:$src"
+            val schemeEnd = src.indexOf("://")
+            if (schemeEnd < 0) return null
+            val hostStart = schemeEnd + 3
+            val pathStart = src.indexOf('/', hostStart)
+            val origin = if (pathStart > 0) src.substring(0, pathStart) else src
+            return origin
+        }
+        // Keyword fallback: the iframe src is sometimes protocol-relative
+        // ("//cloudorchestranova.com/...") or embedded in a JS string in a way
+        // the iframe regex misses. The VidSrc family always uses a
+        // cloudorchestranova.com (or similar) RCP host, so if we can see the
+        // keyword in the HTML, use it directly.
+        val keywordHosts = listOf(
+            "cloudorchestranova.com",
+            "cloudfoxreborn.com",
+            "cloud9sparks.com"
+        )
+        for (host in keywordHosts) {
+            if (html.contains(host, ignoreCase = true)) {
+                Log.d(TAG, "VidSrc findIframeOrigin: iframe regex missed, using keyword host https://$host")
+                return "https://$host"
+            }
+        }
+        return null
     }
 
     private fun findServerHashes(html: String): List<String> {
