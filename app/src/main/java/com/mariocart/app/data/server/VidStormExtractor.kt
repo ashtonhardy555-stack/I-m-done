@@ -174,7 +174,7 @@ object VidStormExtractor {
         var lastError: Result.Error = Result.Error("VidStorm: no API base responded")
         for (base in API_BASES) {
             val apiUrl = "$base/$kind/$encrypted"
-            Log.d(TAG, "\U0001f50d VidStorm API: $apiUrl  (plain=$plain)")
+            Log.d(TAG, "VidStorm API: $apiUrl  (plain=$plain)")
 
             val body = try {
                 fetchJson(apiUrl)
