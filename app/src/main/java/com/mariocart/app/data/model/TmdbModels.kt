@@ -124,3 +124,21 @@ data class StreamingServer(
         }
     }
 }
+
+/**
+ * Response shape for TMDB's `movie/{id}` / `tv/{id}` endpoint when called with
+ * `append_to_response=external_ids`. We only need the [imdbId] field, which is
+ * nested under the `external_ids` object. Used by NoTorrentExtractor to map a
+ * TMDB id → IMDb id (the NoTorrent Stremio addon keys off IMDb ids).
+ */
+data class ExternalIdsResponse(
+    val id: Int = 0,
+    @SerializedName("external_ids") val externalIds: ExternalIds? = null
+) {
+    /** The IMDb id (e.g. "tt0816692") or null if unavailable. */
+    val imdbId: String? get() = externalIds?.imdbId
+}
+
+data class ExternalIds(
+    @SerializedName("imdb_id") val imdbId: String? = null
+)

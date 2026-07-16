@@ -113,4 +113,23 @@ interface TmdbApi {
         @Query("api_key") apiKey: String,
         @Query("language") language: String = "en-US"
     ): TmdbItem
+
+    // ── External IDs ──────────────────────────────────────────────
+    // Used by NoTorrentExtractor to map a TMDB id → IMDb id (ttXXXXXXX).
+    // The NoTorrent Stremio addon accepts IMDb ids for its stream lookup.
+    // We append external_ids to the standard movie/tv detail call so we
+    // get the imdb_id in a single round-trip.
+    @GET("movie/{movie_id}")
+    suspend fun getMovieExternalIds(
+        @Path("movie_id") movieId: Int,
+        @Query("api_key") apiKey: String,
+        @Query("append_to_response") append: String = "external_ids"
+    ): ExternalIdsResponse
+
+    @GET("tv/{tv_id}")
+    suspend fun getTvExternalIds(
+        @Path("tv_id") tvId: Int,
+        @Query("api_key") apiKey: String,
+        @Query("append_to_response") append: String = "external_ids"
+    ): ExternalIdsResponse
 }

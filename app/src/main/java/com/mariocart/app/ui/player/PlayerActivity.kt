@@ -39,6 +39,7 @@ import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import com.mariocart.app.data.server.EmbedExtractor
 import com.mariocart.app.data.server.LookMovieWebExtractor
+import com.mariocart.app.data.server.NoTorrentExtractor
 import com.mariocart.app.data.server.ServerConfig
 import com.mariocart.app.data.server.ServerManager
 import com.mariocart.app.data.server.StreamExtractor
@@ -88,6 +89,10 @@ import kotlinx.coroutines.withTimeout
  *        - [VixSrcExtractor] — calls the vixsrc.to API, fetches the embed
  *          HTML, extracts the token/expires/playlist, and builds a direct
  *          master HLS URL. No WebView, no JS challenge.
+ *        - [NoTorrentExtractor] — queries the NoTorrent Stremio addon
+ *          (`addon-osvh.onrender.com`) after resolving TMDB→IMDb. Returns
+ *          8–18 direct HLS/MP4 streams and reliably resolves the stubborn
+ *          titles VidStorm/VidSrc miss (Interstellar 157336, LOTR:ROTK 122).
  *   2. [EmbedExtractor] (FALLBACK) — tries every embed provider
  *      (VidLink, 2Embed, VidSrc, …) inside an off-screen WebView and
  *      captures the direct `.m3u8`/`.mp4` URL the provider's JS player
@@ -489,6 +494,24 @@ fun PlayerScreen(
                             VixSrcExtractor.Result.Error(e.message ?: "VixSrc extraction failed")
                         }
                     }
+                    // 6th concurrent racer: NoTorrent Stremio addon. This is
+                    // the extractor that reliably resolves the "stubborn"
+                    // titles VidStorm/VidSrc miss — notably Interstellar (157336)
+                    // and LOTR: Return of the King (122), where VidStorm's Boron
+                    // source is a dead 404-in-disguise and VidSrc's token
+                    // resolution yields nothing. NoTorrent returns 8–18 verified
+                    // HLS/MP4 streams for both. It does one extra round-trip
+                    // (TMDB→IMDb) before the addon query, so it is slightly
+                    // slower to first result than the pure-TMDB extractors, but
+                    // for the titles only it can resolve that is a net win.
+                    val noTorrent = async {
+                        try {
+                            NoTorrentExtractor.extract(tmdbId, contentType, season, episode)
+                        } catch (e: Exception) {
+                            Log.e("Player", "💥 NoTorrent extraction failed", e)
+                            NoTorrentExtractor.Result.Error(e.message ?: "NoTorrent extraction failed")
+                        }
+                    }
                     // 5th concurrent racer: the WebView embed pipeline. This
                     // is the same EmbedExtractor.extractFromProviders() that
                     // Stage 2 calls — but now it starts immediately, in
@@ -522,6 +545,7 @@ fun PlayerScreen(
                     var srcResult: VidSrcExtractor.Result? = null
                     var linkResult: VidLinkExtractor.Result? = null
                     var vixResult: VixSrcExtractor.Result? = null
+                    var noTorrentResult: NoTorrentExtractor.Result? = null
                     var embedResult: EmbedExtractor.Result? = null
                     // Remember an embed Challenge so we can surface it if no
                     // direct Stream wins (the user may need to solve it).
@@ -530,6 +554,7 @@ fun PlayerScreen(
                     while (raceWinner == null &&
                         (stormResult == null || srcResult == null ||
                             linkResult == null || vixResult == null ||
+                            noTorrentResult == null ||
                             (embedAsync != null && embedResult == null))
                     ) {
                         raceWinner = select<Any?> {
@@ -539,6 +564,7 @@ fun PlayerScreen(
                                     if (r is VidStormExtractor.Result.Stream) r
                                     else linkResult?.let { if (it is VidLinkExtractor.Result.Stream) it else null }
                                         ?: vixResult?.let { if (it is VixSrcExtractor.Result.Stream) it else null }
+                                        ?: noTorrentResult?.let { if (it is NoTorrentExtractor.Result.Stream) it else null }
                                         ?: srcResult?.let { if (it is VidSrcExtractor.Result.Stream) it else null }
                                         ?: embedResult?.let { if (it is EmbedExtractor.Result.Stream) it else null }
                                 }
@@ -550,6 +576,7 @@ fun PlayerScreen(
                                     else stormResult?.let { if (it is VidStormExtractor.Result.Stream) it else null }
                                         ?: linkResult?.let { if (it is VidLinkExtractor.Result.Stream) it else null }
                                         ?: vixResult?.let { if (it is VixSrcExtractor.Result.Stream) it else null }
+                                        ?: noTorrentResult?.let { if (it is NoTorrentExtractor.Result.Stream) it else null }
                                         ?: embedResult?.let { if (it is EmbedExtractor.Result.Stream) it else null }
                                 }
                             }
@@ -560,6 +587,7 @@ fun PlayerScreen(
                                     else stormResult?.let { if (it is VidStormExtractor.Result.Stream) it else null }
                                         ?: srcResult?.let { if (it is VidSrcExtractor.Result.Stream) it else null }
                                         ?: vixResult?.let { if (it is VixSrcExtractor.Result.Stream) it else null }
+                                        ?: noTorrentResult?.let { if (it is NoTorrentExtractor.Result.Stream) it else null }
                                         ?: embedResult?.let { if (it is EmbedExtractor.Result.Stream) it else null }
                                 }
                             }
@@ -570,6 +598,18 @@ fun PlayerScreen(
                                     else stormResult?.let { if (it is VidStormExtractor.Result.Stream) it else null }
                                         ?: srcResult?.let { if (it is VidSrcExtractor.Result.Stream) it else null }
                                         ?: linkResult?.let { if (it is VidLinkExtractor.Result.Stream) it else null }
+                                        ?: noTorrentResult?.let { if (it is NoTorrentExtractor.Result.Stream) it else null }
+                                        ?: embedResult?.let { if (it is EmbedExtractor.Result.Stream) it else null }
+                                }
+                            }
+                            if (noTorrentResult == null) {
+                                noTorrent.onAwait { r ->
+                                    noTorrentResult = r
+                                    if (r is NoTorrentExtractor.Result.Stream) r
+                                    else stormResult?.let { if (it is VidStormExtractor.Result.Stream) it else null }
+                                        ?: srcResult?.let { if (it is VidSrcExtractor.Result.Stream) it else null }
+                                        ?: linkResult?.let { if (it is VidLinkExtractor.Result.Stream) it else null }
+                                        ?: vixResult?.let { if (it is VixSrcExtractor.Result.Stream) it else null }
                                         ?: embedResult?.let { if (it is EmbedExtractor.Result.Stream) it else null }
                                 }
                             }
@@ -583,6 +623,7 @@ fun PlayerScreen(
                                             ?: srcResult?.let { if (it is VidSrcExtractor.Result.Stream) it else null }
                                             ?: linkResult?.let { if (it is VidLinkExtractor.Result.Stream) it else null }
                                             ?: vixResult?.let { if (it is VixSrcExtractor.Result.Stream) it else null }
+                                            ?: noTorrentResult?.let { if (it is NoTorrentExtractor.Result.Stream) it else null }
                                     }
                                 }
                             }
@@ -597,9 +638,10 @@ fun PlayerScreen(
                         val xe = (srcResult as? VidSrcExtractor.Result.Error)?.message
                         val le = (linkResult as? VidLinkExtractor.Result.Error)?.message
                         val ve = (vixResult as? VixSrcExtractor.Result.Error)?.message
+                        val ne = (noTorrentResult as? NoTorrentExtractor.Result.Error)?.message
                         val ee = (embedResult as? EmbedExtractor.Result.Error)?.message
                         VidStormExtractor.Result.Error(
-                            se ?: xe ?: le ?: ve ?: ee ?: "All primary extractors yielded nothing"
+                            se ?: xe ?: le ?: ve ?: ne ?: ee ?: "All primary extractors yielded nothing"
                         )
                     }
                 }
@@ -651,6 +693,16 @@ fun PlayerScreen(
                         mapOf("User-Agent" to DEFAULT_UA)
                     }
                     deliveringServerName = winner.providerName.ifBlank { "VixSrc" }
+                    isLoading = false
+                    return@LaunchedEffect
+                }
+                is NoTorrentExtractor.Result.Stream -> {
+                    Log.i("Player", "✅ NoTorrent stream (${winner.providerName}): ${winner.url}")
+                    streamUrl = winner.url
+                    streamHeaders = winner.headers.ifEmpty {
+                        mapOf("User-Agent" to DEFAULT_UA)
+                    }
+                    deliveringServerName = winner.providerName.ifBlank { "NoTorrent" }
                     isLoading = false
                     return@LaunchedEffect
                 }
