@@ -206,11 +206,26 @@ object VidStormExtractor {
             return Result.Error("VidStorm: no streams available for this title")
         }
 
-        Log.d(TAG, "VidStorm live sources: ${liveSources.joinToString { it.first }}")
+        // Sort sources so ENGLISH ones are tried first: a source whose
+        // language/flag indicates English (lang contains "eng"/"english", or
+        // flag is us/gb/en/au/ca) gets priority. Among same-language groups
+        // the original API order is preserved (stable sort). This directly
+        // implements the user's request: "pick the best quality ENGLISH video".
+        val isEnglish = { src: JSONObject ->
+            val lang = src.optString("language", "").lowercase()
+            val flag = src.optString("flag", "").lowercase()
+            lang.contains("eng") || lang.contains("english") ||
+                flag in setOf("us", "gb", "uk", "en", "au", "ca", "ie")
+        }
+        val sortedSources = liveSources.sortedWith(
+            compareByDescending<Pair<String, JSONObject>> { isEnglish(it.second) }
+        )
+
+        Log.d(TAG, "VidStorm live sources (English-first): ${sortedSources.joinToString { "${it.first}${if (isEnglish(it.second)) "(en)" else ""}" }}")
 
         // First pass: direct sources (type=hls / .m3u8 / .mp4 directly).
         // Walk through ALL of them and return the first one that verifies.
-        for ((name, src) in liveSources) {
+        for ((name, src) in sortedSources) {
             val url = src.optString("url", "")
             val type = src.optString("type", "")
             if (type == "hls" || url.contains(".m3u8") ||
@@ -226,7 +241,7 @@ object VidStormExtractor {
 
         // Second pass: playlist sources (hellstorm.lol / type=mp4) — fetch the
         // playlist JSON and pick the highest-resolution direct file.
-        for ((name, src) in liveSources) {
+        for ((name, src) in sortedSources) {
             val url = src.optString("url", "")
             val direct = resolvePlaylist(url, name) ?: continue
             if (verifyUrl(direct, headers, name)) {

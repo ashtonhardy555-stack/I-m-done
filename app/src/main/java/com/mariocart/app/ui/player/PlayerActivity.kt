@@ -408,8 +408,29 @@ fun PlayerScreen(
             currentStage = PlayerActivity.STAGE_VIDSTORM
             infoMessage = "Finding best stream…"
 
-            // Race the four direct extractors. The first to return a verified
-            // Stream wins; the losers are cancelled. All run concurrently on IO.
+            // Race the four direct extractors AND the WebView embed pipeline
+            // ALL AT ONCE. The first to return a verified Stream wins; the
+            // losers are cancelled. All run concurrently on IO.
+            //
+            // ## Why also race the WebView here (the "Interstellar is slow" fix)
+            //
+            // For popular movies VidStorm/VidSrc resolve a DIRECT url in
+            // ~0.5-2.4 s — they win the race and the WebView job is cancelled,
+            // so there is zero overhead for fast titles.
+            //
+            // But for titles where ALL four direct extractors fail (e.g.
+            // Interstellar: VidStorm returns a fake-404 "Boron" source, VidSrc's
+            // token resolution yields nothing, VidLink's API returns an empty
+            // body, VixSrc is behind Cloudflare) the old code waited for every
+            // direct extractor to time out (~25 s) and ONLY THEN started the
+            // WebView embed stage from scratch — another ~5-18 s. That made
+            // "some movies don't play / take forever".
+            //
+            // By launching the WebView embed extraction in parallel here, a
+            // WebView provider that can pass Cloudflare (2embed, vidsrc.to,
+            // smashystream…) is already loading while the direct APIs race.
+            // If the direct APIs all fail, the WebView result is often already
+            // ready (or nearly) — cutting worst-case wait from ~40 s to ~5 s.
             val winner: Any? = try {
                 coroutineScope {
                     val vidStorm = async {
@@ -444,19 +465,48 @@ fun PlayerScreen(
                             VixSrcExtractor.Result.Error(e.message ?: "VixSrc extraction failed")
                         }
                     }
+                    // 5th concurrent racer: the WebView embed pipeline. This
+                    // is the same EmbedExtractor.extractFromProviders() that
+                    // Stage 2 calls — but now it starts immediately, in
+                    // parallel with the direct APIs, instead of after they all
+                    // fail. Only launched in auto mode (start == STAGE_VIDSTORM)
+                    // and when we have an Activity (WebView needs one).
+                    val embedAsync = if (start == PlayerActivity.STAGE_VIDSTORM && activity != null) {
+                        async {
+                            try {
+                                EmbedExtractor.extractFromProviders(
+                                    context = activity,
+                                    contentType = contentType,
+                                    tmdbId = tmdbId,
+                                    season = season,
+                                    episode = episode,
+                                    onChallengeNeeded = null
+                                )
+                            } catch (e: Exception) {
+                                Log.e("Player", "💥 Parallel embed extraction failed", e)
+                                EmbedExtractor.Result.Error(e.message ?: "Embed extraction failed")
+                            }
+                        }
+                    } else null
+
                     // select{} suspends until the FIRST async completes; we
                     // then inspect its result. We keep polling as long as a
                     // completed branch is an Error (so a real Stream from
                     // another branch can still win), and stop on the first
-                    // Stream or when all four have completed.
+                    // Stream or when all active branches have completed.
                     var stormResult: VidStormExtractor.Result? = null
                     var srcResult: VidSrcExtractor.Result? = null
                     var linkResult: VidLinkExtractor.Result? = null
                     var vixResult: VixSrcExtractor.Result? = null
+                    var embedResult: EmbedExtractor.Result? = null
+                    // Remember an embed Challenge so we can surface it if no
+                    // direct Stream wins (the user may need to solve it).
+                    var embedChallenge: EmbedExtractor.Result.Challenge? = null
                     var raceWinner: Any? = null
                     while (raceWinner == null &&
                         (stormResult == null || srcResult == null ||
-                            linkResult == null || vixResult == null)
+                            linkResult == null || vixResult == null ||
+                            (embedAsync != null && embedResult == null))
                     ) {
                         raceWinner = select<Any?> {
                             if (stormResult == null) {
@@ -466,6 +516,7 @@ fun PlayerScreen(
                                     else linkResult?.let { if (it is VidLinkExtractor.Result.Stream) it else null }
                                         ?: vixResult?.let { if (it is VixSrcExtractor.Result.Stream) it else null }
                                         ?: srcResult?.let { if (it is VidSrcExtractor.Result.Stream) it else null }
+                                        ?: embedResult?.let { if (it is EmbedExtractor.Result.Stream) it else null }
                                 }
                             }
                             if (srcResult == null) {
@@ -475,6 +526,7 @@ fun PlayerScreen(
                                     else stormResult?.let { if (it is VidStormExtractor.Result.Stream) it else null }
                                         ?: linkResult?.let { if (it is VidLinkExtractor.Result.Stream) it else null }
                                         ?: vixResult?.let { if (it is VixSrcExtractor.Result.Stream) it else null }
+                                        ?: embedResult?.let { if (it is EmbedExtractor.Result.Stream) it else null }
                                 }
                             }
                             if (linkResult == null) {
@@ -484,6 +536,7 @@ fun PlayerScreen(
                                     else stormResult?.let { if (it is VidStormExtractor.Result.Stream) it else null }
                                         ?: srcResult?.let { if (it is VidSrcExtractor.Result.Stream) it else null }
                                         ?: vixResult?.let { if (it is VixSrcExtractor.Result.Stream) it else null }
+                                        ?: embedResult?.let { if (it is EmbedExtractor.Result.Stream) it else null }
                                 }
                             }
                             if (vixResult == null) {
@@ -493,21 +546,36 @@ fun PlayerScreen(
                                     else stormResult?.let { if (it is VidStormExtractor.Result.Stream) it else null }
                                         ?: srcResult?.let { if (it is VidSrcExtractor.Result.Stream) it else null }
                                         ?: linkResult?.let { if (it is VidLinkExtractor.Result.Stream) it else null }
+                                        ?: embedResult?.let { if (it is EmbedExtractor.Result.Stream) it else null }
+                                }
+                            }
+                            if (embedAsync != null && embedResult == null) {
+                                embedAsync.onAwait { r ->
+                                    embedResult = r
+                                    if (r is EmbedExtractor.Result.Stream) r
+                                    else {
+                                        if (r is EmbedExtractor.Result.Challenge) embedChallenge = r
+                                        stormResult?.let { if (it is VidStormExtractor.Result.Stream) it else null }
+                                            ?: srcResult?.let { if (it is VidSrcExtractor.Result.Stream) it else null }
+                                            ?: linkResult?.let { if (it is VidLinkExtractor.Result.Stream) it else null }
+                                            ?: vixResult?.let { if (it is VixSrcExtractor.Result.Stream) it else null }
+                                    }
                                 }
                             }
                         }
                     }
-                    // If none produced a Stream, normalise to the last error
-                    // so the caller can fall through. This expression is the
-                    // coroutineScope return value -> assigned to the outer
-                    // `winner`.
-                    raceWinner ?: run {
+                    // If none produced a Stream, normalise. Prefer surfacing an
+                    // embed Challenge (so the user can solve it) over a bare
+                    // error. This expression is the coroutineScope return value
+                    // -> assigned to the outer `winner`.
+                    raceWinner ?: embedChallenge ?: run {
                         val se = (stormResult as? VidStormExtractor.Result.Error)?.message
                         val xe = (srcResult as? VidSrcExtractor.Result.Error)?.message
                         val le = (linkResult as? VidLinkExtractor.Result.Error)?.message
                         val ve = (vixResult as? VixSrcExtractor.Result.Error)?.message
+                        val ee = (embedResult as? EmbedExtractor.Result.Error)?.message
                         VidStormExtractor.Result.Error(
-                            se ?: xe ?: le ?: ve ?: "All primary extractors yielded nothing"
+                            se ?: xe ?: le ?: ve ?: ee ?: "All primary extractors yielded nothing"
                         )
                     }
                 }
@@ -558,6 +626,27 @@ fun PlayerScreen(
                     isLoading = false
                     return@LaunchedEffect
                 }
+                is EmbedExtractor.Result.Stream -> {
+                    Log.i("Player", "✅ Embed stream (parallel, ${winner.providerName}): ${winner.url}")
+                    streamUrl = winner.url
+                    streamHeaders = winner.headers.ifEmpty {
+                        mapOf("User-Agent" to DEFAULT_UA)
+                    }
+                    deliveringServerName = winner.providerName.ifBlank { "Embed" }
+                    isLoading = false
+                    return@LaunchedEffect
+                }
+                is EmbedExtractor.Result.Challenge -> {
+                    if (verificationRounds < PlayerActivity.MAX_VERIFICATION_ROUNDS) {
+                        verificationRounds++
+                        pendingChallengeUrl = winner.challengeUrl
+                        pendingReferer = winner.embedUrl
+                        infoMessage = "Human verification required. Please complete the challenge, then tap Done."
+                        isLoading = false
+                        return@LaunchedEffect
+                    }
+                    Log.w("Player", "Embeds still blocked after verification; trying LookMovie fallback.")
+                }
                 is VidStormExtractor.Result.Error -> {
                     Log.w("Player", "All primary extractors yielded nothing (${winner.message}); falling back to embed pipeline.")
                 }
@@ -569,9 +658,15 @@ fun PlayerScreen(
         // EmbedExtractor calls ServerManager.getOrderedServers() which puts
         // the user-selected server first. So when start == STAGE_EMBED we
         // jump straight here.
-        if (start <= PlayerActivity.STAGE_EMBED && activity != null) {
-            if (start < PlayerActivity.STAGE_EMBED) infoMessage = "Searching embed providers…"
-            else infoMessage = "Trying ${ServerManager.allServers().firstOrNull { it.id == selectedServerId }?.name ?: "your server"}…"
+        //
+        // NOTE: In auto mode (start == STAGE_VIDSTORM) the WebView embed
+        // pipeline already ran IN PARALLEL with the direct-API race in Stage 1
+        // (see embedAsync above). Re-running it here would just repeat the
+        // same provider scan, so we skip Stage 2 in auto mode and fall
+        // straight through to Stage 3 (LookMovie). Stage 2 is only reached
+        // when the user explicitly picked a server (start == STAGE_EMBED).
+        if (start == PlayerActivity.STAGE_EMBED && activity != null) {
+            infoMessage = "Trying ${ServerManager.allServers().firstOrNull { it.id == selectedServerId }?.name ?: "your server"}…"
             currentStage = PlayerActivity.STAGE_EMBED
             val embedResult = try {
                 EmbedExtractor.extractFromProviders(
