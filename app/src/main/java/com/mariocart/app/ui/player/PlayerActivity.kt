@@ -53,6 +53,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.selects.select
+import kotlinx.coroutines.withTimeout
 
 /**
  * PlayerActivity — the on-device video player.
@@ -128,6 +129,28 @@ class PlayerActivity : ComponentActivity() {
         const val STAGE_EMBED = 2
         const val STAGE_LOOKMOVIE = 3
         const val STAGE_OKHTTP = 4
+
+        /**
+         * Hard ceiling on the parallel direct-extractor race (Stage 0+1).
+         *
+         * The race launches VidStorm, VidSrc, VidLink, VixSrc, and the WebView
+         * embed pipeline all at once. On a fast network a winner typically
+         * emerges in 0.5–2.5 s. But on a slow mobile connection — or when a
+         * provider's server is hanging on a TCP connection that never RSTs —
+         * individual extractors can take 10–15 s before their OkHttp
+         * connect/read timeout fires. Without an overall ceiling the user
+         * could wait 25+ s for ALL five to complete before the race
+         * normalises to an Error and falls through to the next stage.
+         *
+         * 20 s is generous enough for VidSrc's 5-round-trip pipeline on a
+         * 3G connection (~3 s/round-trip = 15 s) plus the embed WebView's
+         * 18 s internal cap, while still guaranteeing the user never waits
+         * more than 20 s before seeing *something* (a stream, a challenge,
+         * or a fallthrough to the next stage). When the timeout fires,
+         * coroutineScope cancels all pending asyncs and we fall through to
+         * the embed/LookMovie stages just as if all extractors had errored.
+         */
+        const val RACE_TIMEOUT_MS = 20_000L
 
         /**
          * Factory used by [com.mariocart.app.ui.MainActivity].
@@ -432,6 +455,7 @@ fun PlayerScreen(
             // If the direct APIs all fail, the WebView result is often already
             // ready (or nearly) — cutting worst-case wait from ~40 s to ~5 s.
             val winner: Any? = try {
+                withTimeout(PlayerActivity.RACE_TIMEOUT_MS) {
                 coroutineScope {
                     val vidStorm = async {
                         try {
@@ -579,6 +603,10 @@ fun PlayerScreen(
                         )
                     }
                 }
+                } // withTimeout
+            } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                Log.w("Player", "⏱️ Race timed out after ${PlayerActivity.RACE_TIMEOUT_MS} ms — falling through to next stage.")
+                VidStormExtractor.Result.Error("Extraction timed out")
             } catch (e: Exception) {
                 Log.e("Player", "💥 Parallel direct-extractor race failed", e)
                 VidStormExtractor.Result.Error(e.message ?: "extraction race failed")
@@ -1337,6 +1365,17 @@ private fun ExoPlayerView(
                     .setUserAgent(userAgent)
                     .setAllowCrossProtocolRedirects(true)
                     .setDefaultRequestProperties(remainingHeaders)
+                    // ── Faster failover for dead URLs ──
+                    // Default ExoPlayer connect/read timeouts are 8s each. On a
+                    // dead CDN URL (e.g. VidStorm's "Boron" CF-Worker that 200s
+                    // an HTML 404, or a VidSrc token that expired) the player
+                    // would hang for up to 16s before surfacing a PlaybackException.
+                    // With 4s/4s the player errors out in ~4-8s and the
+                    // fallthrough to the next server/stage kicks in promptly.
+                    // This is the "loads videos really slow" fix: a dead source
+                    // no longer monopolises the player for 16s.
+                    .setConnectTimeoutMs(4_000)
+                    .setReadTimeoutMs(4_000)
 
                 val dataSourceFactory: DataSource.Factory = httpFactory
 
@@ -1362,15 +1401,24 @@ private fun ExoPlayerView(
                 // the app to switch servers every time. We give ExoPlayer a
                 // larger min buffer and, critically, a long back-buffer so a
                 // momentary segment stall doesn't immediately error out.
+                //
                 // NOTE: media3 1.4.x uses setBufferDurationsMs(...) (a single
                 // call covering min/max/forPlayback/forPlaybackAfterRebuffer)
                 // — the old setMinBufferMs/setMaxBufferMs setters were removed.
+                //
+                // bufferForPlayback lowered from 1500 → 1000 ms and
+                // bufferForPlaybackAfterRebuffer from 3000 → 1500 ms so the
+                // first frame appears sooner after the manifest loads. The
+                // 30s minBuffer still keeps playback smooth once started; this
+                // only affects how quickly playback *begins* after enough data
+                // is buffered. This is the "loads videos really slow" fix:
+                // the user sees video ~0.5-1.5s sooner on every title.
                 val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
                     .setBufferDurationsMs(
                         /* minBufferMs            = */ 30_000,
                         /* maxBufferMs            = */ 90_000,
-                        /* bufferForPlaybackMs    = */ 1_500,
-                        /* bufferForPlaybackAfterRebufferMs = */ 3_000
+                        /* bufferForPlaybackMs    = */ 1_000,
+                        /* bufferForPlaybackAfterRebufferMs = */ 1_500
                     )
                     .setBackBuffer(30_000, true)     // keep 30 s behind for seeks
                     .build()

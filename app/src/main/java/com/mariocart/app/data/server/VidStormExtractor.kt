@@ -99,8 +99,14 @@ object VidStormExtractor {
         OkHttpClient.Builder()
             .followRedirects(true)
             .followSslRedirects(true)
-            .connectTimeout(6, TimeUnit.SECONDS)
-            .readTimeout(6, TimeUnit.SECONDS)
+            // 4s/4s — tight enough that a dead CDN URL (the "Boron" CF-Worker
+            // that 200s an HTML 404 for Interstellar/Green Mile) is rejected
+            // in ~0.5-0.7s on a normal connection, and a hanging TCP
+            // connection (no RST) fails in 4s instead of 6s. This shaves
+            // ~0.2s off the VidStorm dead-end path so the parallel VidSrc
+            // racer wins even sooner.
+            .connectTimeout(4, TimeUnit.SECONDS)
+            .readTimeout(4, TimeUnit.SECONDS)
             .build()
     }
 

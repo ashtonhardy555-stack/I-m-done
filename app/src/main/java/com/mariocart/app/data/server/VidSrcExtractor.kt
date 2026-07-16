@@ -74,8 +74,14 @@ object VidSrcExtractor {
         OkHttpClient.Builder()
             .followRedirects(true)
             .followSslRedirects(true)
-            .connectTimeout(10, TimeUnit.SECONDS)
-            .readTimeout(15, TimeUnit.SECONDS)
+            // 8s/10s — slightly tighter than the original 10s/15s so a
+            // single slow hop in the 5-round-trip pipeline (embed→RCP→
+            // PRORCP→generate.php→verify) doesn't balloon the total.
+            // On a fast connection the whole chain is ~1.8s; on 3G it's
+            // ~6-10s. These timeouts ensure we fail fast on a truly dead
+            // host rather than waiting 15s per hop.
+            .connectTimeout(8, TimeUnit.SECONDS)
+            .readTimeout(10, TimeUnit.SECONDS)
             .build()
     }
 
@@ -84,8 +90,12 @@ object VidSrcExtractor {
         OkHttpClient.Builder()
             .followRedirects(true)
             .followSslRedirects(true)
-            .connectTimeout(6, TimeUnit.SECONDS)
-            .readTimeout(8, TimeUnit.SECONDS)
+            // 4s/6s — tight connect timeout so a dead CDN host fails fast;
+            // slightly longer read timeout because a valid HLS master
+            // playlist can be a few KB and on a slow mobile connection
+            // transferring it may take a moment.
+            .connectTimeout(4, TimeUnit.SECONDS)
+            .readTimeout(6, TimeUnit.SECONDS)
             .build()
     }
 
@@ -331,55 +341,73 @@ object VidSrcExtractor {
         var result = masterStr
         val usedHosts = mutableSetOf<String>()
 
-        for (ph in urlPlaceholders) {
-            val fullPlaceholder = "__${ph}__"
-            // Pick the generate.php host for this placeholder.
-            val host = pickHostForPlaceholder(ph, genHosts, placeholders, result, usedHosts)
-                ?: continue
-            val tokenUrl = "https://$host/generate.php"
+        // ── PRIMARY: per-URL host resolution ──
+        //
+        // The MOST reliable way to resolve a token is to ask the SAME host
+        // that serves the m3u8 for its generate.php token. The CDN that hosts
+        // `https://noosphere-nectar.site/pl/.../master.m3u8?token=__TOKEN__`
+        // always also serves `https://noosphere-nectar.site/generate.php`,
+        // and the token it returns is valid for its own URLs. This mirrors the
+        // JS's third `$.get("https://"+host+"/generate.php", …)` call which
+        // runs AFTER the explicit `$.get("https://HOST/generate.php", …)`
+        // calls — but for our purposes doing it FIRST is more reliable because
+        // it eliminates the chance of the heuristic mis-pairing TOKEN with a
+        // putgate token (which 403s on non-putgate CDN URLs) or vice-versa.
+        //
+        // We walk each URL that still has a placeholder, fetch the token from
+        // that URL's own host, and substitute. Only if this leaves unresolved
+        // placeholders do we fall back to the heuristic below.
+        for (raw in result.split(" or ")) {
+            val url = raw.trim()
+            if (!url.startsWith("http") || !url.contains("__")) continue
+            val host = extractHost(url) ?: continue
+            if (host in usedHosts) continue
             val token = try {
-                fetch(tokenUrl, referer = "$baseDom/").trim()
-            } catch (e: Exception) {
-                Log.w(TAG, "VidSrc token fetch $host failed: ${e.message}")
-                ""
-            }
+                fetch("https://$host/generate.php", referer = "$baseDom/").trim()
+            } catch (e: Exception) { "" }
             if (token.isNotBlank()) {
-                Log.d(TAG, "VidSrc token for $fullPlaceholder from $host: ${token.take(40)}…")
-                result = result.replace(fullPlaceholder, token)
+                Log.d(TAG, "VidSrc per-URL token from $host: ${token.take(40)}…")
+                // Replace every remaining placeholder in this URL with this
+                // host's token (a given CDN host only ever uses one token type
+                // for its own URLs — e.g. noosphere-nectar.site uses __TOKEN__,
+                // app2.putgate.com uses __TOKENPG__).
+                val phsInUrl = PLACEHOLDER_PATTERN.matcher(url).let { m ->
+                    val set = linkedSetOf<String>()
+                    while (m.find()) set += m.group(1)!!
+                    set
+                }
+                for (ph in phsInUrl) {
+                    result = result.replace("__${ph}__", token)
+                }
                 usedHosts += host
+                if (!result.contains("__")) break
             }
         }
 
-        // Fallback: if any __TOKEN*__ placeholder is still present, try each
-        // URL's own host (the CDN that serves the m3u8 also serves
-        // generate.php). This mirrors the third JS call:
-        //   $.get("https://"+host+"/generate.php", function(token){ ... })
-        // and is the most reliable pairing because the host that the URL
-        // points at is always the host that issued its token.
+        // ── FALLBACK: heuristic host selection ──
+        //
+        // If per-URL resolution didn't clear all placeholders (e.g. a URL's
+        // own generate.php was down), use the heuristic: pair __TOKENPG__ →
+        // putgate host, __TOKEN__ → first non-putgate host. This is less
+        // reliable than per-URL (it can mis-pair) but covers edge cases where
+        // the CDN's generate.php is temporarily unreachable.
         if (result.contains("__")) {
-            for (raw in result.split(" or ")) {
-                val url = raw.trim()
-                if (!url.startsWith("http") || !url.contains("__")) continue
-                val host = extractHost(url) ?: continue
-                if (host in usedHosts) continue
+            for (ph in urlPlaceholders) {
+                val fullPlaceholder = "__${ph}__"
+                if (!result.contains(fullPlaceholder)) continue
+                val host = pickHostForPlaceholder(ph, genHosts, placeholders, result, usedHosts)
+                    ?: continue
+                val tokenUrl = "https://$host/generate.php"
                 val token = try {
-                    fetch("https://$host/generate.php", referer = "$baseDom/").trim()
-                } catch (e: Exception) { "" }
+                    fetch(tokenUrl, referer = "$baseDom/").trim()
+                } catch (e: Exception) {
+                    Log.w(TAG, "VidSrc fallback token fetch $host failed: ${e.message}")
+                    ""
+                }
                 if (token.isNotBlank()) {
-                    Log.d(TAG, "VidSrc per-URL fallback token from $host: ${token.take(40)}…")
-                    // Replace every remaining placeholder in this URL with
-                    // this host's token (a given CDN host only ever uses one
-                    // token type for its own URLs).
-                    val phsInUrl = PLACEHOLDER_PATTERN.matcher(url).let { m ->
-                        val set = linkedSetOf<String>()
-                        while (m.find()) set += m.group(1)!!
-                        set
-                    }
-                    for (ph in phsInUrl) {
-                        result = result.replace("__${ph}__", token)
-                    }
+                    Log.d(TAG, "VidSrc fallback token for $fullPlaceholder from $host: ${token.take(40)}…")
+                    result = result.replace(fullPlaceholder, token)
                     usedHosts += host
-                    if (!result.contains("__")) break
                 }
             }
         }
