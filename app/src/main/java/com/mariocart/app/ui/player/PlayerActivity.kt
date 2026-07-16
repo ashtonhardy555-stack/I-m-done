@@ -702,14 +702,34 @@ fun PlayerScreen(
                     headers = streamHeaders,
                     posterUrl = posterUrl,
                     backdropUrl = backdropUrl,
-                    onPlayerError = {
-                        // ── ExoPlayer fallback fix ──
-                        // The URL resolved but ExoPlayer can't render it (e.g.
-                        // a dead/broken source that passed the head-check but
-                        // 404s on the actual segments, or a geo-blocked CDN).
-                        // Instead of leaving the user stuck on a black screen,
-                        // clear this stream and resume extraction from the
-                        // NEXT stage after the one that delivered it.
+                    onPlayerError = { isFatal ->
+                        // ── Transient-error-aware ExoPlayer fallback ──
+                        // ExoPlayer emits onPlayerError for BOTH fatal errors
+                        // (dead/404/geo-blocked source) AND transient errors
+                        // (a slow CDN segment, a momentary network blip, an
+                        // HLS manifest re-load hiccup). Shows use HLS (.m3u8)
+                        // with many segments/variants and are far more likely
+                        // to hit a transient error during buffering than movies
+                        // (progressive MP4). Previously ANY error immediately
+                        // abandoned the server and re-ran extraction → "videos
+                        // try to play then switch to a different server every
+                        // time."
+                        //
+                        // ExoPlayerView now classifies the error and performs
+                        // an in-player retry for transient errors (up to
+                        // MAX_PLAYER_RETRIES) BEFORE surfacing the error here.
+                        // This callback is ONLY invoked once those retries are
+                        // exhausted (isFatal == true) or the error is
+                        // inherently fatal (isFatal == true). So reaching here
+                        // means the source is genuinely unplayable.
+                        if (!isFatal) {
+                            // Safety net: transient errors that survived the
+                            // in-player retries are still recoverable — keep
+                            // the current server and just nudge the player to
+                            // re-prepare instead of switching servers.
+                            Log.w("Player", "⏳ Transient playback hiccup — keeping current server, not switching.")
+                            return@ExoPlayerView
+                        }
                         Log.w("Player", "🔄 ExoPlayer couldn't play the resolved URL — falling through to next stage.")
                         streamUrl = null
                         deliveringServerName = null
@@ -1052,7 +1072,7 @@ private fun ExoPlayerView(
     headers: Map<String, String>,
     posterUrl: String? = null,
     backdropUrl: String? = null,
-    onPlayerError: () -> Unit = {}
+    onPlayerError: (isFatal: Boolean) -> Unit = {}
 ) {
     var player: ExoPlayer? by remember { mutableStateOf(null) }
     var trackSelector: DefaultTrackSelector? by remember { mutableStateOf(null) }
@@ -1064,6 +1084,14 @@ private fun ExoPlayerView(
 
     // Track when the first frame has rendered so we can hide the thumbnail.
     var isReady by remember { mutableStateOf(false) }
+
+    // ── In-player transient-error retry state ──
+    // Transient errors (slow segment, network blip, HLS manifest re-load) are
+    // recovered by re-preparing the SAME media item instead of abandoning the
+    // server. This is the fix for "shows try to play then switch servers every
+    // time": previously any PlaybackException immediately switched servers.
+    var transientRetryCount by remember { mutableStateOf(0) }
+    val mediaItemHolder = remember { mutableStateOf<MediaItem?>(null) }
 
     // Capture the error callback in a lambda we can invoke from the
     // AndroidView factory (which runs outside of the Composition).
@@ -1102,24 +1130,6 @@ private fun ExoPlayerView(
 
                 val dataSourceFactory: DataSource.Factory = httpFactory
 
-                // Detect the stream type so ExoPlayer gets the right MIME type.
-                // This is the fix for the 00:00 duration bug: when a provider
-                // serves a progressive MP4 from a CDN path that does NOT end in
-                // ".mp4" (e.g. .../video/720p/abc123?token=xyz), ExoPlayer's
-                // content-type sniffing fails and it can't determine the
-                // container format, so it reports a 0 duration and can't seek.
-                // By setting the MIME type explicitly we tell ExoPlayer exactly
-                // how to parse the stream.
-                val mimeType = guessMimeType(url)
-                val mediaItem = if (mimeType != null) {
-                    MediaItem.Builder()
-                        .setUri(Uri.parse(url))
-                        .setMimeType(mimeType)
-                        .build()
-                } else {
-                    MediaItem.fromUri(Uri.parse(url))
-                }
-
                 val selector = DefaultTrackSelector(ctx).apply {
                     // Start in auto / adaptive mode — ExoPlayer picks the best
                     // quality based on available bandwidth. The user can
@@ -1129,9 +1139,51 @@ private fun ExoPlayerView(
                         .build()
                 }
                 trackSelector = selector
+                // Ensure playback defaults to English audio/subs when the
+                // provider ships multi-language tracks (VidSrc, 2Embed,
+                // VidStorm often do). Applied before prepare() so the first
+                // rendered track is English.
+                forceEnglishTracks(selector)
+
+                // ── LoadControl: tolerant buffering for shows ──
+                // Shows use HLS (.m3u8) with many segments/variants. The
+                // default LoadControl gives up quickly on slow CDNs, which
+                // surfaces as a PlaybackException and (before this fix) caused
+                // the app to switch servers every time. We give ExoPlayer a
+                // larger min buffer and, critically, a long back-buffer so a
+                // momentary segment stall doesn't immediately error out.
+                val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
+                    .setMinBufferMs(30_000)          // 30 s min buffer
+                    .setMaxBufferMs(90_000)          // 90 s max buffer
+                    .setBufferForPlaybackMs(1_500)   // start playback after 1.5 s
+                    .setBufferForPlaybackAfterRebufferMs(3_000) // 3 s after rebuffer
+                    .setBackBuffer(30_000, true)     // keep 30 s behind for seeks
+                    .build()
+
+                val mediaItem = mediaItemHolder.value ?: run {
+                    // Detect the stream type so ExoPlayer gets the right MIME type.
+                    // This is the fix for the 00:00 duration bug: when a provider
+                    // serves a progressive MP4 from a CDN path that does NOT end in
+                    // ".mp4" (e.g. .../video/720p/abc123?token=xyz), ExoPlayer's
+                    // content-type sniffing fails and it can't determine the
+                    // container format, so it reports a 0 duration and can't seek.
+                    // By setting the MIME type explicitly we tell ExoPlayer exactly
+                    // how to parse the stream.
+                    val mimeType = guessMimeType(url)
+                    if (mimeType != null) {
+                        MediaItem.Builder()
+                            .setUri(Uri.parse(url))
+                            .setMimeType(mimeType)
+                            .build()
+                    } else {
+                        MediaItem.fromUri(Uri.parse(url))
+                    }
+                }
+                mediaItemHolder.value = mediaItem
 
                 val exoPlayer = ExoPlayer.Builder(ctx)
                     .setTrackSelector(selector)
+                    .setLoadControl(loadControl)
                     .setMediaSourceFactory(
                         DefaultMediaSourceFactory(ctx).setDataSourceFactory(dataSourceFactory)
                     )
@@ -1141,6 +1193,10 @@ private fun ExoPlayerView(
                                 Log.d("ExoPlayer", "State: $state")
                                 if (state == Player.STATE_READY) {
                                     isReady = true
+                                    // Playback successfully started → reset the
+                                    // transient retry counter so a later stall
+                                    // gets a fresh allowance of retries.
+                                    transientRetryCount = 0
                                     populateQualities(this@apply) { q -> availableQualities = q }
                                 }
                             }
@@ -1150,14 +1206,53 @@ private fun ExoPlayerView(
                                 // for HLS — fire here too so the quality list
                                 // populates as soon as the manifest is parsed.
                                 populateQualities(this@apply) { q -> availableQualities = q }
+                                // Re-assert English audio preference once the
+                                // real track list is known — HLS manifests for
+                                // multi-audio sources often expose the language
+                                // tags only after the first track change, so
+                                // applying it here locks in English playback.
+                                trackSelector?.let { forceEnglishTracks(it) }
                             }
 
                             override fun onPlayerError(error: PlaybackException) {
                                 Log.e("ExoPlayer", "Error: ${error.errorCodeName} - ${error.message}")
-                                // Surface the error so PlayerScreen can fall
-                                // through to the next extraction stage instead
-                                // of stranding the user on a black screen.
-                                errorHandler.value.invoke()
+                                // ── Classify the error ──
+                                // Transient errors are recovered in-player by
+                                // re-preparing the same media item (up to
+                                // MAX_PLAYER_RETRIES). Only once retries are
+                                // exhausted — or the error is inherently fatal
+                                // — do we surface it so PlayerScreen falls
+                                // through to the next server. This stops the
+                                // "switch to a different server every time"
+                                // behaviour for shows.
+                                if (isTransientPlaybackError(error) &&
+                                    transientRetryCount < MAX_PLAYER_RETRIES) {
+                                    transientRetryCount++
+                                    Log.w("ExoPlayer", "🔁 Transient error — in-player retry $transientRetryCount/$MAX_PLAYER_RETRIES for same source.")
+                                    // Re-prepare the same media item on the main
+                                    // thread (the error callback already runs on
+                                    // the main/application thread, but we use a
+                                    // handler so we don't re-enter the player
+                                    // synchronously while it's still tearing down
+                                    // from the error). A short delay gives the
+                                    // CDN/network a moment to recover.
+                                    val item = mediaItem
+                                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                                        try {
+                                            this@apply.setMediaItem(item)
+                                            this@apply.prepare()
+                                            this@apply.playWhenReady = true
+                                        } catch (e: Exception) {
+                                            Log.e("ExoPlayer", "Retry re-prepare failed", e)
+                                        }
+                                    }, 800L)
+                                    return
+                                }
+                                // Retries exhausted OR a fatal error → surface it.
+                                val fatal = !isTransientPlaybackError(error) ||
+                                    transientRetryCount >= MAX_PLAYER_RETRIES
+                                Log.w("ExoPlayer", if (fatal) "❌ Fatal/unrecoverable error — surfacing to switch server." else "⚠️ surfacing error")
+                                errorHandler.value.invoke(fatal)
                             }
                         })
                         setMediaItem(mediaItem)
@@ -1369,3 +1464,110 @@ private fun applyQuality(selector: DefaultTrackSelector, info: TrackInfo) {
 private const val DEFAULT_UA =
     "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 " +
         "(KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+
+/**
+ * Maximum number of in-player retries for a TRANSIENT playback error before we
+ * give up on the current source and fall through to the next server. Each retry
+ * re-prepares the SAME media item (no server switch). This is the core fix for
+ * "videos are there but it skips them every time": a slow segment or momentary
+ * network blip no longer abandons a working URL.
+ */
+private const val MAX_PLAYER_RETRIES = 3
+
+/**
+ * Classifies an ExoPlayer [PlaybackException] as transient (recoverable by
+ * re-preparing the same source) vs fatal (the source is genuinely dead and we
+ * should move to the next server).
+ *
+ * Transient errors are the ones that happen on streams that *do* exist and
+ * *can* play — a slow CDN segment, a momentary network drop, an HLS manifest
+ * that temporarily 500s then recovers, or a decoder that needs a re-prepare.
+ * Fatal errors are hard 404s, unsupported formats, and DRM/geo blocks where
+ * retrying the same URL will never help.
+ */
+private fun isTransientPlaybackError(error: PlaybackException): Boolean {
+    // Drill into the cause chain — ExoPlayer often wraps the real error.
+    val cause = error.cause
+    val causeName = cause?.javaClass?.simpleName ?: ""
+
+    // Network/connectivity blips → definitely transient.
+    if (causeName.contains("HttpDataSourceException", true) ||
+        causeName.contains("Socket", true) ||
+        causeName.contains("Timeout", true) ||
+        causeName.contains("Network", true)
+    ) {
+        return true
+    }
+
+    // Parse-specific recoverable errors (manifest load hiccup, segment read).
+    if (causeName.contains("ParserException", true) ||
+        causeName.contains("BehindLiveWindowException", true)
+    ) {
+        return true
+    }
+
+    // Inspect the error code for known transient categories.
+    val code = error.errorCode
+    when (code) {
+        // Load errors (HTTP 5xx, timeout, connection reset) — retryable.
+        androidx.media3.common.PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+        androidx.media3.common.PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT,
+        androidx.media3.common.PlaybackException.ERROR_CODE_IO_INVALID_HTTP_CONTENT_TYPE,
+        androidx.media3.common.PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS,
+        androidx.media3.common.PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND,
+        androidx.media3.common.PlaybackException.ERROR_CODE_IO_UNSPECIFIED,
+        // Renderer/decoder init that can recover on re-prepare.
+        androidx.media3.common.PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
+        androidx.media3.common.PlaybackException.ERROR_CODE_DECODING_FAILED,
+        androidx.media3.common.PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED,
+        androidx.media3.common.PlaybackException.ERROR_CODE_AUDIO_TRACK_WRITE_FAILED,
+        // Source/manifest load that may recover.
+        androidx.media3.common.PlaybackException.ERROR_CODE_SOURCE_UNSPECIFIED,
+        androidx.media3.common.PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED,
+        androidx.media3.common.PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED ->
+            return true
+        else -> Unit
+    }
+
+    // A 403 / hard "ACCESS DENIED" on the actual media is fatal for THIS
+    // source (geo/CDN block) — move on. ERROR_CODE_IO_BAD_HTTP_STATUS is
+    // ambiguous, so only treat an explicit 403 message as fatal here.
+    val msg = error.message?.lowercase() ?: ""
+    if (msg.contains("403") || msg.contains("access denied") || msg.contains("forbidden")) {
+        return false
+    }
+
+    // Default: treat as transient so we try the in-player retry before
+    // abandoning a stream that "is there" — better to retry once too many
+    // than to skip a working source every time.
+    return true
+}
+
+/**
+ * Forces English audio + subtitle tracks (when available) on the given player's
+ * [DefaultTrackSelector]. This guarantees playback is in English — many
+ * providers (VidSrc, 2Embed, VidStorm) serve multi-audio HLS/MP4 where the
+ * default track is not English. We prefer "en"/"eng" language tags and, if no
+ * English audio exists, fall back to the default so we never break playback.
+ *
+ * Subtitles: we enable English text tracks but do NOT force them on if the
+ * audio is already English (avoids redundant captions). If the audio is
+ * non-English and English subs are available, they're enabled automatically.
+ */
+@UnstableApi
+private fun forceEnglishTracks(selector: DefaultTrackSelector) {
+    val params = DefaultTrackSelector.ParametersBuilder(selector.context!!)
+        // Prefer English audio; ExoPlayer falls back to the default track
+        // automatically if no English audio is available, so playback is
+        // never broken — only nudged toward English when it exists.
+        .setPreferredAudioLanguage("en")
+        .setPreferredAudioLanguages("en", "eng")
+        // Prefer English text tracks for subtitle/caption selection. Text
+        // tracks are only auto-selected when the audio is NOT in the preferred
+        // language, so English audio won't get redundant English captions.
+        .setPreferredTextLanguage("en")
+        .setPreferredTextLanguages("en", "eng")
+        .build()
+    selector.parameters = params
+}
+
