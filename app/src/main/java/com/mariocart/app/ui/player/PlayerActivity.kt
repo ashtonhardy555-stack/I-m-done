@@ -1152,11 +1152,16 @@ private fun ExoPlayerView(
                 // the app to switch servers every time. We give ExoPlayer a
                 // larger min buffer and, critically, a long back-buffer so a
                 // momentary segment stall doesn't immediately error out.
+                // NOTE: media3 1.4.x uses setBufferDurationsMs(...) (a single
+                // call covering min/max/forPlayback/forPlaybackAfterRebuffer)
+                // — the old setMinBufferMs/setMaxBufferMs setters were removed.
                 val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
-                    .setMinBufferMs(30_000)          // 30 s min buffer
-                    .setMaxBufferMs(90_000)          // 90 s max buffer
-                    .setBufferForPlaybackMs(1_500)   // start playback after 1.5 s
-                    .setBufferForPlaybackAfterRebufferMs(3_000) // 3 s after rebuffer
+                    .setBufferDurationsMs(
+                        /* minBufferMs            = */ 30_000,
+                        /* maxBufferMs            = */ 90_000,
+                        /* bufferForPlaybackMs    = */ 1_500,
+                        /* bufferForPlaybackAfterRebufferMs = */ 3_000
+                    )
                     .setBackBuffer(30_000, true)     // keep 30 s behind for seeks
                     .build()
 
@@ -1521,8 +1526,7 @@ private fun isTransientPlaybackError(error: PlaybackException): Boolean {
         androidx.media3.common.PlaybackException.ERROR_CODE_DECODING_FAILED,
         androidx.media3.common.PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED,
         androidx.media3.common.PlaybackException.ERROR_CODE_AUDIO_TRACK_WRITE_FAILED,
-        // Source/manifest load that may recover.
-        androidx.media3.common.PlaybackException.ERROR_CODE_SOURCE_UNSPECIFIED,
+        // Source/manifest parse that may recover on re-prepare.
         androidx.media3.common.PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED,
         androidx.media3.common.PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED ->
             return true
