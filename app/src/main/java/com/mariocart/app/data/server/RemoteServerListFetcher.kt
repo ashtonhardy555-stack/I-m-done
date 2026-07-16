@@ -13,26 +13,51 @@ import java.util.concurrent.TimeUnit
  * RemoteServerListFetcher — keeps the server list *up to date* without an app
  * update.
  *
- * On startup the app calls [fetchRemoteServers]. It downloads
- * `working-servers.json` from the raw GitHub URL (the same file you can edit
- * and push to instantly update every install), parses it, caches it to
- * private storage so the next launch is instant, and returns the fresh list.
+ * On startup the app calls [fetchRemoteServers]. It downloads the server list
+ * from one of several redundant raw GitHub URLs (see [REMOTE_URLS]), parses
+ * it, caches it to private storage so the next launch is instant, and returns
+ * the fresh list.
  *
- * If the network request fails it falls back to the cached copy from the last
- * successful fetch; if there is no cache it falls back to the [servers.json]
- * asset bundled inside the APK. The app therefore always has a usable list.
+ * If every network request fails it falls back to the cached copy from the
+ * last successful fetch; if there is no cache it falls back to the
+ * [servers.json] asset bundled inside the APK. The app therefore always has a
+ * usable list.
  *
- * The remote URL points at the `main` branch of the I-m-done repo so editing
- * [working-servers.json] and merging to main is all that's needed to push new
- * servers / disable dead ones / reorder reliability.
+ * ## Why multiple remote URLs
+ *
+ * The primary source is the `working-servers.json` on this repo's `main`
+ * branch, which a GitHub Actions workflow (`server-health-check.yml`)
+ * auto-updates every day with fresh reliability scores and enabled flags.
+ * Because the app cannot know in advance which branch/repo name will exist
+ * in the future, it tries several redundant raw URLs in order — the first one
+ * that returns a valid, non-empty server list wins. This means renaming the
+ * repo, moving the file, or the daily workflow pushing to a different branch
+ * all degrade gracefully instead of breaking every install.
  */
 object RemoteServerListFetcher {
 
     private const val TAG = "RemoteServerList"
 
-    /** The auto-update source. Edit `working-servers.json` + push to main. */
-    private const val REMOTE_URL =
-        "https://raw.githubusercontent.com/ashtonhardy555-stack/I-m-done/main/working-servers.json"
+    /**
+     * Ordered list of remote sources for the auto-updating server list.
+     * The first URL that returns a valid JSON server list wins.
+     *
+     *  1. The `main` branch of this repo (auto-updated daily by the
+     *     `server-health-check` GitHub Actions workflow).
+     *  2. A `server-registry` branch of this repo (a dedicated long-lived
+     *     branch the workflow can be repointed to without touching main).
+     *  3. A jsDelivr CDN mirror of the same file (CDN-cached, survives brief
+     *     raw.githubusercontent.com outages).
+     *
+     * Editing `working-servers.json` and merging to main is all that's needed
+     * to push new servers / disable dead ones / reorder reliability — the
+     * daily workflow does this automatically.
+     */
+    private val REMOTE_URLS = listOf(
+        "https://raw.githubusercontent.com/ashtonhardy555-stack/I-m-done/main/working-servers.json",
+        "https://raw.githubusercontent.com/ashtonhardy555-stack/I-m-done/server-registry/working-servers.json",
+        "https://cdn.jsdelivr.net/gh/ashtonhardy555-stack/I-m-done@main/working-servers.json"
+    )
 
     /** Cached copy filename in app private storage. */
     private const val CACHE_FILE = "remote_servers_cache.json"
@@ -82,7 +107,7 @@ object RemoteServerListFetcher {
             if (remote.isNotEmpty()) {
                 cached = remote
                 saveCache(context, remote)
-                Log.i(TAG, "✅ Loaded ${remote.size} servers from remote (${REMOTE_URL})")
+                Log.i(TAG, "✅ Loaded ${remote.size} servers from remote")
                 return remote
             }
         }
@@ -102,18 +127,34 @@ object RemoteServerListFetcher {
         return asset
     }
 
-    /** Force a network fetch right now, returning the result (may be empty). */
+    /**
+     * Force a network fetch right now, trying each URL in [REMOTE_URLS] in
+     * order. Returns the first non-empty server list, or empty if every URL
+     * failed.
+     */
     private fun fetchFromNetwork(): List<ServerConfig> {
+        for (url in REMOTE_URLS) {
+            val result = fetchOne(url)
+            if (result.isNotEmpty()) {
+                Log.i(TAG, "Remote source OK: $url")
+                return result
+            }
+            Log.w(TAG, "Remote source empty/failed: $url")
+        }
+        return emptyList()
+    }
+
+    private fun fetchOne(remoteUrl: String): List<ServerConfig> {
         return try {
             val request = Request.Builder()
-                .url(REMOTE_URL)
+                .url(remoteUrl)
                 .header("User-Agent", "Mozilla/5.0 (Linux; Android 13) I-m-Done/ServerList")
                 .header("Cache-Control", "no-cache")
                 .get()
                 .build()
             client.newCall(request).execute().use { resp ->
                 if (!resp.isSuccessful) {
-                    Log.w(TAG, "Remote fetch failed: HTTP ${resp.code}")
+                    Log.w(TAG, "Remote fetch $remoteUrl failed: HTTP ${resp.code}")
                     return emptyList()
                 }
                 val body = resp.body?.string() ?: return emptyList()
@@ -121,10 +162,10 @@ object RemoteServerListFetcher {
                 list.servers.filter { it.enabled && it.id.isNotBlank() }
             }
         } catch (e: IOException) {
-            Log.w(TAG, "Remote fetch error: ${e.message}")
+            Log.w(TAG, "Remote fetch $remoteUrl error: ${e.message}")
             emptyList()
         } catch (e: Exception) {
-            Log.w(TAG, "Remote parse error: ${e.message}")
+            Log.w(TAG, "Remote parse $remoteUrl error: ${e.message}")
             emptyList()
         }
     }

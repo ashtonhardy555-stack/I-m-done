@@ -67,8 +67,18 @@ object VidStormExtractor {
 
     private const val TAG = "VidStorm"
 
-    /** The VidStorm streaming API base (extracted from the FilmCave bundle). */
-    private const val API_BASE = "https://vidstorm.ru/api"
+    /**
+     * VidStorm-compatible streaming API bases (extracted from the FilmCave
+     * bundle). `autoembed.pro` is a public mirror of `vidstorm.ru` — same
+     * `/api/{kind}/{encrypted}` path, same AES key, same element-named
+     * sources (Lithium/Hydrogen/Boron/…). Trying both doubles extraction
+     * redundancy: when one origin is rate-limited or down the other usually
+     * still resolves the same direct URLs.
+     */
+    private val API_BASES = listOf(
+        "https://vidstorm.ru/api",
+        "https://autoembed.pro/api"
+    )
 
     /**
      * AES-256 key + IV used by the FilmCave player to encrypt the id segment.
@@ -78,9 +88,8 @@ object VidStormExtractor {
     private val AES_KEY = "x7k9mPqT2rWvY8zA5bC3nF6hJ2lK4mN9".toByteArray(Charsets.UTF_8)
     private val AES_IV = AES_KEY.copyOf(16)
 
-    /** Origin to send as Referer on the proxied media URLs (CDN check). */
-    private const val REFERER = "https://vidstorm.ru/"
-
+    /** Origin to send as Referer on the proxied media URLs (CDN check).
+     *  Now derived dynamically per API base (vidstorm.ru / autoembed.pro). */
     private const val USER_AGENT =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
             "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -156,17 +165,35 @@ object VidStormExtractor {
 
         // encryptId() already returns base64url (A-Z a-z 0-9 '-' '_'),
         // which is URL-safe, so no further URLEncoder pass is needed.
-        val apiUrl = "$API_BASE/$kind/$encrypted"
-        Log.d(TAG, "🔍 VidStorm API: $apiUrl  (plain=$plain)")
+        //
+        // Try every API base (vidstorm.ru -> autoembed.pro mirror). The first
+        // base that returns a *verified* stream wins. We go sequentially
+        // because the bases return identical URLs -- racing them would just
+        // double the request load. If a base is unreachable or returns no
+        // verified source, we fall through to the next.
+        var lastError: Result.Error = Result.Error("VidStorm: no API base responded")
+        for (base in API_BASES) {
+            val apiUrl = "$base/$kind/$encrypted"
+            Log.d(TAG, "\U0001f50d VidStorm API: $apiUrl  (plain=$plain)")
 
-        val body = try {
-            fetchJson(apiUrl)
-        } catch (e: Exception) {
-            Log.w(TAG, "VidStorm API fetch failed: ${e.message}")
-            return@withContext Result.Error("VidStorm: API unreachable")
+            val body = try {
+                fetchJson(apiUrl)
+            } catch (e: Exception) {
+                Log.w(TAG, "VidStorm API $base fetch failed: ${e.message}")
+                lastError = Result.Error("VidStorm: $base unreachable")
+                continue
+            }
+
+            val origin = base.substringBefore("/api")
+            when (val res = resolveSources(body, origin)) {
+                is Result.Stream -> return@withContext res
+                is Result.Error -> {
+                    Log.w(TAG, "VidStorm $base: ${res.message} -- trying next base")
+                    lastError = res
+                }
+            }
         }
-
-        resolveSources(body)
+        lastError
     }
 
     // ────────────────────────────────────────────────────────────────────── //
@@ -181,7 +208,7 @@ object VidStormExtractor {
      * before being returned so we never hand ExoPlayer a dead URL (which was
      * the root cause of "some titles like Interstellar don't play").
      */
-    private fun resolveSources(body: String): Result {
+    private fun resolveSources(body: String, origin: String = "https://vidstorm.ru"): Result {
         val root = try {
             JSONObject(body)
         } catch (e: Exception) {
@@ -189,10 +216,14 @@ object VidStormExtractor {
             return Result.Error("VidStorm: bad response")
         }
 
+        // The proxied media URLs (Cloudflare Workers, hellstorm.lol) check the
+        // Origin/Referer against the API origin that issued them. vidstorm.ru
+        // and its autoembed.pro mirror share the same backing CDN, but to be
+        // safe we send the origin that served this response.
         val headers = mapOf(
             "User-Agent" to USER_AGENT,
-            "Referer" to REFERER,
-            "Origin" to "https://vidstorm.ru"
+            "Referer" to "$origin/",
+            "Origin" to origin
         )
 
         val keys = root.keys()
@@ -419,12 +450,21 @@ object VidStormExtractor {
     // ────────────────────────────────────────────────────────────────────── //
 
     private fun fetchJson(url: String): String {
+        // Derive the Origin/Referer from the URL host so requests to the
+        // autoembed.pro mirror send autoembed.pro as Origin (matching what
+        // the browser would send) rather than always vidstorm.ru.
+        val origin = try {
+            val u = java.net.URI(url)
+            "${u.scheme}://${u.host}"
+        } catch (e: Exception) {
+            "https://vidstorm.ru"
+        }
         val req = Request.Builder()
             .url(url)
             .header("User-Agent", USER_AGENT)
             .header("Accept", "application/json, text/javascript, */*; q=0.01")
-            .header("Referer", REFERER)
-            .header("Origin", "https://vidstorm.ru")
+            .header("Referer", "$origin/")
+            .header("Origin", origin)
             .header("X-Requested-With", "XMLHttpRequest")
             .get()
             .build()

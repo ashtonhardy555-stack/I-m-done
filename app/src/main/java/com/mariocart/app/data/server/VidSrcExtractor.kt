@@ -458,19 +458,31 @@ object VidSrcExtractor {
             val origin = if (pathStart > 0) src.substring(0, pathStart) else src
             return origin
         }
-        // Keyword fallback: the iframe src is sometimes protocol-relative
-        // ("//cloudorchestranova.com/...") or embedded in a JS string in a way
-        // the iframe regex misses. The VidSrc family always uses a
-        // cloudorchestranova.com (or similar) RCP host, so if we can see the
-        // keyword in the HTML, use it directly.
+        // The RCP host rotates frequently (cloudorchestranova.com,
+        // cloudfoxreborn.com, cloud9sparks.com, whisperingauroras.com, ...).
+        // Rather than hardcode every possible host, scan the raw HTML for any
+        // full URL that contains the "/rcp/" path segment -- that is the
+        // reliable signal of the current RCP host regardless of whether the
+        // iframe is rendered as a literal tag or injected via JS.
+        val rcpUrlMatch = Regex("https?://([a-zA-Z0-9.-]+)/rcp/").find(html)
+        if (rcpUrlMatch != null) {
+            val host = rcpUrlMatch.groupValues[1]
+            Log.d(TAG, "VidSrc findIframeOrigin: detected RCP host via /rcp/ URL: https://$host")
+            return "https://$host"
+        }
+        // Last-resort keyword fallback for known historical RCP hosts (used
+        // only when the /rcp/ URL scan above also misses -- e.g. the host is
+        // referenced in a config blob without a path).
         val keywordHosts = listOf(
             "cloudorchestranova.com",
             "cloudfoxreborn.com",
-            "cloud9sparks.com"
+            "cloud9sparks.com",
+            "whisperingauroras.com",
+            "2cloudflare.com"
         )
         for (host in keywordHosts) {
             if (html.contains(host, ignoreCase = true)) {
-                Log.d(TAG, "VidSrc findIframeOrigin: iframe regex missed, using keyword host https://$host")
+                Log.d(TAG, "VidSrc findIframeOrigin: iframe + /rcp/ regex missed, using keyword host https://$host")
                 return "https://$host"
             }
         }
