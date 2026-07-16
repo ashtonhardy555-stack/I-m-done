@@ -230,24 +230,44 @@ object VidLinkExtractor {
 
     /**
      * Some VidLink URLs embed required request headers as a URL-encoded JSON
-     * query param, e.g. `…?headers={"referer":"https://filmboom.top/","origin":"https://filmboom.top"}`.
-     * Parse that into a header map (keys normalized to canonical casing).
+     * query param, e.g.
+     *   `…?headers={"referer":"https://filmboom.top/","origin":"https://filmboom.top"}&host=https://bcdnxw.hakunaymatata.com&sign=…&t=…`
+     *
+     * CRITICAL: the `headers` param is just ONE of several query params that
+     * follow the `?`. The CDN also requires `host`, `sign`, and `t` for byte-range
+     * authentication. We must extract ONLY the JSON object that is the value of
+     * `headers=` and leave the rest of the query string untouched.
+     *
+     * The previous implementation URL-decoded the ENTIRE tail after `?headers=`
+     * (which included `&host=…&sign=…&t=…`) and then tried `JSONObject(decoded)`
+     * — that threw because of the trailing `&host=…`, so embedded Referer/Origin
+     * were silently lost. This version isolates just the JSON value.
      */
     private fun parseEmbeddedHeaders(url: String): Map<String, String> {
         return try {
-            val qi = url.indexOf("?headers=")
+            val marker = "?headers="
+            val qi = url.indexOf(marker)
             if (qi < 0) return emptyMap()
-            val rawParam = url.substring(qi + "?headers=".length)
-            // The value may itself contain further query params after it; take up to
-            // the next "&" that isn't part of the JSON. In practice VidLink appends
-            // nothing after headers, so just URL-decode the tail.
-            val decoded = java.net.URLDecoder.decode(rawParam, "UTF-8")
+
+            // The `headers` value is a JSON object. It is URL-encoded in the
+            // query string, so the raw `{` / `}` / `:` / `"` appear as %7B etc.
+            // The value ends at the first literal `&` (the next query param) or
+            // at end-of-string. A JSON object value itself never contains a raw
+            // `&` (JSON uses \u0026 for an ampersand), so splitting on `&` is safe.
+            val afterMarker = url.substring(qi + marker.length)
+            val rawValue = if ('&' in afterMarker) {
+                afterMarker.substring(0, afterMarker.indexOf('&'))
+            } else {
+                afterMarker
+            }
+
+            val decoded = java.net.URLDecoder.decode(rawValue, "UTF-8")
             val json = JSONObject(decoded)
             val out = linkedMapOf<String, String>()
             for (key in json.keys()) {
                 val v = json.optString(key)
                 if (v.isNotBlank()) {
-                    // Normalize common header names.
+                    // Normalize common header names to canonical casing.
                     val norm = when (key.lowercase()) {
                         "referer" -> "Referer"
                         "origin" -> "Origin"
@@ -264,11 +284,63 @@ object VidLinkExtractor {
         }
     }
 
-    /** Remove the `?headers=…` param from the URL before handing to ExoPlayer. */
+    /**
+     * Remove ONLY the `headers=…` query param from the URL, preserving every
+     * other query param (notably `host`, `sign`, `t` which the CDN requires for
+     * byte-range authentication).
+     *
+     * The previous implementation did `url.substring(0, url.indexOf("?headers="))`,
+     * which deleted the ENTIRE query string — including `host`/`sign`/`t`. With
+     * those gone the CDN accepted the initial moov-atom request (so ExoPlayer
+     * showed a duration / scrubber) but rejected all subsequent byte-range
+     * requests, producing a black screen that then skipped to the next server.
+     */
     private fun stripHeadersParam(url: String): String {
-        val qi = url.indexOf("?headers=")
-        if (qi < 0) return url
-        return url.substring(0, qi)
+        val marker = "?headers="
+        val qi = url.indexOf(marker)
+        if (qi < 0) {
+            // Some URLs may carry headers as a non-first param: `…&headers=…`
+            val ampMarker = "&headers="
+            val ai = url.indexOf(ampMarker)
+            if (ai < 0) return url
+            return removeSingleQueryParam(url, ai, ampMarker)
+        }
+        return removeSingleQueryParam(url, qi, marker)
+    }
+
+    /**
+     * Remove a single query param (identified by the start index of its marker
+     * string, e.g. "?headers=" or "&headers=") and its value, correctly handling
+     * the case where more params follow it.
+     *
+     * Examples:
+     *   "...mp4?headers={...}&host=H&sign=S&t=T"  (marker="?headers=" at qi)
+     *      -> "...mp4?host=H&sign=S&t=T"   (the following & becomes the new ?)
+     *   "...mp4?a=1&headers={...}&host=H"   (marker="&headers=" at ai)
+     *      -> "...mp4?a=1&host=H"
+     *   "...mp4?headers={...}"              (only param)
+     *      -> "...mp4"
+     */
+    private fun removeSingleQueryParam(url: String, markerStart: Int, marker: String): String {
+        val valueStart = markerStart + marker.length
+        val rest = url.substring(valueStart)
+        val nextAmp = rest.indexOf('&')
+        return if (nextAmp >= 0) {
+            // There are more params after this one.
+            val prefix = url.substring(0, markerStart)
+            val suffix = rest.substring(nextAmp + 1) // drop the leading '&'
+            // If we removed the FIRST param (marker started with '?'), the next
+            // param must become the new leading param after '?'.
+            if (marker.startsWith("?")) {
+                "$prefix?$suffix"
+            } else {
+                "$prefix&$suffix"
+            }
+        } else {
+            // This was the last (or only) param — just drop it and any trailing
+            // '?' or '&' it was attached to.
+            url.substring(0, markerStart)
+        }
     }
 
     /** Build the final ExoPlayer header set: embedded headers + UA fallback. */
