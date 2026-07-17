@@ -150,8 +150,21 @@ object NoTorrentExtractor {
         val sorted = candidates.sortedWith(
             compareByDescending { it.url.contains(".m3u8") || it.url.contains("index.m3u8") }
         )
+
+        // Best unverified fallback. The OkHttp probe (verifyPlayable) is
+        // advisory only: many CDNs 403/401 a bare OkHttp GET yet still serve
+        // ExoPlayer once it sends Referer/User-Agent/Range. In v13 a failed
+        // probe dropped the candidate entirely — losing titles like
+        // Interstellar/LOTR that NoTorrent reliably covers. We now prefer a
+        // verified stream but ALWAYS fall back to a best unverified candidate
+        // so ExoPlayer gets to try it.
+        var bestUnverified: Pair<String, Map<String, String>>? = null
+
         for (c in sorted) {
             val headers = c.headers.ifEmpty { mapOf("User-Agent" to USER_AGENT) }
+            if (bestUnverified == null && c.url.startsWith("http")) {
+                bestUnverified = c.url to headers
+            }
             if (verifyPlayable(c.url, headers)) {
                 Log.i(TAG, "✅ NoTorrent stream: ${c.url}")
                 return@withContext Result.Stream(
@@ -162,7 +175,18 @@ object NoTorrentExtractor {
             }
         }
 
-        Log.w(TAG, "no candidate verified as playable")
+        // Unverified fallback — hand the best candidate to ExoPlayer.
+        if (bestUnverified != null) {
+            val (fbUrl, fbHeaders) = bestUnverified!!
+            Log.w(TAG, "no candidate passed verification — returning best unverified to ExoPlayer: ${fbUrl.take(90)}")
+            return@withContext Result.Stream(
+                url = fbUrl,
+                headers = fbHeaders,
+                providerName = "NoTorrent·unverified"
+            )
+        }
+
+        Log.w(TAG, "no candidate with a usable URL")
         Result.Error("NoTorrent: streams not playable")
     }
 

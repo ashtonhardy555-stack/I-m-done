@@ -32,6 +32,14 @@ import java.util.concurrent.TimeUnit
  */
 class MarioCartApplication : Application(), ImageLoaderFactory {
 
+    override fun onCreate() {
+        super.onCreate()
+        // Initialise the per-title stream-availability cache so the player
+        // can lead with a known-good provider and the race can skip providers
+        // already known to be dead for a given movie/show.
+        com.mariocart.app.data.cache.StreamAvailabilityCache.init(this)
+    }
+
     override fun newImageLoader(): ImageLoader {
         // A shared OkHttpClient with sensible timeouts for image downloads.
         val imageClient = OkHttpClient.Builder()

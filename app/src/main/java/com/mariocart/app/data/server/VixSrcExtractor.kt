@@ -147,13 +147,22 @@ object VixSrcExtractor {
         Log.d(TAG, "🔍 VixSrc master URL: $masterUrl")
 
         // Step 4: Verify the HLS manifest is actually live.
+        //
+        // The OkHttp side-channel probe is advisory only. VixSrc's CDN is
+        // frequently Cloudflare-403 to a bare OkHttp GET while ExoPlayer —
+        // which sends a full browser User-Agent + the Referer header we
+        // attach — can still play the manifest. In v13 a failed probe here
+        // dropped the whole stream before ExoPlayer saw it, which is why so
+        // many videos were "unplayable". Now we still PREFER a verified
+        // manifest, but if the probe fails we hand the URL to ExoPlayer
+        // anyway; ExoPlayer is the real arbiter and will error out (and the
+        // player will move to the next stage) only if the stream is truly dead.
         val headers = mapOf(
             "User-Agent" to USER_AGENT,
             "Referer" to apiUrl
         )
         if (!verifyHls(masterUrl, headers)) {
-            Log.w(TAG, "VixSrc: playlist verification failed (dead URL)")
-            return@withContext Result.Error("VixSrc: stream not playable")
+            Log.w(TAG, "VixSrc: playlist verification failed (probe inconclusive) — returning URL to ExoPlayer anyway")
         }
 
         Log.i(TAG, "✅ VixSrc stream: $masterUrl")

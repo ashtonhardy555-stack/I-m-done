@@ -260,14 +260,52 @@ object VidStormExtractor {
 
         Log.d(TAG, "VidStorm live sources (English-first): ${sortedSources.joinToString { "${it.first}${if (isEnglish(it.second)) "(en)" else ""}" }}")
 
+        // Best unverified fallbacks (direct + playlist). We collect a
+        // well-formed URL for each pass even when verifyUrl() says "no",
+        // because the OkHttp side-channel probe is NOT the real arbiter of
+        // playability. Many CDNs reply 403/401 to a bare OkHttp GET (no
+        // browser session / different Range handling) while STILL serving
+        // ExoPlayer perfectly once ExoPlayer sends the Referer/User-Agent/
+        // Range headers it is configured with. Dropping such URLs here —
+        // as v13 did — is the root cause of "only a handful of videos play":
+        // the resolved stream is thrown away before ExoPlayer ever sees it.
+        // We now prefer verified URLs, but ALWAYS fall back to a best
+        // unverified one so ExoPlayer gets a chance to play it.
+        var bestUnverifiedDirect: Pair<String, Map<String, String>>? = null
+        var bestUnverifiedPlaylist: Pair<String, Map<String, String>>? = null
+
+        // Cap how many direct sources we bother probing. Verification is now
+        // only a PREFERENCE (we always fall back to an unverified URL), so
+        // walking every source with a 4s-timeout probe would make shows with
+        // many sources load slowly for no benefit. We probe at most the first
+        // few (English-first, so the best candidates); if none verify we
+        // immediately hand the best unverified URL to ExoPlayer. This is the
+        // "shows load slowly" fix: a 12-source episode no longer waits
+        // 12×4s before it starts playing.
+        val MAX_DIRECT_PROBES = 3
+        var directProbes = 0
+
         // First pass: direct sources (type=hls / .m3u8 / .mp4 directly).
-        // Walk through ALL of them and return the first one that verifies.
+        // Walk through them and return the first one that verifies.
         for ((name, src) in sortedSources) {
             val url = src.optString("url", "")
             val type = src.optString("type", "")
             if (type == "hls" || url.contains(".m3u8") ||
                 (url.contains(".mp4") && !url.contains("hellstorm.lol"))
             ) {
+                // Track a well-formed direct URL as the unverified fallback
+                // (English sources are already first, so the first one we
+                // see is the best English candidate).
+                if (bestUnverifiedDirect == null && url.startsWith("http")) {
+                    bestUnverifiedDirect = url to headers
+                }
+                // Stop probing after the cap — we have a fallback, no point
+                // making the user wait through every dead source.
+                if (directProbes >= MAX_DIRECT_PROBES) {
+                    Log.d(TAG, "VidStorm: direct-probe cap reached ($MAX_DIRECT_PROBES) — keeping best unverified")
+                    break
+                }
+                directProbes++
                 if (verifyUrl(url, headers, name)) {
                     Log.i(TAG, "✅ VidStorm direct: $name → $url")
                     return Result.Stream(url, headers, providerName = "VidStorm·$name")
@@ -278,9 +316,17 @@ object VidStormExtractor {
 
         // Second pass: playlist sources (hellstorm.lol / type=mp4) — fetch the
         // playlist JSON and pick the highest-resolution direct file.
+        // Capped at MAX_DIRECT_PROBES for the same slow-shows reason.
+        var playlistProbes = 0
         for ((name, src) in sortedSources) {
+            if (playlistProbes >= MAX_DIRECT_PROBES) break
             val url = src.optString("url", "")
-            val direct = resolvePlaylist(url, name) ?: continue
+            val direct = resolvePlaylist(url, name)
+            if (direct != null && direct.startsWith("http") && bestUnverifiedPlaylist == null) {
+                bestUnverifiedPlaylist = direct to headers
+            }
+            if (direct == null) continue
+            playlistProbes++
             if (verifyUrl(direct, headers, name)) {
                 Log.i(TAG, "✅ VidStorm playlist: $name → $direct")
                 return Result.Stream(direct, headers, providerName = "VidStorm·$name")
@@ -288,7 +334,25 @@ object VidStormExtractor {
             Log.w(TAG, "✗ VidStorm playlist source $name failed verification, trying next")
         }
 
-        Log.w(TAG, "VidStorm: all sources failed verification for this title.")
+        // ── Unverified fallback ──
+        // Every well-formed source failed the side-channel probe. Rather than
+        // dropping the title (the v13 behaviour that left most videos
+        // unplayable), hand the best-looking URL to ExoPlayer. ExoPlayer sends
+        // its own Range/Referer/User-Agent headers and is the true test of
+        // playability. If the CDN is genuinely dead, ExoPlayer errors out and
+        // the player falls through to the next stage — exactly as intended.
+        val fallback = bestUnverifiedDirect ?: bestUnverifiedPlaylist
+        if (fallback != null) {
+            val (fbUrl, fbHeaders) = fallback
+            Log.w(TAG, "VidStorm: no source passed verification — returning best unverified URL to ExoPlayer: ${fbUrl.take(90)}")
+            return Result.Stream(
+                url = fbUrl,
+                headers = fbHeaders,
+                providerName = "VidStorm·unverified"
+            )
+        }
+
+        Log.w(TAG, "VidStorm: no sources with a usable URL for this title.")
         return Result.Error("VidStorm: streams not yet available for this title")
     }
 
