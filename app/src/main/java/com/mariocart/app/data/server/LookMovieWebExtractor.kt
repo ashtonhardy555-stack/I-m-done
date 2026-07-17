@@ -132,6 +132,16 @@ class LookMovieWebExtractor private constructor(
     private var rootView: FrameLayout? = null
     private var continuation: CancellableContinuation<Result>? = null
 
+    /**
+     * The `hash` value pulled from the `movie_storage` / `show_storage` object.
+     * The Kodi addon's proxy (serverHTTP.py) sends this as a `t_hash` cookie on
+     * EVERY m3u8 manifest and segment request — without it LookMovie's CDN
+     * rejects the stream. We capture it here so the [Result.Stream] headers
+     * include `Cookie: t_hash=<hash>`, exactly mirroring the addon.
+     */
+    @Volatile
+    private var storageHash: String? = null
+
     private suspend fun doExtract(
         title: String,
         year: String?,
@@ -169,6 +179,7 @@ class LookMovieWebExtractor private constructor(
         mainHandler.post {
             if (cont.isCancelled) return@post
             continuation = cont
+            storageHash = null // reset per flow attempt
 
             CookieManager.getInstance().setAcceptCookie(true)
 
@@ -329,6 +340,9 @@ class LookMovieWebExtractor private constructor(
                 resumeWithError(cont, "Incomplete storage object.")
                 return@loadAndExtract
             }
+            // Capture the storage hash so the returned stream carries the
+            // t_hash cookie (mirrors the Kodi addon's serverHTTP.py proxy).
+            storageHash = hash
 
             if (contentType == "tv") {
                 val idEpisode = findEpisodeId(storage, season, episode)
@@ -443,13 +457,9 @@ class LookMovieWebExtractor private constructor(
         if (!cont.isActive) return
         if (url.contains(".m3u8") || url.contains(".mp4")) {
             Log.i(TAG, "✅ Captured direct stream from WebView: $url")
-            val cookies = CookieManager.getInstance().getCookie(base) ?: ""
-            val headers = mutableMapOf(
-                "Referer" to "$base/",
-                "User-Agent" to USER_AGENT
-            )
-            if (cookies.isNotBlank()) headers["Cookie"] = cookies
-            resumeWithStream(cont, url, headers)
+            // Use the shared header builder so the t_hash cookie (from the
+            // storage object) is attached, exactly like the addon proxy.
+            resumeWithStream(cont, url, buildStreamHeaders(base))
         }
     }
 
@@ -468,16 +478,41 @@ class LookMovieWebExtractor private constructor(
         val streamUrl = parseSecurityApiJson(body, base)
         if (streamUrl != null) {
             Log.i(TAG, "✅ LookMovie stream: $streamUrl")
-            val cookies = CookieManager.getInstance().getCookie(base) ?: ""
-            val headers = mutableMapOf(
-                "Referer" to "$base/",
-                "User-Agent" to USER_AGENT
-            )
-            if (cookies.isNotBlank()) headers["Cookie"] = cookies
-            resumeWithStream(cont, streamUrl, headers)
+            resumeWithStream(cont, streamUrl, buildStreamHeaders(base))
         } else {
             resumeWithError(cont, "No stream URL in the security API response.")
         }
+    }
+
+    /**
+     * Builds the headers ExoPlayer must send for the LookMovie stream.
+     *
+     * Mirrors the Kodi addon's `serverHTTP.py`: the storage `hash` is sent
+     * as a `t_hash` cookie on the manifest AND every segment request,
+     * otherwise LookMovie's CDN rejects playback. We also forward the
+     * Cloudflare `cf_clearance` cookie the WebView earned, plus Referer + UA.
+     */
+    private fun buildStreamHeaders(base: String): Map<String, String> {
+        val headers = mutableMapOf(
+            "Referer" to "$base/",
+            "User-Agent" to USER_AGENT
+        )
+        val cookieParts = mutableListOf<String>()
+        val cfCookies = CookieManager.getInstance().getCookie(base) ?: ""
+        if (cfCookies.isNotBlank()) cookieParts.add(cfCookies.trim())
+        val tHash = storageHash
+        if (!tHash.isNullOrBlank()) {
+            // The addon sets cok = {'t_hash': hash_} on the m3u8 GET and
+            // sends "Cookie: t_hash="+hash_ on segments. Avoid duplicating
+            // t_hash if cf_clearance already supplies one.
+            if (!cfCookies.contains("t_hash=")) {
+                cookieParts.add("t_hash=$tHash")
+            }
+        }
+        if (cookieParts.isNotEmpty()) {
+            headers["Cookie"] = cookieParts.joinToString("; ")
+        }
+        return headers
     }
 
     /**

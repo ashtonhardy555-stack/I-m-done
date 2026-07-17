@@ -2,6 +2,9 @@ package com.mariocart.app.data.server
 
 import android.content.Context
 import android.util.Log
+import com.mariocart.app.BuildConfig
+import com.mariocart.app.data.api.ApiClient
+import com.mariocart.app.data.cache.StreamAvailabilityCache
 import com.mariocart.app.data.model.TmdbItem
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -9,6 +12,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.json.JSONObject
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
@@ -17,29 +21,54 @@ import java.util.concurrent.TimeUnit
  * a piece of content has at least one working stream, so the browse/discover
  * grid can hide titles that have no playable source.
  *
- * ## Why not just run the full WebView extraction for every title?
- * The full [EmbedExtractor] spins up an off-screen WebView per provider and
- * waits up to 18s — far too slow to run across a 20-item grid. Instead this
- * checker does a **plain HTTP HEAD/GET probe** against the *embed page* of the
- * cleanest providers. If the embed page loads (HTTP 200) and returns HTML
- * (not a Cloudflare challenge or 404), we treat the title as "available": the
- * provider acknowledges the TMDB id and will serve a player. This is the same
- * signal a browser sees before the JS player initialises.
+ * ## Two-tier probing (v2)
  *
- * ## Accuracy trade-off
- * A 200 on the embed page is not a 100% guarantee the underlying video file is
- * playable, but empirically the clean providers (VidLink, 2Embed) return 404
- * for unknown TMDB ids and 200 for known ones, so the probe is a good proxy.
- * Titles that pass the probe but fail at full-extraction time still fall
- * through to the error screen in [PlayerActivity] with a Retry button, so the
- * user is never stuck.
+ *  1. **Persistent good-cache first.** Before any network probe we consult
+ *     [StreamAvailabilityCache.knownGoodProvider]. If a title has a
+ *     *fresh* (≤14-day) good record it means the user (or this checker)
+ *     successfully played it before — show it immediately, no probe needed.
+ *     This is the fastest, most reliable signal: "it played before, it'll
+ *     play again".
+ *
+ *  2. **NoTorrent direct-stream probe (primary).** NoTorrent
+ *     (`addon-osvh.onrender.com`) is the fastest, most reliable 2026 source —
+ *     it returns 302→206 `video/mp4` in ~280-400 ms. We resolve TMDB→IMDb
+ *     (one ~150 ms round-trip) and query the addon. If it returns a
+ *     **non-empty `streams` array**, the title is available — this is a
+ *     *positive* "actually playable" signal, not just "the page loaded".
+ *     This catches titles the embed-probe misses and avoids the false
+ *     positives the embed-probe produces (a 200 page that never plays).
+ *
+ *  3. **Embed-page probe (fallback).** For titles NoTorrent doesn't cover
+ *     we fall back to the original lightweight embed-page probe against the
+ *     cleanest (tier 1-2) providers. A 200 HTML page that isn't a Cloudflare
+ *     challenge is treated as "available".
+ *
+ * ## Never hide on a network error
+ *
+ * Every probe can fail for transient reasons (a CDN hiccup, rate-limit, the
+ * user's connection dropped). Hiding content because a probe *errored* would
+ * make popular titles vanish at random. So the rule is:
+ *
+ *   - A title is **hidden** only when we have **positive evidence** it has no
+ *     source: NoTorrent returned `{"streams": []}` (or 404) **and** every
+ *     embed provider returned a non-200 / challenge / 404.
+ *   - If *every* probe **errored** (threw an exception, timed out), the title
+ *     is **shown** — we don't have evidence it's unplayable, only that we
+ *     couldn't check right now.
+ *
+ * This keeps the grid populated on flaky connections while still hiding the
+ * genuinely sourceless titles.
  *
  * ## Caching
- * Results are cached per (tmdbId, contentType) for the app lifetime so paging
- * through the grid doesn't re-probe the same title. The cache is an
- * in-memory [ConcurrentHashMap].
+ *
+ * In-memory per-app-lifetime cache (`ConcurrentHashMap`) keyed by
+ * `tmdbId|contentType`, so paging through the grid doesn't re-probe the same
+ * title. Good results are also promoted into the persistent
+ * [StreamAvailabilityCache] so they survive app restarts.
  *
  * ## Concurrency
+ *
  * [filterAvailable] probes titles in parallel (bounded by the number of
  * titles) so a full grid resolves in roughly one round-trip, not N.
  */
@@ -48,7 +77,10 @@ object StreamAvailabilityChecker {
     private const val TAG = "StreamAvail"
     private const val PROBE_TIMEOUT_S = 6L
 
-    /** Max providers to probe per title (keeps it fast). */
+    /** NoTorrent Stremio addon base — the fastest, most-reliable 2026 source. */
+    private const val NOTORRENT_BASE = "https://addon-osvh.onrender.com"
+
+    /** Max embed providers to probe per title (keeps it fast). */
     private const val MAX_PROVIDERS_PER_TITLE = 3
 
     private val client by lazy {
@@ -60,7 +92,12 @@ object StreamAvailabilityChecker {
     }
 
     /**
-     * Cached results: tmdbId|contentType -> available?
+     * Cached results: `tmdbId|contentType` -> TriState.
+     *
+     *  - `true`  → confirmed available (show)
+     *  - `false` → confirmed no source (hide)
+     *  - `null`  → probed but inconclusive (all probes errored) → show
+     *
      * Persists for the app lifetime (cleared only by [clearCache]).
      */
     private val cache = ConcurrentHashMap<String, Boolean>()
@@ -68,10 +105,11 @@ object StreamAvailabilityChecker {
     private fun cacheKey(item: TmdbItem): String = "${item.id}|${item.contentType}"
 
     /**
-     * Returns true if at least one clean provider's embed page for [item]
-     * responds with HTTP 200 and non-challenge HTML.
+     * Returns true if the item should be **shown** (i.e. it is, or is likely,
+     * playable). Returns false only when we have positive evidence it has no
+     * playable source.
      *
-     * Uses the cached result if available.
+     * Uses the cached result if available; otherwise probes.
      */
     suspend fun isAvailable(context: Context, item: TmdbItem): Boolean {
         val key = cacheKey(item)
@@ -83,10 +121,11 @@ object StreamAvailabilityChecker {
     }
 
     /**
-     * Filters a list of items to only those with at least one working embed
-     * page, probing in parallel. Items are returned in their original order.
+     * Filters a list of items to only those that should be shown, probing in
+     * parallel. Items are returned in their original order.
      *
-     * This is what the browse/discover grid calls before rendering.
+     * This is what every content grid (Home, Movies, TV, Search, Browse) calls
+     * before rendering, so titles with no playable source never appear.
      */
     suspend fun filterAvailable(
         context: Context,
@@ -103,40 +142,176 @@ object StreamAvailabilityChecker {
     }
 
     // ------------------------------------------------------------------ //
-    //  Probing
+    //  Probing                                                           //
     // ------------------------------------------------------------------ //
 
     private suspend fun probeItem(context: Context, item: TmdbItem): Boolean {
         ServerManager.initialize(context)
-        // Probe only the cleanest (tier 1-2) providers — tier 3 are
-        // Cloudflare-challenged and will 403 on plain HTTP, giving false
-        // negatives. They're still tried at full-extraction time.
-        val providers = ServerManager.allServers()
-            .filter { it.tier <= 2 }
-            .sortedBy { it.tier }
-            .take(MAX_PROVIDERS_PER_TITLE)
 
-        if (providers.isEmpty()) {
-            // No clean providers configured — don't hide everything.
+        // 1) Persistent good-cache: played before → show immediately.
+        //    season/episode default to 0 (movies) / 1,1 (tv) for the
+        //    availability check — we only care "does ANY source exist".
+        val season = if (item.isMovie) 0 else 1
+        val episode = if (item.isMovie) 0 else 1
+        val knownGood = StreamAvailabilityCache.knownGoodProvider(
+            item.id, item.contentType, season, episode
+        )
+        if (knownGood != null) {
+            Log.d(TAG, "✓ ${item.displayTitle} known-good ($knownGood) — show")
             return true
         }
 
-        for (p in providers) {
-            val url = p.urlFor(item.contentType, item.id, 1, 1)
-            if (probeUrl(url)) {
-                Log.d(TAG, "✓ ${item.displayTitle} available via ${p.name}")
-                return true
-            }
+        // 2) NoTorrent direct-stream probe (primary positive signal).
+        val nt = probeNoTorrent(item)
+        if (nt == true) {
+            Log.d(TAG, "✓ ${item.displayTitle} NoTorrent has streams — show")
+            // Promote to the persistent cache so future screens skip probing.
+            StreamAvailabilityCache.recordSuccess(
+                item.id, item.contentType, season, episode, "NoTorrent"
+            )
+            return true
         }
-        Log.d(TAG, "✗ ${item.displayTitle} (${item.id}) no clean embed responded")
-        return false
+
+        // 3) Embed-page probe (fallback for titles NoTorrent doesn't cover).
+        val embed = probeEmbeds(context, item)
+        if (embed == true) {
+            Log.d(TAG, "✓ ${item.displayTitle} embed page responded — show")
+            return true
+        }
+
+        // 4) Decision: hide ONLY when both probes returned a definitive
+        //    "no source" (false). If either was inconclusive (null — all
+        //    probes errored), show the title — we lack positive evidence
+        //    it's unplayable.
+        if (nt == false && embed == false) {
+            Log.d(TAG, "✗ ${item.displayTitle} (${item.id}) no source anywhere — hide")
+            return false
+        }
+        // At least one probe was inconclusive → don't hide on a network glitch.
+        Log.d(TAG, "? ${item.displayTitle} probes inconclusive — show (safe default)")
+        true
     }
 
+    // ------------------------------------------------------------------ //
+    //  NoTorrent direct-stream probe                                     //
+    // ------------------------------------------------------------------ //
+
     /**
-     * Returns true if [url] responds with HTTP 200 and HTML that is not a
-     * Cloudflare challenge page.
+     * Probes the NoTorrent Stremio addon for [item].
+     *
+     * @return `true`  if the addon returned a non-empty `streams` array
+     *         (the title is playable);
+     *         `false` if the addon returned `{"streams": []}` or a 404
+     *         (definitive "no source");
+     *         `null` if the probe errored / timed out (inconclusive).
      */
-    private fun probeUrl(url: String): Boolean {
+    private suspend fun probeNoTorrent(item: TmdbItem): Boolean? =
+        withContext(Dispatchers.IO) {
+            val isTv = !item.isMovie
+            // Resolve TMDB → IMDb (the addon keys off IMDb ids).
+            val imdbId = try {
+                resolveImdbId(item.id, isTv)
+            } catch (e: Exception) {
+                Log.w(TAG, "NoTorrent probe: TMDB→IMDb failed for ${item.id}: ${e.message}")
+                return@withContext null  // inconclusive
+            }
+            if (imdbId.isNullOrBlank()) {
+                // No IMDb id → can't query NoTorrent. Not a "no source" verdict;
+                // the embed probe still gets a chance.
+                return@withContext null
+            }
+
+            val season = if (isTv) 1 else 0
+            val episode = if (isTv) 1 else 0
+            val addonUrl = if (isTv) {
+                "$NOTORRENT_BASE/stream/series/$imdbId:$season:$episode.json"
+            } else {
+                "$NOTORRENT_BASE/stream/movie/$imdbId.json"
+            }
+
+            try {
+                val request = Request.Builder()
+                    .url(addonUrl)
+                    .header("User-Agent",
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+                            "(KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36")
+                    .header("Accept", "application/json")
+                    .get()
+                    .build()
+                client.newCall(request).execute().use { resp ->
+                    if (resp.code == 404) return@withContext false  // definitive: no source
+                    if (!resp.isSuccessful) return@withContext null  // 5xx etc → inconclusive
+                    val body = resp.body?.string() ?: return@withContext null
+                    val json = JSONObject(body)
+                    val streams = json.optJSONArray("streams")
+                    val count = streams?.length() ?: 0
+                    // Non-empty streams array → playable. Empty → no source.
+                    count > 0
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "NoTorrent probe errored for ${item.id}: ${e.message}")
+                null  // inconclusive
+            }
+        }
+
+    /** Resolve a TMDB id → IMDb id via TMDB's external_ids append. */
+    private suspend fun resolveImdbId(tmdbId: Int, isTv: Boolean): String? {
+        val key = BuildConfig.TMDB_API_KEY
+        val resp = if (isTv) {
+            ApiClient.tmdbApi.getTvExternalIds(tmdbId, key)
+        } else {
+            ApiClient.tmdbApi.getMovieExternalIds(tmdbId, key)
+        }
+        return resp.imdbId
+    }
+
+    // ------------------------------------------------------------------ //
+    //  Embed-page probe (fallback)                                       //
+    // ------------------------------------------------------------------ //
+
+    /**
+     * Probes the cleanest (tier 1-2) embed providers for [item].
+     *
+     * @return `true`  if at least one embed page responded 200 + non-challenge;
+     *         `false` if every probed provider returned non-200 / challenge;
+     *         `null` if every probe **errored** (inconclusive).
+     */
+    private suspend fun probeEmbeds(context: Context, item: TmdbItem): Boolean? =
+        withContext(Dispatchers.IO) {
+            // Probe only the cleanest (tier 1-2) providers — tier 3 are
+            // Cloudflare-challenged and will 403 on plain HTTP, giving false
+            // negatives. They're still tried at full-extraction time.
+            val providers = ServerManager.allServers()
+                .filter { it.tier <= 2 }
+                .sortedBy { it.tier }
+                .take(MAX_PROVIDERS_PER_TITLE)
+
+            if (providers.isEmpty()) {
+                // No clean providers configured — don't hide everything.
+                return@withContext null
+            }
+
+            var anyError = false
+            for (p in providers) {
+                val url = p.urlFor(item.contentType, item.id, 1, 1)
+                when (probeUrl(url)) {
+                    true -> return@withContext true
+                    false -> { /* try next provider */ }
+                    null -> { anyError = true }
+                }
+            }
+            // If at least one probe errored (vs cleanly returning false),
+            // treat as inconclusive so we don't hide on a network glitch.
+            if (anyError) null else false
+        }
+
+    /**
+     * Returns `true` if [url] responds with HTTP 200 and HTML that is not a
+     * Cloudflare challenge page; `false` if it responds with a definitive
+     * non-200 / challenge (no source); `null` if the request errored
+     * (inconclusive — network issue).
+     */
+    private fun probeUrl(url: String): Boolean? {
         return try {
             val request = Request.Builder()
                 .url(url)
@@ -168,7 +343,7 @@ object StreamAvailabilityChecker {
                 true
             }
         } catch (e: Exception) {
-            false
+            null  // inconclusive — network error
         }
     }
 

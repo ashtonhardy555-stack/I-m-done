@@ -150,38 +150,34 @@ class PlayerActivity : ComponentActivity() {
         const val STAGE_OKHTTP = 4
 
         /**
-         * Hard ceiling on the parallel direct-extractor race (Stage 0+1).
+         * Hard ceiling on the PARALLEL direct-extractor lane (Stage 0+1).
          *
-         * The race launches VidStorm, VidSrc, VidLink, VixSrc, and the WebView
-         * embed pipeline all at once. On a fast network a winner typically
-         * emerges in 0.5–2.5 s. But on a slow mobile connection — or when a
-         * provider's server is hanging on a TCP connection that never RSTs —
-         * individual extractors can take 10–15 s before their OkHttp
-         * connect/read timeout fires. Without an overall ceiling the user
-         * could wait 25+ s for ALL five to complete before the race
-         * normalises to an Error and falls through to the next stage.
-         *
-         * 20 s is generous enough for VidSrc's 5-round-trip pipeline on a
-         * 3G connection (~3 s/round-trip = 15 s) plus the embed WebView's
-         * 18 s internal cap, while still guaranteeing the user never waits
-         * more than 20 s before seeing *something* (a stream, a challenge,
-         * or a fallthrough to the next stage). When the timeout fires,
-         * coroutineScope cancels all pending asyncs and we fall through to
-         * the embed/LookMovie stages just as if all extractors had errored.
+         * 2026 strategy: the FAST LANE (NoTorrent → VidStorm, tried
+         * sequentially with a 5 s timeout each) handles the common case in
+         * ~300 ms and returns before this parallel lane ever runs. This
+         * ceiling only bounds the PARALLEL LANE that runs when the fast lane
+         * misses — i.e. when none of the confirmed-fast extractors had the
+         * title. Because the confirmed-dead/timeout-prone extractors
+         * (VidSrcPro 12 s timeout, SuperEmbed DNS dead, VidSrcNet parked)
+         * are now EXCLUDED from the parallel lane, the remaining extractors
+         * each have a 6 s per-extractor timeout and resolve quickly, so 9 s
+         * is a generous ceiling that still guarantees the user never waits
+         * long before a stream, a challenge, or a fallthrough to the next
+         * stage. When the timeout fires, we salvage any winner that
+         * completed before the deadline instead of discarding it.
          */
-        const val RACE_TIMEOUT_MS = 12_000L
+        const val RACE_TIMEOUT_MS = 9_000L
 
         /**
-         * Per-extractor timeout for the parallel direct-API race
+         * Per-extractor timeout for the parallel direct-API lane
          * (Stage 0+1). Each pure-HTTP extractor is given this long to
          * resolve a playable URL before its async returns null and the
-         * race continues with the remaining extractors. 7 s is long
+         * lane continues with the remaining extractors. 6 s is long
          * enough for VidSrc's multi-hop RCP/PRORCP pipeline (~2.4 s on a
-         * fast connection, up to ~6 s on 3G). Since all extractors run
-         * concurrently, the overall worst-case wait is max(7s, RACE_TIMEOUT)
-         * — NOT 13 × 7s as it was when they ran sequentially.
+         * fast connection, up to ~5 s on 3G). Since the dead extractors
+         * are excluded, the overall worst-case wait is max(6s, RACE_TIMEOUT).
          */
-        const val PROVIDER_TIMEOUT_MS = 7_000L
+        const val PROVIDER_TIMEOUT_MS = 6_000L
 
         /**
          * Factory used by [com.mariocart.app.ui.MainActivity].
@@ -767,117 +763,139 @@ fun PlayerScreen(
                 }
             }
 
-            // ── PARALLEL RACE: all direct-API extractors run AT THE SAME TIME ──
+            // ── FAST SEQUENTIAL FAILOVER → then BOUNDED PARALLEL RACE ──
             //
-            // Previously these extractors ran SEQUENTIALLY via a `?:` chain.
-            // Each extractor has a 7-second timeout, so in the worst case
-            // (every extractor fails or times out) the user waited up to
-            // 13 × 7 s = 91 seconds before playback started — or before even
-            // reaching a working extractor that happened to be late in the
-            // chain. This was the root cause of both the slowness ("test all
-            // servers at the same time instead of one at a time") AND the
-            // "some shows won't play at all" bug (a working extractor for
-            // that title was simply never reached before the user gave up).
+            // 2026 provider testing (see test_results_v2.json / embed_test_results.json)
+            // empirically confirmed which extractors actually resolve a real
+            // playable stream RIGHT NOW and how fast:
             //
-            // Now we launch ALL extractors concurrently. Each async returns a
-            // DirectWinner? (null on error/timeout/excluded). The FIRST
-            // extractor that returns a non-null DirectWinner wins immediately
-            // and every other in-flight async is cancelled, stopping it. If
-            // ALL return null we fall through to the WebView embed pipeline.
+            //   • NoTorrent  ≈ 280–400 ms  → direct .mp4/.m3u8 (works movie + TV) ✅ BEST
+            //   • VidStorm   ≈ 300 ms      → m3u8 (reliable for TV; flaky for some movies)
+            //   • VidSrc.pro → 12 s TIMEOUT (dead/slow)              ❌
+            //   • SuperEmbed  → seapi.link DNS DEAD                    ❌
+            //   • VidSrcNet   → vidsrc.net embed is a PARKED lander    ❌
+            //   • VidLink API → enc-dec.app proxy returns EMPTY body   ❌ (WebView only)
+            //
+            // The old 15-way parallel race waited up to RACE_TIMEOUT_MS (12 s)
+            // because the dead/slow extractors (VidSrc.pro, SuperEmbed DNS,
+            // VidLink empty-body) held the race open even though NoTorrent had
+            // already won in ~300 ms. That 12 s ceiling — not the extraction
+            // itself — was the dominant cause of "videos play really slowly".
+            //
+            // New strategy (per the user's request: "play as soon as I click,
+            // don't necessarily need to be raced"):
+            //
+            //   1. FAST LANE (sequential, short timeouts) — try the confirmed
+            //      fast+reliable extractors ONE AT A TIME with a tight
+            //      per-extractor timeout. NoTorrent first (~300 ms typical),
+            //      then VidStorm. If either wins we return IMMEDIATELY —
+            //      playback starts in well under a second for the common case.
+            //   2. If the fast lane misses, fall into a BOUNDED parallel race
+            //      of the REMAINING alive extractors (with the dead ones
+            //      REMOVED so they can no longer inflate the wait). First
+            //      verified Stream wins; the rest are cancelled.
+            //
+            // Dead/confirmed-broken extractors (VidSrcPro, SuperEmbed,
+            // VidSrcNet) are excluded from BOTH lanes — they were the sources
+            // of the 12 s timeouts that made everything feel slow.
             //
             // ── Why a CompletableDeferred winner (not select{}/removeAt) ──
             // The original PR-#18 implementation used a `select` block with a
             // `removeAt(idx)` loop. That had a critical regression: the
             // `safe()` wrapper re-threw `CancellationException`, so when the
-            // outer 12 s `withTimeoutOrNull` fired (cancelling all asyncs) the
-            // cancellation propagated through `onAwait` → crashed the `select`
-            // → the `coroutineScope` threw → the outer `catch (e: Exception)`
-            // returned `null`, DISCARDING every extractor result that had
-            // already succeeded. In other words: if the race didn't finish
-            // inside 12 s the app threw away the winner it already had —
-            // "videos that worked don't anymore".
+            // outer timeout fired (cancelling all asyncs) the cancellation
+            // propagated through `onAwait` → crashed the `select` → the
+            // `coroutineScope` threw → the outer `catch` returned `null`,
+            // DISCARDING every extractor result that had already succeeded
+            // ("videos that worked don't anymore").
             //
             // This version uses a single shared `CompletableDeferred` as the
             // "winner" signal. Each async, on getting a non-null result, tries
-            // to complete it (only the first succeeds). The race awaits the
-            // winner deferred OR a "all done" signal, whichever comes first,
-            // inside a `withTimeoutOrNull`. Crucially:
-            //   • `safe()` swallows ALL exceptions (including cancellation)
-            //     and returns null — it NEVER propagates, so a timeout can
-            //     never crash the scope.
-            //   • If the timeout fires we simply read whatever `winner`
-            //     already holds (a race that finished just before the deadline
-            //     is NOT lost).
-            //   • No index bookkeeping, so no removeAt corruption.
-            val winnerDeferred = CompletableDeferred<DirectWinner?>()
-            val allDone = CompletableDeferred<Unit>()
-            val winner: DirectWinner? = try {
-                withTimeoutOrNull(PlayerActivity.RACE_TIMEOUT_MS) {
-                    coroutineScope {
-                        suspend fun safe(d: suspend () -> DirectWinner?): DirectWinner? =
-                            try { d() } catch (e: Exception) {
-                                // Swallow EVERYTHING — including CancellationException
-                                // when the scope is cancelled by a winner or timeout.
-                                // Re-throwing would crash the scope (the PR-#18 bug).
-                                Log.w("Player", "race async error: ${e.message}")
-                                null
+            // to complete it (only the first succeeds). `safe()` swallows ALL
+            // exceptions (including cancellation) and returns null — it NEVER
+            // propagates, so a timeout can never crash the scope. If the
+            // timeout fires we salvage whatever `winner` already holds.
+            suspend fun safe(d: suspend () -> DirectWinner?): DirectWinner? =
+                try { d() } catch (e: Exception) {
+                    Log.w("Player", "race async error: ${e.message}")
+                    null
+                }
+
+            // ── FAST LANE: confirmed-fast extractors, tried sequentially ──
+            // NoTorrent is the single fastest+most-reliable 2026 source, so it
+            // goes first with its own tight timeout. VidStorm is next. If
+            // either resolves a verified stream we play it immediately and
+            // never touch the (slower) parallel lane.
+            val FAST_LANE_TIMEOUT_MS = 5_000L
+            var winner: DirectWinner? = null
+            Log.d("Player", "🚦 FAST LANE: NoTorrent → VidStorm (sequential, ${FAST_LANE_TIMEOUT_MS}ms each)")
+            winner = withTimeoutOrNull(FAST_LANE_TIMEOUT_MS) {
+                safe { tryNoTorrent() }
+            }
+            if (winner == null) {
+                winner = withTimeoutOrNull(FAST_LANE_TIMEOUT_MS) {
+                    safe { tryVidStorm() }
+                }
+            }
+            if (winner != null) {
+                Log.i("Player", "⚡ FAST LANE winner: ${winner.providerName} (skipped parallel race)")
+            }
+
+            // ── PARALLEL LANE: remaining alive extractors race together ──
+            // Only reached if the fast lane missed. Dead/timeout-prone
+            // extractors (VidSrcPro, SuperEmbed, VidSrcNet) are EXCLUDED so
+            // they cannot inflate the wait. VidLink/VixSrc/TwoEmbed are kept
+            // because they sometimes resolve via their (WebView-backed) paths.
+            if (winner == null) {
+                Log.d("Player", "🏁 FAST LANE empty → PARALLEL LANE (dead extractors excluded)")
+                val winnerDeferred = CompletableDeferred<DirectWinner?>()
+                val allDone = CompletableDeferred<Unit>()
+                winner = try {
+                    withTimeoutOrNull(PlayerActivity.RACE_TIMEOUT_MS) {
+                        coroutineScope {
+                            val deferreds = listOf(
+                                async { safe { tryVidSrc() } },
+                                async { safe { tryVidLink() } },
+                                async { safe { tryVixSrc() } },
+                                async { safe { tryMeowTv() } },
+                                async { safe { tryVideasy() } },
+                                async { safe { tryKissKh() } },
+                                async { safe { tryVidSync() } },
+                                async { safe { tryLordFlix() } },
+                                async { safe { tryDahmer() } },
+                                async { safe { tryTwoEmbed() } }
+                                // EXCLUDED (confirmed dead/timeout-prone in 2026):
+                                //   tryVidSrcPro()   → 12 s read timeout
+                                //   trySuperEmbed()  → seapi.link DNS dead
+                                //   tryVidSrcNet()   → vidsrc.net embed is a parked lander
+                            )
+
+                            // Watch every async: the FIRST non-null result
+                            // completes `winnerDeferred`; when ALL finish we
+                            // complete `allDone` so we stop waiting early.
+                            launch {
+                                for (d in deferreds) {
+                                    val res = try { d.await() } catch (e: Exception) { null }
+                                    if (res != null) winnerDeferred.complete(res)
+                                }
+                                allDone.complete(Unit)
                             }
 
-                        val deferreds = listOf(
-                            async { safe { tryVidStorm() } },
-                            async { safe { tryVidSrc() } },
-                            async { safe { tryVidSrcNet() } },
-                            async { safe { tryVidLink() } },
-                            async { safe { tryVixSrc() } },
-                            async { safe { tryNoTorrent() } },
-                            async { safe { tryMeowTv() } },
-                            async { safe { tryVideasy() } },
-                            async { safe { tryKissKh() } },
-                            async { safe { tryVidSync() } },
-                            async { safe { tryLordFlix() } },
-                            async { safe { tryDahmer() } },
-                            async { safe { tryTwoEmbed() } },
-                            async { safe { trySuperEmbed() } },
-                            async { safe { tryVidSrcPro() } }
-                        )
-
-                        // A side job watches every async: as soon as ALL of them
-                        // have completed (win or null) it completes `allDone` so
-                        // the await below can stop waiting instead of hanging
-                        // until the timeout. The FIRST async that returns a
-                        // non-null DirectWinner completes `winnerDeferred`; only
-                        // the first `complete` call wins (CompletableDeferred
-                        // semantics), so there's no race condition.
-                        launch {
-                            for (d in deferreds) {
-                                val res = try { d.await() } catch (e: Exception) { null }
-                                if (res != null) winnerDeferred.complete(res)
+                            // Wait for EITHER a winner OR all-exhausted.
+                            select<DirectWinner?> {
+                                winnerDeferred.onAwait { it }
+                                allDone.onAwait { null }
                             }
-                            allDone.complete(Unit)
                         }
-
-                        // Wait for EITHER a winner OR all-exhausted. select-onAwait
-                        // avoids the old removeAt/index-corruption problem entirely.
-                        // (The outer withTimeoutOrNull is a safety net only — each
-                        // extractor already has its own 7 s timeout, so allDone
-                        // normally fires well within RACE_TIMEOUT_MS.)
-                        select<DirectWinner?> {
-                            winnerDeferred.onAwait { it }
-                            allDone.onAwait { null }
-                        }
+                    } ?: run {
+                        // Timeout fired — salvage a winner completed before the
+                        // deadline instead of discarding it.
+                        safeGetCompleted(winnerDeferred)
                     }
-                } ?: run {
-                    // withTimeoutOrNull returned null (timeout fired). Salvage
-                    // any winner that completed before the deadline instead of
-                    // discarding it — this is the fix for "videos that worked
-                    // don't anymore".
+                } catch (e: Exception) {
+                    Log.w("Player", "Parallel race error: ${e.message}")
                     safeGetCompleted(winnerDeferred)
                 }
-            } catch (e: Exception) {
-                Log.w("Player", "Parallel race error: ${e.message}")
-                // Even on error, salvage a winner if one completed before the
-                // exception — never throw away a good result.
-                safeGetCompleted(winnerDeferred)
             }
 
             // Belt-and-suspenders: if the select returned null but a winner

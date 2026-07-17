@@ -214,26 +214,35 @@ object RemoteServerListFetcher {
             Log.e(TAG, "Asset read failed: ${e.message}")
             // Last-ditch hardcoded fallback so the app is never empty.
             listOf(
-                ServerConfig("vidlink", "VidLink", "https://vidlink.pro",
+                ServerConfig("notorrent", "NoTorrent", "https://addon-osvh.onrender.com",
+                    "{base}/stream/movie/{imdbId}.json",
+                    "{base}/stream/series/{imdbId}:{season}:{episode}.json", 1, 99),
+                ServerConfig("vidstorm", "VidStorm", "https://vidstorm.ru",
+                    "{base}/movie/{id}", "{base}/tv/{id}/{season}/{episode}", 1, 97),
+                ServerConfig("vidspark", "VidSpark", "https://vidspark.to",
                     "{base}/movie/{id}", "{base}/tv/{id}/{season}/{episode}", 1, 95),
+                ServerConfig("vidlink", "VidLink", "https://vidlink.pro",
+                    "{base}/movie/{id}", "{base}/tv/{id}/{season}/{episode}", 1, 94),
                 ServerConfig("2embed_cc", "2Embed.cc", "https://www.2embed.cc",
-                    "{base}/embed/{id}", "{base}/embedtv/{id}&s={season}&e={episode}", 1, 88),
-                ServerConfig("2embed_vcr", "2Embed·VCR", "https://streamsrcs.2embed.cc",
-                    "{base}/vcr?tmdb={id}", "{base}/vcr-tv?tmdb={id}&s={season}&e={episode}", 1, 85),
+                    "{base}/embed/{id}", "{base}/embedtv/{id}&s={season}&e={episode}", 1, 93),
+                ServerConfig("2embed_skin", "2Embed.skin", "https://www.2embed.skin",
+                    "{base}/embed/{id}", "{base}/embedtv/{id}&s={season}&e={episode}", 1, 92),
                 ServerConfig("2embed_vesy", "2Embed·Vesy", "https://streamsrcs.2embed.cc",
-                    "{base}/vesy?tmdb={id}", "{base}/vesy-tv?tmdb={id}&s={season}&e={episode}", 1, 85),
+                    "{base}/vesy?tmdb={id}", "{base}/vesy-tv?tmdb={id}&s={season}&e={episode}", 1, 91),
+                ServerConfig("2embed_vcr", "2Embed·VCR", "https://streamsrcs.2embed.cc",
+                    "{base}/vcr?tmdb={id}", "{base}/vcr-tv?tmdb={id}&s={season}&e={episode}", 1, 90),
                 ServerConfig("2embed_xps", "2Embed·XPS", "https://streamsrcs.2embed.cc",
-                    "{base}/xps?imdb=tt{id}", "{base}/xps-tv?imdb=tt{id}&s={season}&e={episode}", 1, 83),
+                    "{base}/xps?imdb=tt{id}", "{base}/xps-tv?imdb=tt{id}&s={season}&e={episode}", 1, 89),
                 ServerConfig("videasy_net", "Videasy.net", "https://player.videasy.net",
-                    "{base}/movie/{id}", "{base}/tv/{id}/{season}/{episode}", 1, 80),
-                ServerConfig("vidsrc_me", "VidSrc.me", "https://vidsrc.me",
-                    "{base}/embed/movie/{id}", "{base}/embed/tv/{id}/{season}/{episode}", 2, 78),
+                    "{base}/movie/{id}", "{base}/tv/{id}/{season}/{episode}", 1, 83),
                 ServerConfig("multiembed", "MultiEmbed", "https://multiembed.mov",
-                    "{base}/?video_id={id}&tmdb=1", "{base}/?video_id={id}&tmdb=1&s={season}&e={episode}", 2, 71),
+                    "{base}/?video_id={id}&tmdb=1", "{base}/?video_id={id}&tmdb=1&s={season}&e={episode}", 2, 79),
+                ServerConfig("vidsrc_me", "VidSrc.me", "https://vidsrc.me",
+                    "{base}/embed/movie/{id}", "{base}/embed/tv/{id}/{season}/{episode}", 2, 60),
                 ServerConfig("vidsrc_cc", "VidSrc.cc", "https://vidsrc.cc",
-                    "{base}/v2/embed/movie/{id}", "{base}/v2/embed/tv/{id}/{season}/{episode}", 2, 74),
+                    "{base}/v2/embed/movie/{id}", "{base}/v2/embed/tv/{id}/{season}/{episode}", 2, 60),
                 ServerConfig("vidsrc_to", "VidSrc.to", "https://vidsrc.to",
-                    "{base}/embed/movie/{id}", "{base}/embed/tv/{id}/{season}/{episode}", 2, 73)
+                    "{base}/embed/movie/{id}", "{base}/embed/tv/{id}/{season}/{episode}", 2, 60)
             )
         }
     }
