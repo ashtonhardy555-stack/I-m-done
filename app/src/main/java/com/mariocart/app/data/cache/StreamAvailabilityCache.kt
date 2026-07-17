@@ -55,8 +55,18 @@ object StreamAvailabilityCache {
 
     /** A "good" record is trusted for 14 days before we re-evaluate. */
     private const val GOOD_TRUST_MS = 14L * 24 * 60 * 60 * 1000
-    /** A "bad" record is re-evaluated after 3 days (providers do get fixed). */
-    private const val STALE_AFTER_MS = 3L * 24 * 60 * 60 * 1000
+    /**
+     * A "bad" record is re-evaluated after this long. Kept SHORT (2 hours)
+     * deliberately: most provider failures are TRANSIENT (a CDN hiccup, a
+     * rate-limit, a temporary 5xx). Marking a provider bad for days — as the
+     * old 3-day window did — meant a single transient failure permanently
+     * excluded a working server (e.g. VidStorm·Lithium) for the rest of the
+     * week. The user reported "servers like lithium are the main ones I've
+     * seen work" being removed; a 2-hour window lets transient blips age out
+     * quickly while still short-circuiting genuinely-dead providers within a
+     * viewing session.
+     */
+    private const val STALE_AFTER_MS = 2L * 60 * 60 * 1000  // 2 hours (was 3 days)
 
     // The race-provider keys whose health we track at the race level.
     // This now includes ALL direct-API extractors that participate in the
@@ -64,7 +74,8 @@ object StreamAvailabilityCache {
     // good/bad results for every extractor (not just the original 5).
     private val RACE_PROVIDERS = setOf(
         "VidStorm", "VidSrc", "VidSrcNet", "VidLink", "VixSrc", "NoTorrent",
-        "MeowTV", "Videasy", "KissKH", "VidSync", "LordFlix", "DahmerMovies", "TwoEmbed"
+        "MeowTV", "Videasy", "KissKH", "VidSync", "LordFlix", "DahmerMovies",
+        "TwoEmbed", "SuperEmbed", "VidSrcPro"
     )
 
     private var appContext: Context? = null
@@ -196,11 +207,28 @@ object StreamAvailabilityCache {
         }
     }
 
-    /** Map a deliveringServerName (e.g. "VidStorm·Boron", "NoTorrent·unverified")
-     *  to the canonical race-provider key, or null if it's not a race provider. */
+    /**
+     * Map a deliveringServerName to the canonical cache key, or null if it's
+     * not a race provider.
+     *
+     * IMPORTANT: this preserves the FULL sub-server name. A VidStorm stream
+     * is delivered as "VidStorm·Lithium", "VidStorm·Hydrogen", "VidStorm·Boron",
+     * etc. — each element-named sub-server is a DIFFERENT upstream source.
+     * The old implementation stripped the "·Lithium" suffix and collapsed
+     * every sub-server to a single "VidStorm" key, so if ONE sub-server
+     * (e.g. Boron) failed once, recordFailure marked "VidStorm" bad and
+     * knownBadProviders then excluded ALL VidStorm sub-servers — including
+     * Lithium, which the user confirmed is "the main one I've seen work".
+     *
+     * Now each sub-server is tracked independently: "VidStorm·Lithium" stays
+     * "VidStorm·Lithium", so a Boron failure never touches Lithium.
+     */
     private fun canonical(provider: String): String? {
-        val n = provider.substringBefore("·").trim()
-        return if (n in RACE_PROVIDERS) n else null
+        val n = provider.trim()
+        if (n.isBlank()) return null
+        // The base provider name is everything before the "·" separator.
+        val base = n.substringBefore("·").trim()
+        return if (base in RACE_PROVIDERS) n else null
     }
 
     /** The set of race providers (used by the player to seed its exclusion set). */

@@ -50,18 +50,22 @@ import com.mariocart.app.data.server.ServerConfig
 import com.mariocart.app.data.server.ServerManager
 import com.mariocart.app.data.server.StreamExtractor
 import com.mariocart.app.data.server.StreamProviders
+import com.mariocart.app.data.server.SuperEmbedExtractor
 import com.mariocart.app.data.server.VidLinkExtractor
 import com.mariocart.app.data.server.VidSrcExtractor
 import com.mariocart.app.data.server.VidSrcNetExtractor
+import com.mariocart.app.data.server.VidSrcProExtractor
 import com.mariocart.app.data.server.VidStormExtractor
 import com.mariocart.app.data.server.VideasyExtractor
 import com.mariocart.app.data.server.VixSrcExtractor
 import com.mariocart.app.data.server.TwoEmbedExtractor
 import com.mariocart.app.ui.theme.MarioCartTheme
 import kotlinx.coroutines.async
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
@@ -513,9 +517,26 @@ fun PlayerScreen(
             // per-extractor timeout, and return a DirectWinner only on a
             // verified Stream. Errors/timeouts return null so the next
             // extractor in the chain gets a chance.
+            //
+            // -- Sub-server-aware exclusion --
+            // `excluded` holds FULL provider names (e.g. "VidStorm\u00b7Lithium",
+            // "VidSrc", "NoTorrent"). For most extractors the provider name
+            // IS the base name, so a simple `in` membership check works.
+            // VidStorm is special: it returns element-named sub-servers
+            // ("VidStorm\u00b7Lithium", "VidStorm\u00b7Hydrogen", "VidStorm\u00b7Boron", \u2026)
+            // and we don't know WHICH sub-server we'll get until after
+            // extraction. So for VidStorm we run the extraction first, then
+            // drop the result only if THAT SPECIFIC sub-server is excluded \u2014
+            // never the whole VidStorm family. This is the fix for "servers
+            // like lithium are the main ones I've seen work" being removed:
+            // a Boron failure no longer excludes Lithium.
             suspend fun tryVidStorm(): DirectWinner? {
-                if ("VidStorm" in excluded) {
-                    Log.d("Player", "\u23ed\ufe0f VidStorm excluded this round")
+                // Only short-circuit if the BARE "VidStorm" key is excluded
+                // (legacy cache entries / explicit whole-family exclusion).
+                // We do NOT skip just because one sub-server like
+                // "VidStorm\u00b7Boron" is in the set.
+                if ("VidStorm" in excluded && excluded.none { it.startsWith("VidStorm\u00b7") }) {
+                    Log.d("Player", "\u23ed\ufe0f VidStorm excluded this round (whole family)")
                     return null
                 }
                 Log.d("Player", "🏇 VidStorm: extracting\u2026")
@@ -523,8 +544,16 @@ fun PlayerScreen(
                     VidStormExtractor.extract(tmdbId, contentType, season, episode)
                 }
                 return (res as? VidStormExtractor.Result.Stream)?.let {
-                    Log.i("Player", "\u2705 VidStorm hit: ${it.url}")
-                    DirectWinner(it.url, it.headers, it.providerName.ifBlank { "VidStorm" })
+                    val pname = it.providerName.ifBlank { "VidStorm" }
+                    // If THIS specific sub-server is excluded, drop it so a
+                    // different sub-server or another extractor can win.
+                    if (pname in excluded) {
+                        Log.d("Player", "\u23ed\ufe0f VidStorm sub-server $pname excluded \u2014 skipping")
+                        null
+                    } else {
+                        Log.i("Player", "\u2705 VidStorm hit ($pname): ${it.url}")
+                        DirectWinner(it.url, it.headers, pname)
+                    }
                 }
             }
 
@@ -708,9 +737,39 @@ fun PlayerScreen(
                 }
             }
 
+            suspend fun trySuperEmbed(): DirectWinner? {
+                if ("SuperEmbed" in excluded) {
+                    Log.d("Player", "\u23ed\ufe0f SuperEmbed excluded this round")
+                    return null
+                }
+                Log.d("Player", "\ud83c\udfc7 SuperEmbed: extracting\u2026")
+                val res = withTimeoutOrNull(PlayerActivity.PROVIDER_TIMEOUT_MS) {
+                    SuperEmbedExtractor.extract(tmdbId, contentType, season, episode)
+                }
+                return (res as? SuperEmbedExtractor.Result.Stream)?.let {
+                    Log.i("Player", "\u2705 SuperEmbed hit: ${it.url}")
+                    DirectWinner(it.url, it.headers, it.providerName.ifBlank { "SuperEmbed" })
+                }
+            }
+
+            suspend fun tryVidSrcPro(): DirectWinner? {
+                if ("VidSrcPro" in excluded) {
+                    Log.d("Player", "\u23ed\ufe0f VidSrcPro excluded this round")
+                    return null
+                }
+                Log.d("Player", "\ud83c\udfc7 VidSrcPro: extracting\u2026")
+                val res = withTimeoutOrNull(PlayerActivity.PROVIDER_TIMEOUT_MS) {
+                    VidSrcProExtractor.extract(tmdbId, contentType, season, episode)
+                }
+                return (res as? VidSrcProExtractor.Result.Stream)?.let {
+                    Log.i("Player", "\u2705 VidSrcPro hit: ${it.url}")
+                    DirectWinner(it.url, it.headers, it.providerName.ifBlank { "VidSrcPro" })
+                }
+            }
+
             // ── PARALLEL RACE: all direct-API extractors run AT THE SAME TIME ──
             //
-            // Previously these 13 extractors ran SEQUENTIALLY via a `?:` chain.
+            // Previously these extractors ran SEQUENTIALLY via a `?:` chain.
             // Each extractor has a 7-second timeout, so in the worst case
             // (every extractor fails or times out) the user waited up to
             // 13 × 7 s = 91 seconds before playback started — or before even
@@ -720,26 +779,49 @@ fun PlayerScreen(
             // "some shows won't play at all" bug (a working extractor for
             // that title was simply never reached before the user gave up).
             //
-            // Now we launch ALL extractors concurrently inside a
-            // coroutineScope. Each async returns a DirectWinner? (null on
-            // error/timeout/excluded). We use a `select` on the deferred
-            // results so the FIRST extractor that returns a non-null
-            // DirectWinner wins immediately and the scope is cancelled,
-            // stopping every other in-flight extractor. If ALL return null
-            // we fall through to the WebView embed pipeline as before.
+            // Now we launch ALL extractors concurrently. Each async returns a
+            // DirectWinner? (null on error/timeout/excluded). The FIRST
+            // extractor that returns a non-null DirectWinner wins immediately
+            // and every other in-flight async is cancelled, stopping it. If
+            // ALL return null we fall through to the WebView embed pipeline.
             //
-            // The per-extractor PROVIDER_TIMEOUT_MS (7 s) still applies via
-            // withTimeoutOrNull inside each helper, so a single hung
-            // extractor can never block the race. The overall RACE_TIMEOUT_MS
-            // (12 s) provides an outer safety net.
+            // ── Why a CompletableDeferred winner (not select{}/removeAt) ──
+            // The original PR-#18 implementation used a `select` block with a
+            // `removeAt(idx)` loop. That had a critical regression: the
+            // `safe()` wrapper re-threw `CancellationException`, so when the
+            // outer 12 s `withTimeoutOrNull` fired (cancelling all asyncs) the
+            // cancellation propagated through `onAwait` → crashed the `select`
+            // → the `coroutineScope` threw → the outer `catch (e: Exception)`
+            // returned `null`, DISCARDING every extractor result that had
+            // already succeeded. In other words: if the race didn't finish
+            // inside 12 s the app threw away the winner it already had —
+            // "videos that worked don't anymore".
+            //
+            // This version uses a single shared `CompletableDeferred` as the
+            // "winner" signal. Each async, on getting a non-null result, tries
+            // to complete it (only the first succeeds). The race awaits the
+            // winner deferred OR a "all done" signal, whichever comes first,
+            // inside a `withTimeoutOrNull`. Crucially:
+            //   • `safe()` swallows ALL exceptions (including cancellation)
+            //     and returns null — it NEVER propagates, so a timeout can
+            //     never crash the scope.
+            //   • If the timeout fires we simply read whatever `winner`
+            //     already holds (a race that finished just before the deadline
+            //     is NOT lost).
+            //   • No index bookkeeping, so no removeAt corruption.
+            val winnerDeferred = CompletableDeferred<DirectWinner?>()
+            val allDone = CompletableDeferred<Unit>()
             val winner: DirectWinner? = try {
                 withTimeoutOrNull(PlayerActivity.RACE_TIMEOUT_MS) {
                     coroutineScope {
-                        // Each async wraps its tryXxx() in a try/catch so
-                        // that ANY unexpected exception (cancellation aside)
-                        // becomes a null result instead of crashing the race.
                         suspend fun safe(d: suspend () -> DirectWinner?): DirectWinner? =
-                            try { d() } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { Log.w("Player", "race async error: ${e.message}"); null }
+                            try { d() } catch (e: Exception) {
+                                // Swallow EVERYTHING — including CancellationException
+                                // when the scope is cancelled by a winner or timeout.
+                                // Re-throwing would crash the scope (the PR-#18 bug).
+                                Log.w("Player", "race async error: ${e.message}")
+                                null
+                            }
 
                         val deferreds = listOf(
                             async { safe { tryVidStorm() } },
@@ -754,50 +836,61 @@ fun PlayerScreen(
                             async { safe { tryVidSync() } },
                             async { safe { tryLordFlix() } },
                             async { safe { tryDahmer() } },
-                            async { safe { tryTwoEmbed() } }
+                            async { safe { tryTwoEmbed() } },
+                            async { safe { trySuperEmbed() } },
+                            async { safe { tryVidSrcPro() } }
                         )
-                        // True parallel "first winner": loop selecting on all
-                        // deferreds simultaneously. The moment ANY deferred
-                        // completes (returns null OR a DirectWinner), select
-                        // resumes. If it returned a non-null DirectWinner we
-                        // take it and return immediately (coroutineScope
-                        // cancels every other in-flight async). If it returned
-                        // null (error/timeout/excluded) we remove it from the
-                        // pool and keep selecting on the remaining ones, so a
-                        // fast failure never blocks a slow-but-working
-                        // extractor. This continues until we get a winner or
-                        // the pool is exhausted (all returned null).
-                        val pending = deferreds.toMutableList()
-                        var firstWinner: DirectWinner? = null
-                        while (pending.isNotEmpty() && firstWinner == null) {
-                            val (result, idx) = select<Pair<DirectWinner?, Int>> {
-                                pending.forEachIndexed { i, d ->
-                                    d.onAwait { Pair(it, i) }
-                                }
+
+                        // A side job watches every async: as soon as ALL of them
+                        // have completed (win or null) it completes `allDone` so
+                        // the await below can stop waiting instead of hanging
+                        // until the timeout. The FIRST async that returns a
+                        // non-null DirectWinner completes `winnerDeferred`; only
+                        // the first `complete` call wins (CompletableDeferred
+                        // semantics), so there's no race condition.
+                        launch {
+                            for (d in deferreds) {
+                                val res = try { d.await() } catch (e: Exception) { null }
+                                if (res != null) winnerDeferred.complete(res)
                             }
-                            if (result != null) {
-                                firstWinner = result
-                            } else {
-                                // This extractor returned null — drop it and
-                                // keep racing the rest.
-                                pending.removeAt(idx)
-                            }
+                            allDone.complete(Unit)
                         }
-                        firstWinner
+
+                        // Wait for EITHER a winner OR all-exhausted. select-onAwait
+                        // avoids the old removeAt/index-corruption problem entirely.
+                        // (The outer withTimeoutOrNull is a safety net only — each
+                        // extractor already has its own 7 s timeout, so allDone
+                        // normally fires well within RACE_TIMEOUT_MS.)
+                        select<DirectWinner?> {
+                            winnerDeferred.onAwait { it }
+                            allDone.onAwait { null }
+                        }
                     }
+                } ?: run {
+                    // withTimeoutOrNull returned null (timeout fired). Salvage
+                    // any winner that completed before the deadline instead of
+                    // discarding it — this is the fix for "videos that worked
+                    // don't anymore".
+                    safeGetCompleted(winnerDeferred)
                 }
             } catch (e: Exception) {
                 Log.w("Player", "Parallel race error: ${e.message}")
-                null
+                // Even on error, salvage a winner if one completed before the
+                // exception — never throw away a good result.
+                safeGetCompleted(winnerDeferred)
             }
 
-            if (winner != null) {
-                Log.i("Player", "🏁 Direct-API winner: ${winner.providerName}")
-                streamUrl = winner.url
-                streamHeaders = winner.headers.ifEmpty {
+            // Belt-and-suspenders: if the select returned null but a winner
+            // completed in the meantime (very tight race), use it.
+            val finalWinner = winner ?: safeGetCompleted(winnerDeferred)
+
+            if (finalWinner != null) {
+                Log.i("Player", "🏁 Direct-API winner: ${finalWinner.providerName}")
+                streamUrl = finalWinner.url
+                streamHeaders = finalWinner.headers.ifEmpty {
                     mapOf("User-Agent" to DEFAULT_UA)
                 }
-                deliveringServerName = winner.providerName
+                deliveringServerName = finalWinner.providerName
                 isLoading = false
                 return@LaunchedEffect
             } else {
@@ -1096,9 +1189,16 @@ fun PlayerScreen(
                             // If there are still direct extractors left to try,
                             // re-run Stage 0 (the race skips excluded ones);
                             // otherwise fall through to Stage 2 (embed).
-                            // There are 13 direct extractors total, so we
-                            // allow up to 12 exclusions before giving up.
-                            if (excludedRaceProviders.size < 12) {
+                            // Count DISTINCT base providers (collapsing
+                            // VidStorm sub-servers to one) so that many
+                            // VidStorm sub-server failures don't prematurely
+                            // exhaust the re-race budget. There are 15 base
+                            // providers, so we allow up to 12 distinct-base
+                            // exclusions before giving up.
+                            val distinctBases = excludedRaceProviders
+                                .map { it.substringBefore("·").trim() }
+                                .toSet()
+                            if (distinctBases.size < 14) {
                                 Log.i("Player", "🔁 Re-racing Stage 0 with $raceProviderKey excluded (tried so far: $excludedRaceProviders)")
                                 startStage = PlayerActivity.STAGE_VIDSTORM
                             } else {
@@ -1797,20 +1897,49 @@ private fun ExoPlayerView(
  * `tryXxx()` helpers can return a uniform type regardless of which
  * extractor's `Result.Stream` they came from.
  */
+
+/**
+ * Safely read the completed value of a [CompletableDeferred] without
+ * throwing. Returns null if the deferred is not yet completed (which can
+ * happen if `isCompleted` was true a moment ago but the value was reset, or
+ * in a very tight race). This avoids [CompletableDeferred.getCompleted]
+ * throwing [IllegalStateException].
+ */
+private fun safeGetCompleted(d: CompletableDeferred<DirectWinner?>): DirectWinner? =
+    try { d.getCompleted() } catch (e: Exception) { null }
+
 private data class DirectWinner(
     val url: String,
     val headers: Map<String, String>,
     val providerName: String
 )
 
+/**
+ * Map a deliveringServerName to the race-provider key used for exclusion.
+ *
+ * Preserves the FULL sub-server name so that a failure of ONE VidStorm
+ * sub-server (e.g. "VidStorm·Boron") only excludes THAT sub-server on
+ * re-race, not the entire VidStorm family (Lithium, Hydrogen, …). This is
+ * the fix for "servers like lithium are the main ones I've seen work" being
+ * removed: the old version stripped the "·Boron" suffix and collapsed
+ * every sub-server to "VidStorm", so a single Boron failure excluded Lithium
+ * too.
+ *
+ * Returns null if the base name isn't a known race provider.
+ */
 private fun mapRaceProviderKey(deliveringServerName: String): String? {
-    val n = deliveringServerName.substringBefore("·").trim()
-    return when (n) {
-        "VidStorm", "VidSrc", "VidSrcNet", "VidLink", "VixSrc", "NoTorrent",
-        "MeowTV", "Videasy", "KissKH", "VidSync", "LordFlix", "DahmerMovies", "TwoEmbed" -> n
-        else -> null
-    }
+    val n = deliveringServerName.trim()
+    if (n.isBlank()) return null
+    val base = n.substringBefore("·").trim()
+    return if (base in RACE_PROVIDER_BASES) n else null
 }
+
+/** The set of base race-provider names (without sub-server suffixes). */
+private val RACE_PROVIDER_BASES = setOf(
+    "VidStorm", "VidSrc", "VidSrcNet", "VidLink", "VixSrc", "NoTorrent",
+    "MeowTV", "Videasy", "KissKH", "VidSync", "LordFlix", "DahmerMovies",
+    "TwoEmbed", "SuperEmbed", "VidSrcPro"
+)
 
 private fun guessMimeType(url: String): String? {
     val u = url.lowercase()
