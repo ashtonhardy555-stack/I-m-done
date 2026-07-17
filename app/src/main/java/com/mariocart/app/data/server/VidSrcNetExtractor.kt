@@ -451,8 +451,8 @@ object VidSrcNetExtractor {
     private fun iglImMhWrI(s: String): String {
         val rev = s.reversed()
         val rot = rev.map { c ->
-            if (c in 'a'..'z') ((c - 'a' + 13) % 26 + 'a').toChar()
-            else if (c in 'A'..'Z') ((c - 'A' + 13) % 26 + 'A').toChar()
+            if (c in 'a'..'z') ((c.code - 'a'.code + 13) % 26 + 'a'.code).toChar()
+            else if (c in 'A'..'Z') ((c.code - 'A'.code + 13) % 26 + 'A'.code).toChar()
             else c
         }.joinToString("")
         val rev2 = rot.reversed()
