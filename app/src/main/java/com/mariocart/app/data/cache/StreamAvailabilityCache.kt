@@ -59,7 +59,13 @@ object StreamAvailabilityCache {
     private const val STALE_AFTER_MS = 3L * 24 * 60 * 60 * 1000
 
     // The race-provider keys whose health we track at the race level.
-    private val RACE_PROVIDERS = setOf("VidStorm", "VidSrc", "VidLink", "VixSrc", "NoTorrent")
+    // This now includes ALL direct-API extractors that participate in the
+    // parallel race in PlayerActivity, so the cache can record per-title
+    // good/bad results for every extractor (not just the original 5).
+    private val RACE_PROVIDERS = setOf(
+        "VidStorm", "VidSrc", "VidSrcNet", "VidLink", "VixSrc", "NoTorrent",
+        "MeowTV", "Videasy", "KissKH", "VidSync", "LordFlix", "DahmerMovies", "TwoEmbed"
+    )
 
     private var appContext: Context? = null
     private val saveMutex = Mutex()

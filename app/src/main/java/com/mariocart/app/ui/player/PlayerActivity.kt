@@ -58,8 +58,11 @@ import com.mariocart.app.data.server.VideasyExtractor
 import com.mariocart.app.data.server.VixSrcExtractor
 import com.mariocart.app.data.server.TwoEmbedExtractor
 import com.mariocart.app.ui.theme.MarioCartTheme
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -165,13 +168,14 @@ class PlayerActivity : ComponentActivity() {
         const val RACE_TIMEOUT_MS = 12_000L
 
         /**
-         * Per-extractor timeout for the sequential direct-API failover
+         * Per-extractor timeout for the parallel direct-API race
          * (Stage 0+1). Each pure-HTTP extractor is given this long to
-         * resolve a playable URL before we give up on it and move on to
-         * the next extractor. 7 s is long enough for VidSrc's multi-hop
-         * RCP/PRORCP pipeline (~2.4 s on a fast connection, up to ~6 s on
-         * 3G) while keeping worst-case total wait bounded when several
-         * extractors fail in a row.
+         * resolve a playable URL before its async returns null and the
+         * race continues with the remaining extractors. 7 s is long
+         * enough for VidSrc's multi-hop RCP/PRORCP pipeline (~2.4 s on a
+         * fast connection, up to ~6 s on 3G). Since all extractors run
+         * concurrently, the overall worst-case wait is max(7s, RACE_TIMEOUT)
+         * — NOT 13 × 7s as it was when they ran sequentially.
          */
         const val PROVIDER_TIMEOUT_MS = 7_000L
 
@@ -475,7 +479,13 @@ fun PlayerScreen(
         // but with MORE direct APIs and a per-extractor timeout so one slow
         // server can never block the others for more than PROVIDER_TIMEOUT_MS.
         //
-        // Order matters: the fastest, highest-coverage extractors go first.
+        // UPDATE: all 13 direct-API extractors now run IN PARALLEL via a
+        // coroutineScope race (see below). The first verified Stream wins
+        // and every other in-flight extractor is cancelled immediately.
+        // This means playback starts in ~1-3 s (the time of the FASTEST
+        // working extractor) instead of up to 91 s in the worst case.
+        // Order no longer matters for speed \u2014 all fire at once \u2014 but the
+        // list below documents each extractor's role:
         //   VidStorm  → one HTTP call, direct .m3u8/.mp4 (fast for popular movies)
         //   VidSrc    → vidsrc.me RCP/PRORCP, resolves almost everything (~2.4 s)
         //   VidSrcNet → vidsrc.net/cloudnestra with full 12-decoder pipeline
@@ -698,21 +708,88 @@ fun PlayerScreen(
                 }
             }
 
-            // Sequential failover: first verified Stream wins, stop immediately.
-            val winner: DirectWinner? =
-                tryVidStorm()
-                    ?: tryVidSrc()
-                    ?: tryVidSrcNet()
-                    ?: tryVidLink()
-                    ?: tryVixSrc()
-                    ?: tryNoTorrent()
-                    ?: tryMeowTv()
-                    ?: tryVideasy()
-                    ?: tryKissKh()
-                    ?: tryVidSync()
-                    ?: tryLordFlix()
-                    ?: tryDahmer()
-                    ?: tryTwoEmbed()
+            // ── PARALLEL RACE: all direct-API extractors run AT THE SAME TIME ──
+            //
+            // Previously these 13 extractors ran SEQUENTIALLY via a `?:` chain.
+            // Each extractor has a 7-second timeout, so in the worst case
+            // (every extractor fails or times out) the user waited up to
+            // 13 × 7 s = 91 seconds before playback started — or before even
+            // reaching a working extractor that happened to be late in the
+            // chain. This was the root cause of both the slowness ("test all
+            // servers at the same time instead of one at a time") AND the
+            // "some shows won't play at all" bug (a working extractor for
+            // that title was simply never reached before the user gave up).
+            //
+            // Now we launch ALL extractors concurrently inside a
+            // coroutineScope. Each async returns a DirectWinner? (null on
+            // error/timeout/excluded). We use a `select` on the deferred
+            // results so the FIRST extractor that returns a non-null
+            // DirectWinner wins immediately and the scope is cancelled,
+            // stopping every other in-flight extractor. If ALL return null
+            // we fall through to the WebView embed pipeline as before.
+            //
+            // The per-extractor PROVIDER_TIMEOUT_MS (7 s) still applies via
+            // withTimeoutOrNull inside each helper, so a single hung
+            // extractor can never block the race. The overall RACE_TIMEOUT_MS
+            // (12 s) provides an outer safety net.
+            val winner: DirectWinner? = try {
+                withTimeoutOrNull(PlayerActivity.RACE_TIMEOUT_MS) {
+                    coroutineScope {
+                        // Each async wraps its tryXxx() in a try/catch so
+                        // that ANY unexpected exception (cancellation aside)
+                        // becomes a null result instead of crashing the race.
+                        suspend fun safe(d: suspend () -> DirectWinner?): DirectWinner? =
+                            try { d() } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { Log.w("Player", "race async error: ${e.message}"); null }
+
+                        val deferreds = listOf(
+                            async { safe { tryVidStorm() } },
+                            async { safe { tryVidSrc() } },
+                            async { safe { tryVidSrcNet() } },
+                            async { safe { tryVidLink() } },
+                            async { safe { tryVixSrc() } },
+                            async { safe { tryNoTorrent() } },
+                            async { safe { tryMeowTv() } },
+                            async { safe { tryVideasy() } },
+                            async { safe { tryKissKh() } },
+                            async { safe { tryVidSync() } },
+                            async { safe { tryLordFlix() } },
+                            async { safe { tryDahmer() } },
+                            async { safe { tryTwoEmbed() } }
+                        )
+                        // True parallel "first winner": loop selecting on all
+                        // deferreds simultaneously. The moment ANY deferred
+                        // completes (returns null OR a DirectWinner), select
+                        // resumes. If it returned a non-null DirectWinner we
+                        // take it and return immediately (coroutineScope
+                        // cancels every other in-flight async). If it returned
+                        // null (error/timeout/excluded) we remove it from the
+                        // pool and keep selecting on the remaining ones, so a
+                        // fast failure never blocks a slow-but-working
+                        // extractor. This continues until we get a winner or
+                        // the pool is exhausted (all returned null).
+                        val pending = deferreds.toMutableList()
+                        var firstWinner: DirectWinner? = null
+                        while (pending.isNotEmpty() && firstWinner == null) {
+                            val (result, idx) = select<Pair<DirectWinner?, Int>> {
+                                pending.forEachIndexed { i, d ->
+                                    d.onAwait { Pair(it, i) }
+                                }
+                            }
+                            if (result != null) {
+                                firstWinner = result
+                            } else {
+                                // This extractor returned null — drop it and
+                                // keep racing the rest.
+                                pending.removeAt(idx)
+                            }
+                        }
+                        firstWinner
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w("Player", "Parallel race error: ${e.message}")
+                null
+            }
 
             if (winner != null) {
                 Log.i("Player", "🏁 Direct-API winner: ${winner.providerName}")
@@ -1004,8 +1081,8 @@ fun PlayerScreen(
 
                         // ── Race-provider exclusion (the Interstellar fix) ──
                         // If the broken stream came from a Stage-0 direct
-                        // extractor, exclude it and re-run the sequential
-                        // failover so a DIFFERENT extractor wins (e.g.
+                        // extractor, exclude it and re-run the parallel
+                        // race so a DIFFERENT extractor wins (e.g.
                         // NoTorrent for Interstellar once VidStorm's dead URL
                         // is excluded). We keep doing this until every direct
                         // extractor has been tried; only then do we fall
@@ -1017,11 +1094,11 @@ fun PlayerScreen(
                         ) {
                             excludedRaceProviders = excludedRaceProviders + raceProviderKey
                             // If there are still direct extractors left to try,
-                            // re-run Stage 0 (the chain skips excluded ones);
+                            // re-run Stage 0 (the race skips excluded ones);
                             // otherwise fall through to Stage 2 (embed).
-                            // There are 10 direct extractors total, so we
-                            // allow up to 9 exclusions before giving up.
-                            if (excludedRaceProviders.size < 9) {
+                            // There are 13 direct extractors total, so we
+                            // allow up to 12 exclusions before giving up.
+                            if (excludedRaceProviders.size < 12) {
                                 Log.i("Player", "🔁 Re-racing Stage 0 with $raceProviderKey excluded (tried so far: $excludedRaceProviders)")
                                 startStage = PlayerActivity.STAGE_VIDSTORM
                             } else {
@@ -1729,7 +1806,8 @@ private data class DirectWinner(
 private fun mapRaceProviderKey(deliveringServerName: String): String? {
     val n = deliveringServerName.substringBefore("·").trim()
     return when (n) {
-        "VidStorm", "VidSrc", "VidSrcNet", "VidLink", "VixSrc", "NoTorrent", "Videasy", "LordFlix", "DahmerMovies", "TwoEmbed" -> n
+        "VidStorm", "VidSrc", "VidSrcNet", "VidLink", "VixSrc", "NoTorrent",
+        "MeowTV", "Videasy", "KissKH", "VidSync", "LordFlix", "DahmerMovies", "TwoEmbed" -> n
         else -> null
     }
 }
@@ -1757,6 +1835,20 @@ private fun guessMimeType(url: String): String? {
     // Query-param format hints: ?format=hls, ?type=m3u8, etc.
     if (u.contains("format=hls") || u.contains("type=m3u8") ||
         u.contains("format=m3u8") || u.contains("type=hls")) return MimeTypes.APPLICATION_M3U8
+
+    // MeowTV / cf-master HLS manifests disguised as .txt files.
+    // MeowTV's decrypt pipeline returns URLs like:
+    //   https://sunl.stellarforgeinnovation.online/v4/tab/.../cf-master.1774676289.txt
+    // These are HLS (M3U8) playlists served with a .txt extension by the
+    // CDN. Without this check ExoPlayer falls through to the generic MP4
+    // heuristics (the URL contains "/v4/" which matches the /video/ rule
+    // further below) and tries to parse the M3U8 text as an MP4 moov atom,
+    // causing "duration known but no video renders" \u2014 the exact bug that
+    // made Rick and Morty (and other MeowTV-sourced titles) not play.
+    // The cf-master filename and /v4/ path are unique to MeowTV's CDN.
+    if (u.contains("cf-master") || (u.contains("/v4/") && u.contains(".txt"))) return MimeTypes.APPLICATION_M3U8
+    // Some MeowTV CDNs also use /v2/ or /v3/ paths with .txt manifests.
+    if ((u.contains("/v2/") || u.contains("/v3/")) && u.endsWith(".txt")) return MimeTypes.APPLICATION_M3U8
 
     // DASH (.mpd or manifest patterns).
     if (u.contains(".mpd")) return MimeTypes.APPLICATION_MPD
