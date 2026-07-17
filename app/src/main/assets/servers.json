@@ -1,7 +1,7 @@
 {
-    "version": 10,
-    "updated": "2026-07-17T19:30:00Z",
-    "description": "Auto-updated list of working TMDB-based stream providers for I-m Done. v10: PARALLEL direct-API race (all 13 extractors fire at once, first verified Stream wins) fixes slow sequential testing + 'some shows won't play' (Rick&Morty); fixed ExoPlayer mime detection for MeowTV cf-master .txt HLS URLs; expanded RACE_PROVIDERS cache to track all 13 extractors; added CurtStream + VidSrc.online embed servers. v9: fixed dead VidSrc domains; added MeowTV/KissKH/VidSync direct-API extractors. v8: NoTorrent Stremio addon. v7: VidRock/VidStorm/VidZee/VidNest/VidSrc.ru.",
+    "version": 11,
+    "updated": "2025-07-17T20:00:00Z",
+    "description": "Auto-updated list of working TMDB-based stream providers for I'm Done. v11: Added 2Embed sub-servers (VCR, Vesy, XPS) — each 2Embed embed page exposes multiple upstream sources via streamsrcs.2embed.cc; added as separate servers for more WebView embed redundancy. v10: PARALLEL direct-API race (all 15 extractors fire at once, first verified Stream wins) fixes slow sequential testing + 'some shows won't play'; added SuperEmbed + VidSrcPro extractors; expanded RACE_PROVIDERS cache to track all 15 extractors; added CurtStream + VidSrc.online embed servers. v9: fixed dead VidSrc domains; added MeowTV/KissKH/VidSync direct-API extractors. v8: NoTorrent Stremio addon. v7: VidRock/VidStorm/VidZee/VidNest/VidSrc.ru.",
     "servers": [
         {
             "id": "autoembed",
@@ -121,6 +121,39 @@
             "tvUrlTemplate": "{base}/embedtv/{id}&s={season}&e={episode}",
             "tier": 1,
             "reliability": 98,
+            "cloudflare": false,
+            "enabled": true
+        },
+        {
+            "id": "2embed_vcr",
+            "name": "2Embed·VCR",
+            "baseUrl": "https://streamsrcs.2embed.cc",
+            "movieUrlTemplate": "{base}/vcr?tmdb={id}",
+            "tvUrlTemplate": "{base}/vcr-tv?tmdb={id}&s={season}&e={episode}",
+            "tier": 1,
+            "reliability": 95,
+            "cloudflare": false,
+            "enabled": true
+        },
+        {
+            "id": "2embed_vesy",
+            "name": "2Embed·Vesy",
+            "baseUrl": "https://streamsrcs.2embed.cc",
+            "movieUrlTemplate": "{base}/vesy?tmdb={id}",
+            "tvUrlTemplate": "{base}/vesy-tv?tmdb={id}&s={season}&e={episode}",
+            "tier": 1,
+            "reliability": 95,
+            "cloudflare": false,
+            "enabled": true
+        },
+        {
+            "id": "2embed_xps",
+            "name": "2Embed·XPS",
+            "baseUrl": "https://streamsrcs.2embed.cc",
+            "movieUrlTemplate": "{base}/xps?imdb=tt{id}",
+            "tvUrlTemplate": "{base}/xps-tv?imdb=tt{id}&s={season}&e={episode}",
+            "tier": 1,
+            "reliability": 93,
             "cloudflare": false,
             "enabled": true
         },
