@@ -53,6 +53,7 @@ import com.mariocart.app.data.server.StreamProviders
 import com.mariocart.app.data.server.SuperEmbedExtractor
 import com.mariocart.app.data.server.VidLinkExtractor
 import com.mariocart.app.data.server.VidSrcExtractor
+import com.mariocart.app.data.server.VidSrcMeResolver
 import com.mariocart.app.data.server.VidSrcNetExtractor
 import com.mariocart.app.data.server.VidSrcProExtractor
 import com.mariocart.app.data.server.VidStormExtractor
