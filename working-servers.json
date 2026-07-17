@@ -1,7 +1,7 @@
 {
   "version": 8,
-  "updated": "2026-07-16T23:47:23Z",
-  "description": "Auto-updated list of working TMDB-based stream providers for I-m Done. v8: added NoTorrent (addon-osvh.onrender.com Stremio addon) \u2014 a direct-API extractor that reliably resolves the stubborn titles VidStorm/VidSrc miss, notably Interstellar (TMDB 157336) and LOTR: Return of the King (TMDB 122), returning 8-18 verified playable HLS/MP4 streams each. Verified LIVE from sandbox: Interstellar=9 streams (valid #EXTM3U + ftyp mp4), LOTR ROTK=10 streams, Breaking Bad S1E1=18, Game of Thrones S1E1=11, Stranger Things S1E1=11. NoTorrent keys off IMDb ids (TMDB->IMDb resolved via external_ids). v7: added 5 servers from filmcave.ru's watch page (VidRock, VidStorm, VidZee, VidNest, VidSrc.ru). v6: added VidSrc.net, VidSrc.dev, VidSrc.pm, SuperEmbed, Embed.lol, VidSync, Hexa. v5: added VidFast, VidSpark, VidCore, AutoEmbed.",
+  "updated": "2026-07-17T07:48:46Z",
+  "description": "Auto-updated list of working TMDB-based stream providers for I-m Done. v8: added NoTorrent (addon-osvh.onrender.com Stremio addon) — a direct-API extractor that reliably resolves the stubborn titles VidStorm/VidSrc miss, notably Interstellar (TMDB 157336) and LOTR: Return of the King (TMDB 122), returning 8-18 verified playable HLS/MP4 streams each. Verified LIVE from sandbox: Interstellar=9 streams (valid #EXTM3U + ftyp mp4), LOTR ROTK=10 streams, Breaking Bad S1E1=18, Game of Thrones S1E1=11, Stranger Things S1E1=11. NoTorrent keys off IMDb ids (TMDB->IMDb resolved via external_ids). v7: added 5 servers from filmcave.ru's watch page (VidRock, VidStorm, VidZee, VidNest, VidSrc.ru). v6: added VidSrc.net, VidSrc.dev, VidSrc.pm, SuperEmbed, Embed.lol, VidSync, Hexa. v5: added VidFast, VidSpark, VidCore, AutoEmbed.",
   "servers": [
     {
       "id": "vidspark",
@@ -10,7 +10,7 @@
       "movieUrlTemplate": "{base}/movie/{id}",
       "tvUrlTemplate": "{base}/tv/{id}/{season}/{episode}",
       "tier": 1,
-      "reliability": 97,
+      "reliability": 99,
       "cloudflare": false,
       "enabled": true
     },
@@ -21,7 +21,7 @@
       "movieUrlTemplate": "{base}/embed/movie/{id}",
       "tvUrlTemplate": "{base}/embed/tv/{id}/{season}/{episode}",
       "tier": 1,
-      "reliability": 96,
+      "reliability": 98,
       "cloudflare": false,
       "enabled": true
     },
@@ -32,7 +32,7 @@
       "movieUrlTemplate": "{base}/movie/{id}",
       "tvUrlTemplate": "{base}/tv/{id}/{season}/{episode}",
       "tier": 1,
-      "reliability": 98,
+      "reliability": 99,
       "cloudflare": false,
       "enabled": true
     },
@@ -43,7 +43,7 @@
       "movieUrlTemplate": "{base}/movie/{id}",
       "tvUrlTemplate": "{base}/tv/{id}/{season}/{episode}",
       "tier": 1,
-      "reliability": 95,
+      "reliability": 98,
       "cloudflare": true,
       "enabled": true
     },
@@ -54,7 +54,7 @@
       "movieUrlTemplate": "{base}/movie/{id}",
       "tvUrlTemplate": "{base}/tv/{id}/{season}/{episode}",
       "tier": 1,
-      "reliability": 96,
+      "reliability": 98,
       "cloudflare": true,
       "enabled": true
     },
@@ -65,7 +65,7 @@
       "movieUrlTemplate": "{base}/embed/movie/{id}",
       "tvUrlTemplate": "{base}/embed/tv/{id}/{season}/{episode}",
       "tier": 1,
-      "reliability": 74,
+      "reliability": 90,
       "cloudflare": true,
       "enabled": true
     },
@@ -76,7 +76,7 @@
       "movieUrlTemplate": "{base}/movie/{id}",
       "tvUrlTemplate": "{base}/tv/{id}/{season}/{episode}",
       "tier": 1,
-      "reliability": 94,
+      "reliability": 98,
       "cloudflare": true,
       "enabled": true
     },
@@ -87,7 +87,7 @@
       "movieUrlTemplate": "{base}/embed/movie/{id}",
       "tvUrlTemplate": "{base}/embed/tv/{id}/{season}/{episode}",
       "tier": 1,
-      "reliability": 94,
+      "reliability": 98,
       "cloudflare": true,
       "enabled": true
     },
@@ -98,7 +98,7 @@
       "movieUrlTemplate": "{base}/movie/{id}",
       "tvUrlTemplate": "{base}/tv/{id}/{season}/{episode}",
       "tier": 2,
-      "reliability": 94,
+      "reliability": 98,
       "cloudflare": true,
       "enabled": true
     },
@@ -109,7 +109,7 @@
       "movieUrlTemplate": "{base}/movie/{id}",
       "tvUrlTemplate": "{base}/tv/{id}/{season}/{episode}",
       "tier": 1,
-      "reliability": 98,
+      "reliability": 99,
       "cloudflare": false,
       "enabled": true
     },
@@ -120,7 +120,7 @@
       "movieUrlTemplate": "{base}/embed/{id}",
       "tvUrlTemplate": "{base}/embedtv/{id}&s={season}&e={episode}",
       "tier": 1,
-      "reliability": 96,
+      "reliability": 98,
       "cloudflare": false,
       "enabled": true
     },
@@ -131,7 +131,7 @@
       "movieUrlTemplate": "{base}/embed/{id}",
       "tvUrlTemplate": "{base}/embedtv/{id}&s={season}&e={episode}",
       "tier": 1,
-      "reliability": 94,
+      "reliability": 98,
       "cloudflare": false,
       "enabled": true
     },
@@ -142,7 +142,7 @@
       "movieUrlTemplate": "{base}/player.php?tmdb={id}",
       "tvUrlTemplate": "{base}/player.php?type=series&tmdb={id}&season={season}&episode={episode}",
       "tier": 1,
-      "reliability": 93,
+      "reliability": 97,
       "cloudflare": false,
       "enabled": true
     },
@@ -153,7 +153,7 @@
       "movieUrlTemplate": "{base}/movie/{id}",
       "tvUrlTemplate": "{base}/tv/{id}/{season}/{episode}",
       "tier": 1,
-      "reliability": 92,
+      "reliability": 97,
       "cloudflare": false,
       "enabled": true
     },
@@ -164,7 +164,7 @@
       "movieUrlTemplate": "{base}/embed/movie/{id}",
       "tvUrlTemplate": "{base}/embed/tv/{id}/{season}/{episode}",
       "tier": 2,
-      "reliability": 92,
+      "reliability": 97,
       "cloudflare": false,
       "enabled": true
     },
@@ -175,7 +175,7 @@
       "movieUrlTemplate": "{base}/embed/movie/{id}",
       "tvUrlTemplate": "{base}/embed/tv/{id}/{season}/{episode}",
       "tier": 2,
-      "reliability": 81,
+      "reliability": 82,
       "cloudflare": false,
       "enabled": true
     },
@@ -186,7 +186,7 @@
       "movieUrlTemplate": "{base}/embed/movie/{id}",
       "tvUrlTemplate": "{base}/embed/tv/{id}/{season}/{episode}",
       "tier": 2,
-      "reliability": 90,
+      "reliability": 96,
       "cloudflare": false,
       "enabled": true
     },
@@ -197,7 +197,7 @@
       "movieUrlTemplate": "{base}/embed/movie/{id}",
       "tvUrlTemplate": "{base}/embed/tv/{id}/{season}/{episode}",
       "tier": 2,
-      "reliability": 89,
+      "reliability": 96,
       "cloudflare": false,
       "enabled": true
     },
@@ -208,7 +208,7 @@
       "movieUrlTemplate": "{base}/v2/embed/movie/{id}",
       "tvUrlTemplate": "{base}/v2/embed/tv/{id}/{season}/{episode}",
       "tier": 2,
-      "reliability": 90,
+      "reliability": 96,
       "cloudflare": true,
       "enabled": true
     },
@@ -219,7 +219,7 @@
       "movieUrlTemplate": "{base}/embed/movie/{id}",
       "tvUrlTemplate": "{base}/embed/tv/{id}/{season}/{episode}",
       "tier": 2,
-      "reliability": 89,
+      "reliability": 96,
       "cloudflare": true,
       "enabled": true
     },
@@ -230,7 +230,7 @@
       "movieUrlTemplate": "{base}/?video_id={id}&tmdb=1",
       "tvUrlTemplate": "{base}/?video_id={id}&tmdb=1&s={season}&e={episode}",
       "tier": 2,
-      "reliability": 88,
+      "reliability": 95,
       "cloudflare": true,
       "enabled": true
     },
@@ -241,7 +241,7 @@
       "movieUrlTemplate": "{base}/playere.php?tmdb={id}",
       "tvUrlTemplate": "{base}/playere.php?tmdb={id}&season={season}&episode={episode}",
       "tier": 2,
-      "reliability": 78,
+      "reliability": 91,
       "cloudflare": true,
       "enabled": true
     },
@@ -252,7 +252,7 @@
       "movieUrlTemplate": "{base}/movie/{id}",
       "tvUrlTemplate": "{base}/tv/{id}/{season}/{episode}",
       "tier": 2,
-      "reliability": 87,
+      "reliability": 95,
       "cloudflare": false,
       "enabled": true
     },
@@ -263,7 +263,7 @@
       "movieUrlTemplate": "{base}/embed/movie/{id}",
       "tvUrlTemplate": "{base}/embed/tv/{id}/{season}/{episode}",
       "tier": 2,
-      "reliability": 86,
+      "reliability": 94,
       "cloudflare": true,
       "enabled": true
     },
@@ -274,7 +274,7 @@
       "movieUrlTemplate": "{base}/embed/movie/{id}",
       "tvUrlTemplate": "{base}/embed/tv/{id}/{season}/{episode}",
       "tier": 3,
-      "reliability": 82,
+      "reliability": 93,
       "cloudflare": true,
       "enabled": true
     },
@@ -285,7 +285,7 @@
       "movieUrlTemplate": "{base}/embed/movie/{id}",
       "tvUrlTemplate": "{base}/embed/tv/{id}/{season}/{episode}",
       "tier": 1,
-      "reliability": 94,
+      "reliability": 88,
       "cloudflare": false,
       "enabled": true
     },
@@ -296,7 +296,7 @@
       "movieUrlTemplate": "{base}/embed/movie/{id}",
       "tvUrlTemplate": "{base}/embed/tv/{id}/{season}/{episode}",
       "tier": 2,
-      "reliability": 90,
+      "reliability": 96,
       "cloudflare": false,
       "enabled": true
     },
@@ -307,7 +307,7 @@
       "movieUrlTemplate": "{base}/embed/movie/{id}",
       "tvUrlTemplate": "{base}/embed/tv/{id}/{season}/{episode}",
       "tier": 2,
-      "reliability": 89,
+      "reliability": 96,
       "cloudflare": false,
       "enabled": true
     },
@@ -318,7 +318,7 @@
       "movieUrlTemplate": "{base}/?video_id={id}",
       "tvUrlTemplate": "{base}/?video_id={id}&tmdb=1&s={season}&e={episode}",
       "tier": 2,
-      "reliability": 88,
+      "reliability": 95,
       "cloudflare": false,
       "enabled": true
     },
@@ -329,7 +329,7 @@
       "movieUrlTemplate": "{base}/movie/{id}",
       "tvUrlTemplate": "{base}/tv/{id}/{season}/{episode}",
       "tier": 2,
-      "reliability": 87,
+      "reliability": 35,
       "cloudflare": false,
       "enabled": true
     },
@@ -340,7 +340,7 @@
       "movieUrlTemplate": "{base}/embed/movie/{id}",
       "tvUrlTemplate": "{base}/embed/tv/{id}/{season}/{episode}",
       "tier": 2,
-      "reliability": 93,
+      "reliability": 97,
       "cloudflare": true,
       "enabled": true
     },
@@ -351,7 +351,7 @@
       "movieUrlTemplate": "{base}/movie/{id}",
       "tvUrlTemplate": "{base}/tv/{id}/{season}/{episode}",
       "tier": 2,
-      "reliability": 91,
+      "reliability": 96,
       "cloudflare": false,
       "enabled": true
     },
