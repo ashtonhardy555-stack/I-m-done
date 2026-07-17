@@ -1,5 +1,6 @@
 package com.mariocart.app.data.api
 
+import com.mariocart.app.data.model.ExternalIdsResponse
 import com.mariocart.app.data.model.TmdbItem
 import com.mariocart.app.data.model.TmdbResponse
 import com.mariocart.app.data.model.TvSeasonsResponse
