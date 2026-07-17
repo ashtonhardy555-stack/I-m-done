@@ -828,6 +828,11 @@ fun PlayerScreen(
             // never touch the (slower) parallel lane.
             val FAST_LANE_TIMEOUT_MS = 5_000L
             var winner: DirectWinner? = null
+            // Declared in the outer scope so the belt-and-suspenders salvage
+            // after the parallel lane can reference it even if the fast lane
+            // already resolved `winner` (in which case the deferred stays
+            // incomplete and safeGetCompleted returns null — harmless).
+            val winnerDeferred = CompletableDeferred<DirectWinner?>()
             Log.d("Player", "🚦 FAST LANE: NoTorrent → VidStorm (sequential, ${FAST_LANE_TIMEOUT_MS}ms each)")
             winner = withTimeoutOrNull(FAST_LANE_TIMEOUT_MS) {
                 safe { tryNoTorrent() }
@@ -848,7 +853,6 @@ fun PlayerScreen(
             // because they sometimes resolve via their (WebView-backed) paths.
             if (winner == null) {
                 Log.d("Player", "🏁 FAST LANE empty → PARALLEL LANE (dead extractors excluded)")
-                val winnerDeferred = CompletableDeferred<DirectWinner?>()
                 val allDone = CompletableDeferred<Unit>()
                 winner = try {
                     withTimeoutOrNull(PlayerActivity.RACE_TIMEOUT_MS) {

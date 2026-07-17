@@ -189,7 +189,7 @@ object StreamAvailabilityChecker {
         }
         // At least one probe was inconclusive → don't hide on a network glitch.
         Log.d(TAG, "? ${item.displayTitle} probes inconclusive — show (safe default)")
-        true
+        return true
     }
 
     // ------------------------------------------------------------------ //
