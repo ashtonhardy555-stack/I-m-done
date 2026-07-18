@@ -209,33 +209,53 @@ object LookMovieHeadlessExtractor {
                 expires = extractNum(storage, "expires")
                     ?: return@withContext Result.Error("LookMovie: no expires")
 
+                // ── Normalise the matched storage block the way the v0.8 addon
+                //    does (ListSerial in main.py): collapse escaped quotes,
+                //    strip newlines and triple-spaces so the seasons array
+                //    parses as one contiguous run. Without this, real
+                //    show_storage (which spans many lines) can fail to yield
+                //    the seasons array or its episode objects.
+                val storageClean = storage
+                    .replace("\\\"", "'")
+                    .replace("\n", "")
+                    .replace("   ", "")
+
                 // Scan the seasons array for the requested (season, episode).
                 // `"?seasons"?` handles both unquoted (seasons:) and quoted
                 // ("seasons":) JS keys.
                 val seasonsMatch = Regex(""""?seasons"?\s*:\s*(\[.*?\])""", RegexOption.DOT_MATCHES_ALL)
-                    .find(storage)
+                    .find(storageClean)
                     ?: run {
                         Log.w(TAG, "no seasons array for $slug")
                         return@withContext Result.Error("LookMovie: no seasons")
                     }
                 val seasons = seasonsMatch.groupValues[1]
-                // Episode objects in the seasons array look like:
-                //   {season:"1",episode:"1",id_episode:10001,title:"Pilot"}
-                // or with quoted keys:
-                //   {"season":"1","episode":"1","id_episode":10001,...}
-                // The `"?` around each field name handles both formats.
-                val episodeRegex = Regex(
-                    """\{[^{}]*?"?season"?\s*:\s*"?(\d+)"?[^{}]*?"?episode"?\s*:\s*"?(\d+)"?[^{}]*?"?id_episode"?\s*:\s*(\d+)[^{}]*?\}""",
-                    RegexOption.DOT_MATCHES_ALL
-                )
-                val ep = episodeRegex.findAll(seasons).firstOrNull {
-                    it.groupValues[1].toIntOrNull() == season &&
-                        it.groupValues[2].toIntOrNull() == episode
+
+                // ── Find the id_episode for the requested (season, episode) ──
+                // Port of the addon's robust per-episode-object parsing
+                // (re.findall('(\{.*?}),', seasons[0]) then extract each
+                // field individually). LookMovie lists episode objects with
+                // fields in an ARBITRARY order (often id_episode FIRST), so a
+                // single fixed-order regex misses every episode. Splitting
+                // each object and pulling season/episode/id_episode out of it
+                // individually works regardless of field order.
+                val episodeObjectRegex = Regex("""(\{.*?\})(?:,|\])""", RegexOption.DOT_MATCHES_ALL)
+                val seasonRe = Regex("""(?<![A-Za-z_])["']?season["']?\s*:\s*"?(\d+)["']?""")
+                val episodeRe = Regex("""(?<![A-Za-z_])["']?episode["']?\s*:\s*"?(\d+)["']?""")
+                val idEpisodeRe = Regex("""(?<![A-Za-z_])["']?id_episode["']?\s*:\s*(\d+)""")
+                val ep = episodeObjectRegex.findAll(seasons).firstOrNull { obj ->
+                    val s = seasonRe.find(obj.groupValues[1])?.groupValues?.get(1)?.toIntOrNull()
+                    val e = episodeRe.find(obj.groupValues[1])?.groupValues?.get(1)?.toIntOrNull()
+                    s == season && e == episode
                 } ?: run {
                     Log.w(TAG, "no S${season}E${episode} in seasons for $slug")
                     return@withContext Result.Error("LookMovie: episode not found")
                 }
-                val idEpisode = ep.groupValues[3]
+                val idEpisode = idEpisodeRe.find(ep.groupValues[1])?.groupValues?.get(1)
+                    ?: run {
+                        Log.w(TAG, "S${season}E${episode} matched but no id_episode for $slug")
+                        return@withContext Result.Error("LookMovie: episode not found")
+                    }
                 securityPath = "/api/v1/security/episode-access"
                 idParam = "id_episode" to idEpisode
             }

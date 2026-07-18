@@ -142,11 +142,12 @@ class PlayerActivity : ComponentActivity() {
          * Budget for the engine-first step: the time we're willing to wait
          * for the background Kodi-like engine to hand us a pre-resolved
          * LookMovie stream before falling back to the full parallel race.
-         * A cache hit returns in ~0 ms; a cold resolve gets this long. Kept
-         * short (4 s) so a slow LookMovie resolve never delays playback more
-         * than the race would have \u2014 the race then covers it.
+         * A cache hit returns in ~0 ms; a cold resolve gets this long. Bumped
+         * to 7 s so LookMovie (SEARCH -> STORAGE -> SECURITY -> PLAY) completes
+         * BEFORE the parallel extractor race fires -- this is what makes LookMovie
+         * "always tried first". On a timeout we still fall through to the race,
          */
-        const val ENGINE_FIRST_TIMEOUT_MS = 4_000L
+        const val ENGINE_FIRST_TIMEOUT_MS = 7_000L
 
         /**
          * Factory used by [com.mariocart.app.ui.MainActivity].
@@ -803,55 +804,35 @@ fun PlayerScreen(
                         // null at the timeout and never hold up the others.
                         // This is the fix for "make sure all the servers are
                         // being used not just some".
-                        // ── LookMovie-first for TV shows ──
-                        // Per the user's request, LookMovie fires FIRST in
-                        // the race for TV content so its headless extraction
-                        // gets a head start. For movies, the standard order
-                        // (reliability-tiered) is used. All extractors still
-                        // race in parallel either way; this just ensures
-                        // LookMovie's coroutine is launched first for shows.
-                        val isTvForRace = contentType.equals("tv", ignoreCase = true)
-                        val deferreds = if (isTvForRace) {
-                            listOf(
-                                async { safe { tryLookMovie() } },
-                                async { safe { tryNoTorrent() } },
-                                async { safe { tryVidStorm() } },
-                                async { safe { tryVidSrc() } },
-                                async { safe { tryVidSrcMe() } },
-                                async { safe { tryVidSrcPro() } },
-                                async { safe { tryVidSrcNet() } },
-                                async { safe { tryVidLink() } },
-                                async { safe { tryVixSrc() } },
-                                async { safe { tryMeowTv() } },
-                                async { safe { tryVideasy() } },
-                                async { safe { tryKissKh() } },
-                                async { safe { tryVidSync() } },
-                                async { safe { tryLordFlix() } },
-                                async { safe { tryDahmer() } },
-                                async { safe { tryTwoEmbed() } },
-                                async { safe { trySuperEmbed() } }
-                            )
-                        } else {
-                            listOf(
-                                async { safe { tryNoTorrent() } },
-                                async { safe { tryVidStorm() } },
-                                async { safe { tryVidSrc() } },
-                                async { safe { tryVidSrcMe() } },
-                                async { safe { tryVidSrcPro() } },
-                                async { safe { tryVidSrcNet() } },
-                                async { safe { tryVidLink() } },
-                                async { safe { tryVixSrc() } },
-                                async { safe { tryMeowTv() } },
-                                async { safe { tryVideasy() } },
-                                async { safe { tryKissKh() } },
-                                async { safe { tryVidSync() } },
-                                async { safe { tryLordFlix() } },
-                                async { safe { tryDahmer() } },
-                                async { safe { tryTwoEmbed() } },
-                                async { safe { trySuperEmbed() } },
-                                async { safe { tryLookMovie() } }
-                            )
-                        }
+                        // ── LookMovie-first for ALL content ──
+                        // Per the user's request ("make sure lookmovie is
+                        // always tried before anything else"), LookMovie fires
+                        // FIRST in the race for BOTH movies and TV so its
+                        // headless extraction gets a head start. All
+                        // extractors still race in parallel; this just ensures
+                        // LookMovie's coroutine is launched first. The engine-
+                        // first gate (above) already runs LookMovie alone
+                        // before this race even starts.
+                        val deferreds = listOf(
+                            async { safe { tryLookMovie() } },
+                            async { safe { tryNoTorrent() } },
+                            async { safe { tryVidStorm() } },
+                            async { safe { tryVidSrc() } },
+                            async { safe { tryVidSrcMe() } },
+                            async { safe { tryVidSrcPro() } },
+                            async { safe { tryVidSrcNet() } },
+                            async { safe { tryVidLink() } },
+                            async { safe { tryVixSrc() } },
+                            async { safe { tryMeowTv() } },
+                            async { safe { tryVideasy() } },
+                            async { safe { tryKissKh() } },
+                            async { safe { tryVidSync() } },
+                            async { safe { tryLordFlix() } },
+                            async { safe { tryDahmer() } },
+                            async { safe { tryTwoEmbed() } },
+                            async { safe { trySuperEmbed() } }
+                        )
+
                         // awaitAll so we collect EVERY resolved candidate,
                         // not just the first. safe() guarantees no async
                         // throws, so awaitAll completes cleanly.
@@ -874,27 +855,20 @@ fun PlayerScreen(
             // per-provider reliability weight so the most dependable
             // English source is played first.
             //
-            // ── LookMovie-first for TV shows ──
-            // Per the user's explicit request: "make sure shows try
-            // lookmovie first before anything else". For TV content, any
-            // LookMovie candidate gets a priority boost above all other
-            // providers (regardless of English/reliability tier), so the
-            // headless LookMovie extractor's stream is always played first
-            // when it resolves. Movies keep the standard English→reliability
-            // ranking since LookMovie's movie catalogue is thinner.
-            val isTvContent = contentType.equals("tv", ignoreCase = true)
+            // ── LookMovie-first ranking (movies AND TV) ──
+            // Per the user's request "make sure lookmovie is always tried
+            // before anything else", any LookMovie candidate gets a priority
+            // boost above all other providers (regardless of English/
+            // reliability tier), so the headless LookMovie extractor's stream
+            // is always played first when it resolves. English-audio and
+            // reliability only break ties among the non-LookMovie providers.
             val ranked = raceCandidates
                 .map { RankedCandidate(it, isEnglishStream(it, contentType)) }
                 .sortedWith(
-                    if (isTvContent) {
-                        compareByDescending<RankedCandidate> {
-                            it.winner.providerName.contains("LookMovie", ignoreCase = true)
-                        }.thenByDescending { it.english }
-                         .thenByDescending { providerReliability(it.winner.providerName) }
-                    } else {
-                        compareByDescending<RankedCandidate> { it.english }
-                            .thenByDescending { providerReliability(it.winner.providerName) }
-                    }
+                    compareByDescending<RankedCandidate> {
+                        it.winner.providerName.contains("LookMovie", ignoreCase = true)
+                    }.thenByDescending { it.english }
+                     .thenByDescending { providerReliability(it.winner.providerName) }
                 )
 
             if (ranked.isNotEmpty()) {
