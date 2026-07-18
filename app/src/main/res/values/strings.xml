@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Mario Cart</string>
+    <string name="app_name">Netflix</string>
     <string name="tab_home">Home</string>
     <string name="tab_movies">Movies</string>
     <string name="tab_tv">TV Shows</string>

@@ -136,7 +136,7 @@ class KodiEngineService : Service() {
     private fun buildNotification(): Notification {
         val cached = runCatching { KodiEngine.get().cacheSize() }.getOrDefault(0)
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Mario Cart engine")
+            .setContentTitle("Netflix engine")
             .setContentText(
                 if (cached > 0) "Sources ready \u2014 $cached title(s) pre-resolved"
                 else "Finding movie sources in the background\u2026"

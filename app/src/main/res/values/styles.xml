@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.MarioCart" parent="Theme.AppCompat.NoActionBar">
+    <style name="Theme.Netflix" parent="Theme.AppCompat.NoActionBar">
         <item name="android:windowBackground">@color/bg</item>
         <item name="android:statusBarColor">@color/bg</item>
         <item name="android:navigationBarColor">@color/bg</item>
@@ -8,7 +8,7 @@
         <item name="android:colorAccent">@color/red</item>
     </style>
 
-    <style name="Theme.MarioCart.Player" parent="Theme.AppCompat.NoActionBar">
+    <style name="Theme.Netflix.Player" parent="Theme.AppCompat.NoActionBar">
         <item name="android:windowFullscreen">true</item>
         <item name="android:windowBackground">@android:color/black</item>
         <item name="android:statusBarColor">@android:color/black</item>

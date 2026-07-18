@@ -22,7 +22,6 @@ fun TvScreen(
     viewModel: TvViewModel = viewModel()
 ) {
     val popular by viewModel.popular.collectAsState()
-    val airingToday by viewModel.airingToday.collectAsState()
     val topRated by viewModel.topRated.collectAsState()
 
     LazyColumn(
@@ -44,12 +43,6 @@ fun TvScreen(
                 title = "Popular Shows", emoji = "\uD83D\uDCFA",
                 items = popular, onItemClick = onItemClick,
                 onLoadMore = { viewModel.loadMore() }
-            )
-        }
-        item {
-            ContentRow(
-                title = "Airing Today", emoji = "\uD83D\uDCE1",
-                items = airingToday, onItemClick = onItemClick
             )
         }
         item {

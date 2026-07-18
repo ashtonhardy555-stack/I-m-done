@@ -64,7 +64,7 @@ import com.mariocart.app.ui.player.PlayerActivity
 import com.mariocart.app.ui.search.SearchScreen
 import com.mariocart.app.ui.theme.Bg
 import com.mariocart.app.ui.theme.Bg2
-import com.mariocart.app.ui.theme.MarioCartTheme
+import com.mariocart.app.ui.theme.NetflixTheme
 import com.mariocart.app.ui.theme.Red
 import com.mariocart.app.ui.theme.TextMuted
 import com.mariocart.app.ui.theme.TextPrimary
@@ -89,7 +89,7 @@ class MainActivity : ComponentActivity() {
         com.mariocart.app.ui.browse.AppContextHolder.context = applicationContext
 
         setContent {
-            MarioCartTheme {
+            NetflixTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background

@@ -260,7 +260,7 @@ fun UpdatesScreen() {
                 Spacer(Modifier.height(12.dp))
                 Text(
                     "If the installer doesn't appear, enable " +
-                        "\"Install unknown apps\" for Mario Cart in your Android settings.",
+                        "\"Install unknown apps\" for Netflix in your Android settings.",
                     color = TextMuted, fontSize = 12.sp, lineHeight = 18.sp
                 )
             }

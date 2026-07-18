@@ -4,7 +4,10 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.os.PowerManager
 import android.util.Log
+import android.view.KeyEvent
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -12,6 +15,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -37,6 +41,7 @@ import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import com.mariocart.app.data.cache.StreamAvailabilityCache
 import com.mariocart.app.data.engine.KodiEngine
+import com.mariocart.app.data.repository.ContentRepository
 import com.mariocart.app.data.server.DahmerMoviesExtractor
 import com.mariocart.app.data.server.LordFlixExtractor
 import com.mariocart.app.data.server.MeowTvExtractor
@@ -57,10 +62,11 @@ import com.mariocart.app.data.server.VidStormExtractor
 import com.mariocart.app.data.server.VideasyExtractor
 import com.mariocart.app.data.server.VixSrcExtractor
 import com.mariocart.app.data.server.TwoEmbedExtractor
-import com.mariocart.app.ui.theme.MarioCartTheme
+import com.mariocart.app.ui.theme.NetflixTheme
 import kotlinx.coroutines.async
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -177,10 +183,61 @@ class PlayerActivity : ComponentActivity() {
             posterUrl?.let { putExtra("POSTER_URL", it) }
             backdropUrl?.let { putExtra("BACKDROP_URL", it) }
         }
+
+        // ── Active-player bridge for Android TV remote controls ──────────── //
+        // The ExoPlayer instance is created inside the ExoPlayerView composable
+        // (a remembered state) and is not directly reachable from the Activity.
+        // This volatile holder lets the composable publish its live player so
+        // the Activity's onKeyDown / wake-lock logic can drive play/pause from
+        // the remote (KEYCODE_MEDIA_PLAY_PAUSE, the OK/DPAD-center button, etc.)
+        // without restructuring the whole player into a ViewModel.
+        @Volatile
+        var activePlayer: androidx.media3.common.Player? = null
+
+        // -- Netflix-style seek indicator bridge --------------------------- //
+        // When the user presses left/right on the D-pad while watching (the
+        // Netflix TV seek gesture), the Activity seeks the live player and
+        // bumps this counter so the composable overlay knows to (re)show the
+        // seek scrubber with the new position. The composable reads
+        // lastSeekTick + lastSeekPositionMs to render the progress bar + time.
+        @Volatile
+        var lastSeekTick: Long = 0L
+        @Volatile
+        var lastSeekPositionMs: Long = 0L
+        @Volatile
+        var lastSeekDurationMs: Long = 0L
+
+        /** Base seek step (10 seconds) — matches Netflix's TV seek behaviour. */
+        const val SEEK_STEP_MS = 10_000L
     }
+
+    /** Partial wake lock held while the player activity is alive so the
+     *  Android TV box / device never dims or goes to the idle/standby screen
+     *  during a video. Acquired in onCreate, released in onDestroy. */
+    private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Keep the screen on for the lifetime of the player activity. This
+        // prevents the display from timing out / dimming while a video is
+        // playing on phones, tablets, and Android TV boxes that honour the
+        // window flag.
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
+        // Acquire a PARTIAL_WAKE_LOCK as a belt-and-braces measure: some
+        // Android TV boxes ignore FLAG_KEEP_SCREEN_ON or dim regardless, and
+        // a partial wake lock keeps the CPU/screen-logic awake so playback
+        // never stalls and the box never drops to the idle screen mid-video.
+        runCatching {
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            wakeLock = pm.newWakeLock(
+                PowerManager.SCREEN_BRIGHT_WAKE_LOCK or
+                PowerManager.ON_AFTER_RELEASE or
+                PowerManager.ACQUIRE_CAUSES_WAKEUP,
+                "Netflix:PlayerActivity"
+            ).also { it.acquire(4 * 60 * 60 * 1000L) } // 4h ceiling; released on destroy
+        }
 
         // Make sure the server list (used for ordering/scoring) is loaded.
         ServerManager.initialize(this)
@@ -201,7 +258,7 @@ class PlayerActivity : ComponentActivity() {
         }
 
         setContent {
-            MarioCartTheme {
+            NetflixTheme {
                 PlayerScreen(
                     tmdbId = tmdbId,
                     contentType = contentType,
@@ -214,6 +271,108 @@ class PlayerActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    /**
+     * Android TV remote / Bluetooth media-key handling.
+     *
+     * The remote's Play/Pause button (and many TV remotes' OK / DPAD-center
+     * button) must toggle playback. ExoPlayer's default PlayerView controller
+     * handles touch clicks but does not reliably intercept every remote's
+     * media keycodes on all TV boxes, so we handle them here at the Activity
+     * level and forward a clean play/pause toggle to the live player.
+     *
+     * Handled keys:
+     *  - KEYCODE_MEDIA_PLAY_PAUSE  → toggle play/pause
+     *  - KEYCODE_MEDIA_PLAY        → resume
+     *  - KEYCODE_MEDIA_PAUSE       → pause
+     *  - KEYCODE_DPAD_CENTER / KEYCODE_ENTER → toggle play/pause
+     *    (the "OK" button on most Android TV remotes)
+     */
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        val player = activePlayer
+        if (player != null) {
+            when (keyCode) {
+                KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+                KeyEvent.KEYCODE_DPAD_CENTER,
+                KeyEvent.KEYCODE_ENTER -> {
+                    if (player.isPlaying) player.pause() else player.play()
+                    return true
+                }
+                KeyEvent.KEYCODE_MEDIA_PLAY -> {
+                    player.play()
+                    return true
+                }
+                KeyEvent.KEYCODE_MEDIA_PAUSE -> {
+                    player.pause()
+                    return true
+                }
+                // -- Netflix-style D-pad seek while watching --------------- //
+                // On the Netflix TV app, pressing left/right on the D-pad
+                // while a video is playing scrubs backward/forward through
+                // the timeline (10s per press, accelerating when held via
+                // key-repeat). We seek the live player and bump the seek
+                // indicator bridge so the overlay shows the scrubber + the
+                // new position, exactly like Netflix's seek preview.
+                KeyEvent.KEYCODE_DPAD_LEFT,
+                KeyEvent.KEYCODE_MEDIA_REWIND -> {
+                    seekBy(player, -SEEK_STEP_MS * seekMultiplier(event))
+                    return true
+                }
+                KeyEvent.KEYCODE_DPAD_RIGHT,
+                KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> {
+                    seekBy(player, SEEK_STEP_MS * seekMultiplier(event))
+                    return true
+                }
+            }
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
+    /**
+     * Netflix-style seek acceleration: the longer the user holds left/right
+     * (more key-repeat events), the bigger each jump so scrubbing through a
+     * 2-hour movie is fast. Returns a multiplier (1x for the first press,
+     * growing with repeat count, capped so a single press never overshoots).
+     */
+    private fun seekMultiplier(event: KeyEvent?): Int {
+        val rc = event?.repeatCount ?: 0
+        return when {
+            rc < 3 -> 1          // first few presses: 10s jumps (Netflix default)
+            rc < 8 -> 3          // holding: 30s jumps
+            rc < 15 -> 6         // holding longer: 60s jumps
+            else -> 10           // held down a lot: 100s jumps
+        }
+    }
+
+    /**
+     * Seeks the live player by [deltaMs] (negative = rewind, positive = skip
+     * forward), clamped to the media bounds, and publishes the new position
+     * to the seek-indicator bridge so the on-screen scrubber updates.
+     */
+    private fun seekBy(player: androidx.media3.common.Player, deltaMs: Long) {
+        val duration = player.duration.coerceAtLeast(0L)
+        val current = player.currentPosition.coerceIn(0L, duration)
+        val target = (current + deltaMs).coerceIn(0L, if (duration > 0) duration else Long.MAX_VALUE)
+        runCatching { player.seekTo(target) }
+        // Publish to the seek-indicator bridge (read by the composable overlay).
+        lastSeekPositionMs = target
+        lastSeekDurationMs = duration
+        lastSeekTick = System.currentTimeMillis()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        // Clear the active-player bridge so a stale reference is never driven.
+        activePlayer = null
+        // Release the wake lock so the device can return to normal idle
+        // behaviour once the player is closed.
+        runCatching {
+            wakeLock?.let { if (it.isHeld) it.release() }
+            wakeLock = null
+        }
+        // Clear the keep-screen-on flag.
+        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     }
 }
 
@@ -244,6 +403,7 @@ fun PlayerScreen(
     backdropUrl: String? = null
 ) {
     val localContext = LocalContext.current
+    val scope = rememberCoroutineScope()
 
     // --- Player + extraction state ---------------------------------- //
     var streamUrl by remember { mutableStateOf<String?>(null) }
@@ -251,6 +411,27 @@ fun PlayerScreen(
     var isLoading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var infoMessage by remember { mutableStateOf<String?>(null) }
+
+    // --- Current season/episode (mutable so the next episode can auto-play) -- //
+    // season & episode arrive as immutable params, but to auto-advance to the
+    // next TV episode when one finishes we need mutable state that the
+    // extraction LaunchedEffect keys on. currentSeason/currentEpisode start
+    // equal to the requested values and are bumped by the next-episode
+    // auto-play logic (onEpisodeEnded). Movies never change them.
+    var currentSeason by remember { mutableStateOf(season) }
+    var currentEpisode by remember { mutableStateOf(episode) }
+
+    // --- Next-episode auto-play state (TV shows only) ------------------- //
+    // When an episode ends (STATE_ENDED) we look up the show's seasons on TMDB
+    // to find the next episode (episode+1, or season+1 episode 1 if this was
+    // the last episode of the season). If there is one, we advance
+    // currentSeason/currentEpisode so the extraction LaunchedEffect re-fires
+    // for the next episode — the poster shows "Next episode…" then the new
+    // stream resolves and plays, exactly like Netflix's post-play next-episode
+    // auto-play. If the user has left the player (Activity destroyed) the
+    // coroutine scope is cancelled so nothing happens.
+    val isTv = contentType.equals("tv", ignoreCase = true)
+    var nextEpisodeLabel by remember { mutableStateOf<String?>(null) }
 
     // --- Loop control ------------------------------------------------ //
     // attempt is the LaunchedEffect key; bumping it re-runs extraction.
@@ -324,10 +505,13 @@ fun PlayerScreen(
     // --------------------------------------------------------------- //
     //  Extraction LaunchedEffect                                       //
     // --------------------------------------------------------------- //
-    LaunchedEffect(tmdbId, contentType, season, episode, attempt) {
+    LaunchedEffect(tmdbId, contentType, currentSeason, currentEpisode, attempt) {
         isLoading = true
         error = null
         infoMessage = null
+        // Clear the "Next episode" label once the new episode starts resolving
+        // so it doesn't linger after the new stream begins playing.
+        if (attempt == 0) nextEpisodeLabel = null
 
         // Reset the race-provider exclusion set whenever we start extraction
         // for a NEW title (attempt 0). Within one playback session we keep
@@ -344,7 +528,7 @@ fun PlayerScreen(
             // immediately. For Interstellar this means VidStorm is excluded up
             // front and NoTorrent wins the first race — no cold-start penalty.
             excludedRaceProviders = StreamAvailabilityCache.knownBadProviders(
-                tmdbId, contentType, season, episode
+                tmdbId, contentType, currentSeason, currentEpisode
             ).toSet()
             ServerManager.resetHealth()
         }
@@ -354,7 +538,7 @@ fun PlayerScreen(
         // changes mid-extraction.
         val start = startStage
 
-        Log.d("Player", "🔎 Extraction attempt #$attempt (start stage $start) for \"$title\" ($year) $contentType S$season E$episode")
+        Log.d("Player", "🔎 Extraction attempt #$attempt (start stage $start) for \"$title\" ($year) $contentType S$currentSeason E$currentEpisode")
 
         val activity = localContext as? android.app.Activity
 
@@ -384,9 +568,9 @@ fun PlayerScreen(
         //   VidSrcNet   → vidsrc.net/cloudnestra 12-decoder pipeline
         //   VidLink     → /api/player?tmdb direct HLS
         //   VixSrc      → vidsrc.xyz /vixsrc embed
-        //   MeowTV      → api.meowtv.ru direct API (excellent TV-episode coverage)
+        //   MeowTV      → api.meowtv.ru direct API (excellent TV-currentEpisode coverage)
         //   Videasy     → videasy.stream (10-server parallel)
-        //   KissKH      → kisskh.do search→episode direct HLS (broad TV catalogue)
+        //   KissKH      → kisskh.do search→currentEpisode direct HLS (broad TV catalogue)
         //   VidSync     → vidsync.xyz / wingsdatabase 12-server parallel
         //   LordFlix    → lordflix alternative (10-server aggregator)
         //   DahmerMovies→ dahmermovies fallback
@@ -430,8 +614,8 @@ fun PlayerScreen(
                         title = title,
                         year = year,
                         isMovie = contentType.equals("movie", ignoreCase = true),
-                        season = season,
-                        episode = episode
+                        season = currentSeason,
+                        episode = currentEpisode
                     )
                     // Short budget: a cache hit returns immediately; a cold
                     // resolve gets up to ENGINE_FIRST_TIMEOUT_MS before we
@@ -484,7 +668,7 @@ fun PlayerScreen(
                 }
                 Log.d("Player", "🏇 VidStorm: extracting\u2026")
                 val res = withTimeoutOrNull(PlayerActivity.PROVIDER_TIMEOUT_MS) {
-                    VidStormExtractor.extract(tmdbId, contentType, season, episode)
+                    VidStormExtractor.extract(tmdbId, contentType, currentSeason, currentEpisode)
                 }
                 return (res as? VidStormExtractor.Result.Stream)?.let {
                     val pname = it.providerName.ifBlank { "VidStorm" }
@@ -507,7 +691,7 @@ fun PlayerScreen(
                 }
                 Log.d("Player", "🏇 VidSrc: extracting\u2026")
                 val res = withTimeoutOrNull(PlayerActivity.PROVIDER_TIMEOUT_MS) {
-                    VidSrcExtractor.extract(tmdbId, contentType, season, episode)
+                    VidSrcExtractor.extract(tmdbId, contentType, currentSeason, currentEpisode)
                 }
                 return (res as? VidSrcExtractor.Result.Stream)?.let {
                     Log.i("Player", "\u2705 VidSrc hit: ${it.url}")
@@ -522,7 +706,7 @@ fun PlayerScreen(
                 }
                 Log.d("Player", "🏇 VidSrcNet: extracting\u2026")
                 val res = withTimeoutOrNull(PlayerActivity.PROVIDER_TIMEOUT_MS) {
-                    VidSrcNetExtractor.extract(tmdbId, contentType, season, episode)
+                    VidSrcNetExtractor.extract(tmdbId, contentType, currentSeason, currentEpisode)
                 }
                 return (res as? VidSrcNetExtractor.Result.Stream)?.let {
                     Log.i("Player", "\u2705 VidSrcNet hit: ${it.url}")
@@ -537,7 +721,7 @@ fun PlayerScreen(
                 }
                 Log.d("Player", "🏇 VidLink: extracting\u2026")
                 val res = withTimeoutOrNull(PlayerActivity.PROVIDER_TIMEOUT_MS) {
-                    VidLinkExtractor.extract(tmdbId, contentType, season, episode)
+                    VidLinkExtractor.extract(tmdbId, contentType, currentSeason, currentEpisode)
                 }
                 return (res as? VidLinkExtractor.Result.Stream)?.let {
                     Log.i("Player", "\u2705 VidLink hit: ${it.url}")
@@ -552,7 +736,7 @@ fun PlayerScreen(
                 }
                 Log.d("Player", "🏇 VixSrc: extracting\u2026")
                 val res = withTimeoutOrNull(PlayerActivity.PROVIDER_TIMEOUT_MS) {
-                    VixSrcExtractor.extract(tmdbId, contentType, season, episode)
+                    VixSrcExtractor.extract(tmdbId, contentType, currentSeason, currentEpisode)
                 }
                 return (res as? VixSrcExtractor.Result.Stream)?.let {
                     Log.i("Player", "\u2705 VixSrc hit: ${it.url}")
@@ -567,7 +751,7 @@ fun PlayerScreen(
                 }
                 Log.d("Player", "🏇 NoTorrent: extracting\u2026")
                 val res = withTimeoutOrNull(PlayerActivity.PROVIDER_TIMEOUT_MS) {
-                    NoTorrentExtractor.extract(tmdbId, contentType, season, episode)
+                    NoTorrentExtractor.extract(tmdbId, contentType, currentSeason, currentEpisode)
                 }
                 return (res as? NoTorrentExtractor.Result.Stream)?.let {
                     Log.i("Player", "\u2705 NoTorrent hit: ${it.url}")
@@ -582,7 +766,7 @@ fun PlayerScreen(
                 }
                 Log.d("Player", "🏇 MeowTV: extracting\u2026")
                 val res = withTimeoutOrNull(PlayerActivity.PROVIDER_TIMEOUT_MS) {
-                    MeowTvExtractor.extract(tmdbId, contentType, season, episode)
+                    MeowTvExtractor.extract(tmdbId, contentType, currentSeason, currentEpisode)
                 }
                 return (res as? MeowTvExtractor.Result.Stream)?.let {
                     Log.i("Player", "\u2705 MeowTV hit: ${it.url}")
@@ -597,7 +781,7 @@ fun PlayerScreen(
                 }
                 Log.d("Player", "🏇 KissKH: extracting\u2026")
                 val res = withTimeoutOrNull(PlayerActivity.PROVIDER_TIMEOUT_MS) {
-                    KissKhExtractor.extract(tmdbId, contentType, season, episode)
+                    KissKhExtractor.extract(tmdbId, contentType, currentSeason, currentEpisode)
                 }
                 return (res as? KissKhExtractor.Result.Stream)?.let {
                     Log.i("Player", "\u2705 KissKH hit: ${it.url}")
@@ -612,7 +796,7 @@ fun PlayerScreen(
                 }
                 Log.d("Player", "🏇 VidSync: extracting\u2026")
                 val res = withTimeoutOrNull(PlayerActivity.PROVIDER_TIMEOUT_MS) {
-                    VidSyncExtractor.extract(tmdbId, contentType, season, episode)
+                    VidSyncExtractor.extract(tmdbId, contentType, currentSeason, currentEpisode)
                 }
                 return (res as? VidSyncExtractor.Result.Stream)?.let {
                     Log.i("Player", "\u2705 VidSync hit: ${it.url}")
@@ -627,7 +811,7 @@ fun PlayerScreen(
                 }
                 Log.d("Player", "🏇 Videasy: extracting\u2026")
                 val res = withTimeoutOrNull(PlayerActivity.PROVIDER_TIMEOUT_MS) {
-                    VideasyExtractor.extract(tmdbId, contentType, season, episode)
+                    VideasyExtractor.extract(tmdbId, contentType, currentSeason, currentEpisode)
                 }
                 return (res as? VideasyExtractor.Result.Stream)?.let {
                     Log.i("Player", "\u2705 Videasy hit: ${it.url}")
@@ -642,7 +826,7 @@ fun PlayerScreen(
                 }
                 Log.d("Player", "🏇 LordFlix: extracting\u2026")
                 val res = withTimeoutOrNull(PlayerActivity.PROVIDER_TIMEOUT_MS) {
-                    LordFlixExtractor.extract(tmdbId, contentType, season, episode)
+                    LordFlixExtractor.extract(tmdbId, contentType, currentSeason, currentEpisode)
                 }
                 return (res as? LordFlixExtractor.Result.Stream)?.let {
                     Log.i("Player", "\u2705 LordFlix hit: ${it.url}")
@@ -657,7 +841,7 @@ fun PlayerScreen(
                 }
                 Log.d("Player", "🏇 DahmerMovies: extracting\u2026")
                 val res = withTimeoutOrNull(PlayerActivity.PROVIDER_TIMEOUT_MS) {
-                    DahmerMoviesExtractor.extract(tmdbId, contentType, season, episode)
+                    DahmerMoviesExtractor.extract(tmdbId, contentType, currentSeason, currentEpisode)
                 }
                 return (res as? DahmerMoviesExtractor.Result.Stream)?.let {
                     Log.i("Player", "\u2705 DahmerMovies hit: ${it.url}")
@@ -672,7 +856,7 @@ fun PlayerScreen(
                 }
                 Log.d("Player", "🏇 TwoEmbed: extracting\u2026")
                 val res = withTimeoutOrNull(PlayerActivity.PROVIDER_TIMEOUT_MS) {
-                    TwoEmbedExtractor.extract(tmdbId, contentType, season, episode)
+                    TwoEmbedExtractor.extract(tmdbId, contentType, currentSeason, currentEpisode)
                 }
                 return (res as? TwoEmbedExtractor.Result.Stream)?.let {
                     Log.i("Player", "\u2705 TwoEmbed hit: ${it.url}")
@@ -686,7 +870,7 @@ fun PlayerScreen(
                 }
                 Log.d("Player", "🏇 VidSrcMe: extracting sub-servers\u2026")
                 val res = withTimeoutOrNull(PlayerActivity.PROVIDER_TIMEOUT_MS) {
-                    VidSrcMeResolver.extract(tmdbId, contentType, season, episode)
+                    VidSrcMeResolver.extract(tmdbId, contentType, currentSeason, currentEpisode)
                 }
                 return (res as? VidSrcMeResolver.Result.Stream)?.let {
                     Log.i("Player", "\u2705 VidSrcMe hit: ${it.url}")
@@ -702,7 +886,7 @@ fun PlayerScreen(
                 }
                 Log.d("Player", "\ud83c\udfc7 SuperEmbed: extracting\u2026")
                 val res = withTimeoutOrNull(PlayerActivity.PROVIDER_TIMEOUT_MS) {
-                    SuperEmbedExtractor.extract(tmdbId, contentType, season, episode)
+                    SuperEmbedExtractor.extract(tmdbId, contentType, currentSeason, currentEpisode)
                 }
                 return (res as? SuperEmbedExtractor.Result.Stream)?.let {
                     Log.i("Player", "\u2705 SuperEmbed hit: ${it.url}")
@@ -717,7 +901,7 @@ fun PlayerScreen(
                 }
                 Log.d("Player", "\ud83c\udfc7 VidSrcPro: extracting\u2026")
                 val res = withTimeoutOrNull(PlayerActivity.PROVIDER_TIMEOUT_MS) {
-                    VidSrcProExtractor.extract(tmdbId, contentType, season, episode)
+                    VidSrcProExtractor.extract(tmdbId, contentType, currentSeason, currentEpisode)
                 }
                 return (res as? VidSrcProExtractor.Result.Stream)?.let {
                     Log.i("Player", "\u2705 VidSrcPro hit: ${it.url}")
@@ -743,8 +927,8 @@ fun PlayerScreen(
                         title = title,
                         year = year,
                         isMovie = contentType.equals("movie", ignoreCase = true),
-                        season = season,
-                        episode = episode
+                        season = currentSeason,
+                        episode = currentEpisode
                     )
                 }
                 return (res as? LookMovieHeadlessExtractor.Result.Stream)?.let {
@@ -933,6 +1117,66 @@ fun PlayerScreen(
                     posterUrl = posterUrl,
                     backdropUrl = backdropUrl,
                     onPlayingChange = { playing -> isPlaying = playing },
+                    onEpisodeEnded = {
+                        // ── Next-episode auto-play (TV shows only) ────────── //
+                        // Fired by ExoPlayerView when playback reaches
+                        // STATE_ENDED. For TV shows we look up the show's
+                        // seasons on TMDB to find the next episode and advance
+                        // currentSeason/currentEpisode so the extraction
+                        // LaunchedEffect re-fires for it — the new episode
+                        // resolves and plays automatically, just like Netflix.
+                        // Movies do nothing (playback simply ends). This only
+                        // runs while the Activity is alive; if the user has
+                        // left the player the coroutine scope is already
+                        // cancelled so nothing happens.
+                        if (!isTv) return@ExoPlayerView
+                        scope.launch {
+                            val repo = ContentRepository()
+                            val detail = repo.getTvShowDetail(tmdbId)
+                            val seasons = detail?.seasons
+                                ?.filter { it.seasonNumber >= 1 } // skip specials (season 0)
+                                ?.sortedBy { it.seasonNumber }
+                                .orEmpty()
+                            // Find the current season's episode count.
+                            val curSeasonInfo = seasons.firstOrNull { it.seasonNumber == currentSeason }
+                            val epsInSeason = curSeasonInfo?.episodeCount ?: 0
+                            val nextSeason: Int
+                            val nextEp: Int
+                            if (currentEpisode < epsInSeason) {
+                                // More episodes in this season.
+                                nextSeason = currentSeason
+                                nextEp = currentEpisode + 1
+                            } else {
+                                // Last episode of this season → next season, ep 1.
+                                val next = seasons.firstOrNull { it.seasonNumber > currentSeason }
+                                if (next != null) {
+                                    nextSeason = next.seasonNumber
+                                    nextEp = 1
+                                } else {
+                                    // No more seasons — series finished. Stop.
+                                    Log.d("Player", "No next episode — end of series.")
+                                    return@launch
+                                }
+                            }
+                            Log.d("Player", "Auto-playing next episode: S$nextSeason E$nextEp")
+                            nextEpisodeLabel = "Next episode: S$nextSeason E$nextEp"
+                            // Reset extraction state for the new episode.
+                            streamUrl = null
+                            streamHeaders = emptyMap()
+                            deliveringServerName = null
+                            error = null
+                            excludedRaceProviders = emptySet()
+                            raceFallbackUsed = false
+                            candidateQueue = emptyList()
+                            attempt = 0
+                            startStage = PlayerActivity.STAGE_VIDSTORM
+                            isLoading = true
+                            // Advance the mutable season/episode → the
+                            // LaunchedEffect keyed on them re-fires extraction.
+                            currentSeason = nextSeason
+                            currentEpisode = nextEp
+                        }
+                    },
                     onPlayerError = { isFatal ->
                         // ── Transient-error-aware ExoPlayer fallback ──
                         // ExoPlayer emits onPlayerError for BOTH fatal errors
@@ -977,8 +1221,8 @@ fun PlayerScreen(
                             StreamAvailabilityCache.recordFailure(
                                 tmdbId = tmdbId,
                                 contentType = contentType,
-                                season = season,
-                                episode = episode,
+                                season = currentSeason,
+                                episode = currentEpisode,
                                 provider = fp
                             )
                         }
@@ -1002,8 +1246,8 @@ fun PlayerScreen(
                                 StreamAvailabilityCache.recordFailure(
                                     tmdbId = tmdbId,
                                     contentType = contentType,
-                                    season = season,
-                                    episode = episode,
+                                    season = currentSeason,
+                                    episode = currentEpisode,
                                     provider = fp
                                 )
                             }
@@ -1036,8 +1280,8 @@ fun PlayerScreen(
                             StreamAvailabilityCache.recordFailure(
                                 tmdbId = tmdbId,
                                 contentType = contentType,
-                                season = season,
-                                episode = episode,
+                                season = currentSeason,
+                                episode = currentEpisode,
                                 provider = fp
                             )
                             // Keep race-provider exclusion up to date so a
@@ -1055,6 +1299,35 @@ fun PlayerScreen(
                         isLoading = true
                         attempt++
                     }
+                )
+            }
+        }
+
+        // ── Netflix-style seek indicator overlay ────────────────────────── //
+        // When the user presses left/right on the D-pad while watching, the
+        // Activity's onKeyDown seeks the live player and bumps the
+        // lastSeekTick bridge. This overlay polls that bridge and renders a
+        // Netflix-style scrubber (progress bar + current time / total time)
+        // so the user sees where they've seeked to — the same gesture Netflix
+        // uses on Android TV. It auto-hides a few seconds after the last seek.
+        if (streamUrl != null) {
+            SeekIndicatorOverlay()
+        }
+
+        // ── Next-episode label (shown while the next TV episode resolves) ── //
+        if (nextEpisodeLabel != null && isLoading) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.BottomCenter
+            ) {
+                Text(
+                    text = nextEpisodeLabel!!,
+                    color = Color.White,
+                    fontSize = 16.sp,
+                    modifier = Modifier
+                        .padding(bottom = 24.dp)
+                        .background(Color(0xCC000000), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 16.dp, vertical = 10.dp)
                 )
             }
         }
@@ -1096,6 +1369,115 @@ fun PlayerScreen(
         }
     }
 }
+
+/**
+ * Netflix-style seek indicator overlay.
+ *
+ * Polls the [PlayerActivity.lastSeekTick] bridge (bumped by the Activity's
+ * onKeyDown whenever the user presses D-pad left/right to scrub). When a seek
+ * happens, this renders a centered scrubber: a red progress bar showing the
+ * new position within the total duration, plus the current time and total
+ * time labels below it — exactly like Netflix's seek preview on Android TV.
+ *
+ * The overlay auto-hides [SEEK_INDICATOR_TIMEOUT_MS] after the last seek so it
+ * never lingers over active playback.
+ */
+@Composable
+private fun SeekIndicatorOverlay() {
+    // Local mirrored state driven by the volatile bridge. We poll the bridge
+    // on a short interval while a seek is "active" and stop once it has been
+    // hidden long enough.
+    var visible by remember { mutableStateOf(false) }
+    var positionMs by remember { mutableStateOf(0L) }
+    var durationMs by remember { mutableStateOf(0L) }
+    var lastSeenTick by remember { mutableStateOf(0L) }
+
+    LaunchedEffect(Unit) {
+        // Poll the bridge ~10x/sec while visible; the tick changes whenever
+        // onKeyDown seeks. We keep polling (cheap) so a new seek re-shows the
+        // overlay even after it had auto-hidden.
+        while (true) {
+            val tick = PlayerActivity.lastSeekTick
+            if (tick != lastSeenTick) {
+                lastSeenTick = tick
+                positionMs = PlayerActivity.lastSeekPositionMs
+                durationMs = PlayerActivity.lastSeekDurationMs
+                visible = true
+            }
+            if (visible) {
+                // Auto-hide 2.5s after the last seek tick.
+                val elapsed = System.currentTimeMillis() - lastSeenTick
+                if (elapsed > SEEK_INDICATOR_TIMEOUT_MS) {
+                    visible = false
+                }
+            }
+            kotlinx.coroutines.delay(100L)
+        }
+    }
+
+    if (visible) {
+        val dur = if (durationMs > 0) durationMs else 0L
+        val progress = if (dur > 0) (positionMs.toFloat() / dur).coerceIn(0f, 1f) else 0f
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier
+                    .background(Color(0xB3000000), RoundedCornerShape(12.dp))
+                    .padding(horizontal = 28.dp, vertical = 20.dp)
+                    .width(420.dp)
+            ) {
+                // Time labels (current / total).
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = formatTimeMs(positionMs),
+                        color = Color.White,
+                        fontSize = 14.sp
+                    )
+                    Text(
+                        text = formatTimeMs(dur),
+                        color = Color(0x99FFFFFF),
+                        fontSize = 14.sp
+                    )
+                }
+                Spacer(Modifier.height(10.dp))
+                // Netflix-red progress track.
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(6.dp)
+                        .background(Color(0x44FFFFFF), RoundedCornerShape(3.dp))
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(progress)
+                            .fillMaxHeight()
+                            .background(Color(0xFFE50914), RoundedCornerShape(3.dp))
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Formats milliseconds as M:SS or H:MM:SS for the seek overlay. */
+private fun formatTimeMs(ms: Long): String {
+    if (ms <= 0) return "0:00"
+    val totalSec = ms / 1000
+    val h = totalSec / 3600
+    val m = (totalSec % 3600) / 60
+    val s = totalSec % 60
+    return if (h > 0) "%d:%02d:%02d".format(h, m, s)
+    else "%d:%02d".format(m, s)
+}
+
+/** How long the seek indicator stays visible after the last seek. */
+private const val SEEK_INDICATOR_TIMEOUT_MS = 2500L
 
 /**
  * Server picker overlay — lets the user choose which provider to try.
@@ -1327,7 +1709,8 @@ private fun ExoPlayerView(
     posterUrl: String? = null,
     backdropUrl: String? = null,
     onPlayingChange: (Boolean) -> Unit = {},
-    onPlayerError: (isFatal: Boolean) -> Unit = {}
+    onPlayerError: (isFatal: Boolean) -> Unit = {},
+    onEpisodeEnded: () -> Unit = {}
 ) {
     var player: ExoPlayer? by remember { mutableStateOf(null) }
     var trackSelector: DefaultTrackSelector? by remember { mutableStateOf(null) }
@@ -1354,6 +1737,12 @@ private fun ExoPlayerView(
     // Capture the error callback in a lambda we can invoke from the
     // AndroidView factory (which runs outside of the Composition).
     val errorHandler = rememberUpdatedState(onPlayerError)
+
+    // Capture the episode-ended callback so the Player.Listener (created in
+    // the AndroidView factory, outside Composition) always invokes the latest
+    // version. Fired when playback reaches STATE_ENDED so PlayerScreen can
+    // auto-play the next TV episode (unless the user has left the player).
+    val episodeEndedHandler = rememberUpdatedState(onEpisodeEnded)
 
     // ── Reset ready + retry state whenever the URL changes (server switch) ──
     // When the player falls through to the next server, a NEW url arrives.
@@ -1506,6 +1895,18 @@ private fun ExoPlayerView(
                                     // gets a fresh allowance of retries.
                                     transientRetryCount = 0
                                     populateQualities(this@apply) { q -> availableQualities = q }
+                                } else if (state == Player.STATE_ENDED) {
+                                    // The episode/movie finished playing
+                                    // naturally (reached the end). Notify the
+                                    // parent so it can auto-play the next TV
+                                    // episode (movies just stop). This only
+                                    // fires while the Activity is alive, so if
+                                    // the user has left the player nothing
+                                    // happens — matching the request that the
+                                    // next episode auto-plays "unless you leave
+                                    // the player".
+                                    Log.d("ExoPlayer", "Playback ended → onEpisodeEnded")
+                                    episodeEndedHandler.value.invoke()
                                 }
                             }
 
@@ -1578,6 +1979,9 @@ private fun ExoPlayerView(
                         playWhenReady = true
                     }
                 player = exoPlayer
+                // Publish the live player so PlayerActivity.onKeyDown can drive
+                // Android TV remote play/pause (media keys + OK/DPAD-center).
+                PlayerActivity.activePlayer = exoPlayer
 
                 PlayerView(ctx).apply {
                     this.player = exoPlayer
@@ -1599,6 +2003,9 @@ private fun ExoPlayerView(
             update = {},
             onRelease = {
                 player?.release()
+                // Clear the active-player bridge so remote keys can't drive a
+                // released player. Done before nulling the local ref.
+                PlayerActivity.activePlayer = null
                 player = null
             },
             modifier = Modifier.fillMaxSize()

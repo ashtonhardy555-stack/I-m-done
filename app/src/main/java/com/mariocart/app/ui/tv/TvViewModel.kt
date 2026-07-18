@@ -20,9 +20,6 @@ class TvViewModel : ViewModel() {
     private val _popular = MutableStateFlow<List<TmdbItem>>(emptyList())
     val popular: StateFlow<List<TmdbItem>> = _popular
 
-    private val _airingToday = MutableStateFlow<List<TmdbItem>>(emptyList())
-    val airingToday: StateFlow<List<TmdbItem>> = _airingToday
-
     private val _topRated = MutableStateFlow<List<TmdbItem>>(emptyList())
     val topRated: StateFlow<List<TmdbItem>> = _topRated
 
@@ -40,10 +37,6 @@ class TvViewModel : ViewModel() {
         viewModelScope.launch {
             _popular.value = repo.getPopularTV()
             refineRow(_popular)
-        }
-        viewModelScope.launch {
-            _airingToday.value = repo.getAiringToday()
-            refineRow(_airingToday)
         }
         viewModelScope.launch {
             _topRated.value = repo.getTopRatedTV()

@@ -83,7 +83,7 @@ private val NetflixTypography = Typography(
 )
 
 @Composable
-fun MarioCartTheme(content: @Composable () -> Unit) {
+fun NetflixTheme(content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = DarkScheme,
         typography = NetflixTypography,

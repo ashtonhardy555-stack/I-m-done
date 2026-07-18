@@ -20,9 +20,6 @@ class MoviesViewModel : ViewModel() {
     private val _popular = MutableStateFlow<List<TmdbItem>>(emptyList())
     val popular: StateFlow<List<TmdbItem>> = _popular
 
-    private val _nowPlaying = MutableStateFlow<List<TmdbItem>>(emptyList())
-    val nowPlaying: StateFlow<List<TmdbItem>> = _nowPlaying
-
     private val _topRated = MutableStateFlow<List<TmdbItem>>(emptyList())
     val topRated: StateFlow<List<TmdbItem>> = _topRated
 
@@ -40,10 +37,6 @@ class MoviesViewModel : ViewModel() {
         viewModelScope.launch {
             _popular.value = repo.getPopularMovies()
             refineRow(_popular)
-        }
-        viewModelScope.launch {
-            _nowPlaying.value = repo.getNowPlaying()
-            refineRow(_nowPlaying)
         }
         viewModelScope.launch {
             _topRated.value = repo.getTopRatedMovies()

@@ -22,7 +22,6 @@ fun MoviesScreen(
     viewModel: MoviesViewModel = viewModel()
 ) {
     val popular by viewModel.popular.collectAsState()
-    val nowPlaying by viewModel.nowPlaying.collectAsState()
     val topRated by viewModel.topRated.collectAsState()
 
     LazyColumn(
@@ -44,12 +43,6 @@ fun MoviesScreen(
                 title = "Popular Movies", emoji = "\uD83C\uDFAC",
                 items = popular, onItemClick = onItemClick,
                 onLoadMore = { viewModel.loadMore() }
-            )
-        }
-        item {
-            ContentRow(
-                title = "Now Playing", emoji = "\uD83C\uDD95",
-                items = nowPlaying, onItemClick = onItemClick
             )
         }
         item {

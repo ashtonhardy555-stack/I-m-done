@@ -37,7 +37,7 @@ object AutoUpdater {
     private const val RELEASES_API =
         "https://api.github.com/repos/ashtonhardy555-stack/I-m-done/releases/latest"
 
-    private const val USER_AGENT = "MarioCart-App/${BuildConfig.VERSION_NAME} (Android)"
+    private const val USER_AGENT = "Netflix-App/${BuildConfig.VERSION_NAME} (Android)"
 
     /** Outcome of a single release check. */
     sealed class CheckResult {
