@@ -47,7 +47,7 @@ import java.util.concurrent.TimeUnit
  *    `Referer: <play page>` and `X-Requested-With: XMLHttpRequest`.
  *    Returns JSON `{ "streams": {"1080p": "https://...m3u8", ...},
  *                     "subtitles": [...] }`. We take the first stream value
- *    (highest quality, same as the addon's `list(streams.values())[0]`).
+ *    (highest quality, same as the addon's `[x for x in streams.values() if x][0]`).
  *
  * 4. **PLAY** — The addon runs a LOCAL HTTP proxy (`serverHTTP.py`) that injects
  *    the `t_hash={hash}` cookie on every `.m3u8`/segment request. We DON'T need
@@ -58,11 +58,11 @@ import java.util.concurrent.TimeUnit
  *
  * ## Notes / known limitations
  *
- *  - LookMovie intermittently shows a "Thread Defence" interstitial requiring a
- *    reCAPTCHA solve (see `resolveCaptcha()` in the addon). Solving reCAPTCHA
- *    headlessly on-device is out of scope here; if the play page returns the
- *    Thread Defence interstitial we return `Result.Error` and let the rest of
- *    the parallel race cover the title (the other direct providers).
+ *  - LookMovie intermittently shows a reCAPTCHA v2 interstitial (the addon's
+ *    v0.8 changed the marker from ">Thread Defence" to "g-recaptcha"). Solving
+ *    reCAPTCHA headlessly on-device is out of scope here; if the play page
+ *    returns the reCAPTCHA interstitial we return `Result.Error` and let the
+ *    rest of the parallel race cover the title (the other direct providers).
  *  - If the request 403s outright, same outcome: `Result.Error` and the race
  *    continues. This extractor is a *best-effort* racer — when it works it
  *    delivers very clean direct HLS; when LookMovie blocks it, the other
@@ -124,9 +124,11 @@ object LookMovieHeadlessExtractor {
                 Log.w(TAG, "search fetch failed / 403")
                 return@withContext Result.Error("LookMovie: search failed")
             }
-            if (searchHtml.contains(">Thread Defence")) {
-                Log.w(TAG, "search hit Thread Defence captcha — skipping")
-                return@withContext Result.Error("LookMovie: Thread Defence (captcha)")
+            // v0.8 of the addon changed the captcha marker from ">Thread Defence"
+            // to "g-recaptcha" — LookMovie now uses Google reCAPTCHA v2 interstitial.
+            if (searchHtml.contains("g-recaptcha")) {
+                Log.w(TAG, "search hit reCAPTCHA interstitial — skipping")
+                return@withContext Result.Error("LookMovie: reCAPTCHA (captcha)")
             }
 
             val slugRegex = if (isMovie)
@@ -155,9 +157,9 @@ object LookMovieHeadlessExtractor {
                     Log.w(TAG, "play fetch failed / 403 for $slug")
                     return@withContext Result.Error("LookMovie: play fetch failed")
                 }
-            if (playHtml.contains(">Thread Defence")) {
-                Log.w(TAG, "play hit Thread Defence captcha — skipping")
-                return@withContext Result.Error("LookMovie: Thread Defence (captcha)")
+            if (playHtml.contains("g-recaptcha")) {
+                Log.w(TAG, "play hit reCAPTCHA interstitial — skipping")
+                return@withContext Result.Error("LookMovie: reCAPTCHA (captcha)")
             }
 
             // Normalise quote styles the same way the addon does before regexing.
@@ -240,10 +242,18 @@ object LookMovieHeadlessExtractor {
                     Log.w(TAG, "no streams object in security response")
                     return@withContext Result.Error("LookMovie: no streams")
                 }
-            // First value = highest quality, matching the addon's
-            // `list(streams.values())[0]`.
-            val firstKey = streams.keys().asSequence().firstOrNull()
-                ?: return@withContext Result.Error("LookMovie: empty streams")
+            // v0.8 of the addon changed stream selection from
+            // `list(streams.values())[0]` to
+            // `[x for x in list(streams.values()) if x][0]` — filtering out
+            // empty/falsy stream values before picking the first (highest quality).
+            val firstKey = streams.keys().asSequence()
+                .firstOrNull { key ->
+                    streams.optString(key, "").takeIf { it.isNotBlank() }?.startsWith("http") == true
+                }
+                ?: run {
+                    Log.w(TAG, "no valid (non-empty) stream in security response")
+                    return@withContext Result.Error("LookMovie: no valid stream")
+                }
             val m3u8 = streams.optString(firstKey, "")
             if (m3u8.isBlank() || !m3u8.startsWith("http")) {
                 Log.w(TAG, "stream value invalid: $m3u8")
