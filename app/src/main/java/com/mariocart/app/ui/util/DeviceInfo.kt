@@ -101,6 +101,13 @@ data class ResponsiveDims(
     val navIconSize: Dp,
     val navLabelSize: Int,
     val gridColumns: Int,
+    /**
+     * Vertical space to reserve at the top of a non-hero screen so its
+     * title / first content row is NOT hidden behind the transparent
+     * overlay top bar (phone layout only). On TV the side rail is used
+     * instead of an overlay top bar, so this is 0.
+     */
+    val topContentPadding: Dp,
 ) {
     companion object {
         val Phone = ResponsiveDims(
@@ -115,6 +122,9 @@ data class ResponsiveDims(
             navIconSize = 24.dp,
             navLabelSize = 11,
             gridColumns = 3,
+            // Status-bar inset (~24dp) + top bar vertical padding (10dp) +
+            // tab text + underline (~26dp) + a little breathing room.
+            topContentPadding = 72.dp,
         )
 
         val TV = ResponsiveDims(
@@ -131,6 +141,8 @@ data class ResponsiveDims(
             navLabelSize = 14,
             // TV screens are wide — 5 columns fills the space nicely.
             gridColumns = 5,
+            // No overlay top bar on TV (side rail layout) — nothing to clear.
+            topContentPadding = 0.dp,
         )
     }
 }

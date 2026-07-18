@@ -15,6 +15,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mariocart.app.data.model.TmdbItem
 import com.mariocart.app.ui.components.ContentRow
 import com.mariocart.app.ui.theme.TextPrimary
+import com.mariocart.app.ui.util.responsiveDims
 
 @Composable
 fun MoviesScreen(
@@ -23,11 +24,12 @@ fun MoviesScreen(
 ) {
     val popular by viewModel.popular.collectAsState()
     val topRated by viewModel.topRated.collectAsState()
+    val dims = responsiveDims()
 
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .padding(top = 16.dp)
+            .padding(top = dims.topContentPadding)
     ) {
         item {
             Text(

@@ -38,6 +38,7 @@ import com.mariocart.app.ui.components.ContentCard
 import com.mariocart.app.ui.theme.Bg3
 import com.mariocart.app.ui.theme.Red
 import com.mariocart.app.ui.theme.TextPrimary
+import com.mariocart.app.ui.util.responsiveDims
 
 @Composable
 fun BrowseScreen(
@@ -48,11 +49,12 @@ fun BrowseScreen(
     val selectedGenre by viewModel.selectedGenre.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val allGenres = MOVIE_GENRES + TV_GENRES
+    val dims = responsiveDims()
 
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .padding(top = 8.dp)
+            .padding(top = dims.topContentPadding)
     ) {
         item {
             Text(

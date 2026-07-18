@@ -24,6 +24,7 @@ import com.mariocart.app.ui.theme.Bg3
 import com.mariocart.app.ui.theme.Red
 import com.mariocart.app.ui.theme.TextMuted
 import com.mariocart.app.ui.theme.TextPrimary
+import com.mariocart.app.ui.util.responsiveDims
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -48,12 +49,14 @@ fun UpdatesScreen() {
         isChecking = false
     }
 
+    val dims = responsiveDims()
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(Bg)
             .verticalScroll(rememberScrollState())
-            .padding(20.dp)
+            .padding(start = 20.dp, end = 20.dp, bottom = 20.dp, top = dims.topContentPadding)
     ) {
         Text(
             "Updates",
