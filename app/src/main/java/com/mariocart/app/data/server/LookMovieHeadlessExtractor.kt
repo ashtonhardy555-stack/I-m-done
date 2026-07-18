@@ -171,6 +171,11 @@ object LookMovieHeadlessExtractor {
             val idParam: Pair<String, String>  // (paramName, paramValue)
 
             if (isMovie) {
+                // `movie_storage` is assigned as a JS string-key property:
+                //   window["movie_storage"] = {hash:"abc",id_movie:123,...};
+                // The `"?` around the field names makes the field regexes work
+                // whether LookMovie uses unquoted keys (hash:...) or quoted
+                // keys ("hash":...).
                 val storageMatch = Regex("""movie_storage"\]\s*=\s*(\{.*?\})""", RegexOption.DOT_MATCHES_ALL)
                     .find(norm)
                     ?: run {
@@ -187,6 +192,11 @@ object LookMovieHeadlessExtractor {
                 securityPath = "/api/v1/security/movie-access"
                 idParam = "id_movie" to idMovie
             } else {
+                // `show_storage` is assigned as a JS string-key property:
+                //   window["show_storage"] = {hash:"abc",expires:123,seasons:[...]};
+                // We extract hash + expires, then scan the seasons array for the
+                // episode matching the requested (season, episode) to get its
+                // id_episode for the episode-access security API.
                 val storageMatch = Regex("""show_storage"\]\s*=\s*(\{.*?\};)""", RegexOption.DOT_MATCHES_ALL)
                     .find(norm)
                     ?: run {
@@ -200,15 +210,22 @@ object LookMovieHeadlessExtractor {
                     ?: return@withContext Result.Error("LookMovie: no expires")
 
                 // Scan the seasons array for the requested (season, episode).
-                val seasonsMatch = Regex("""seasons\s*:\s*(\[.*?\])""", RegexOption.DOT_MATCHES_ALL)
+                // `"?seasons"?` handles both unquoted (seasons:) and quoted
+                // ("seasons":) JS keys.
+                val seasonsMatch = Regex(""""?seasons"?\s*:\s*(\[.*?\])""", RegexOption.DOT_MATCHES_ALL)
                     .find(storage)
                     ?: run {
                         Log.w(TAG, "no seasons array for $slug")
                         return@withContext Result.Error("LookMovie: no seasons")
                     }
                 val seasons = seasonsMatch.groupValues[1]
+                // Episode objects in the seasons array look like:
+                //   {season:"1",episode:"1",id_episode:10001,title:"Pilot"}
+                // or with quoted keys:
+                //   {"season":"1","episode":"1","id_episode":10001,...}
+                // The `"?` around each field name handles both formats.
                 val episodeRegex = Regex(
-                    """\{[^{}]*?season\s*:\s*"?(\d+)"?[^{}]*?episode\s*:\s*"?(\d+)"?[^{}]*?id_episode\s*:\s*(\d+)[^{}]*?\}""",
+                    """\{[^{}]*?"?season"?\s*:\s*"?(\d+)"?[^{}]*?"?episode"?\s*:\s*"?(\d+)"?[^{}]*?"?id_episode"?\s*:\s*(\d+)[^{}]*?\}""",
                     RegexOption.DOT_MATCHES_ALL
                 )
                 val ep = episodeRegex.findAll(seasons).firstOrNull {
@@ -304,15 +321,22 @@ object LookMovieHeadlessExtractor {
         }
     }
 
-    /** Extract a quoted string field: `hash: "abc"` / `hash:"abc"` / `"hash":"abc"`. */
+    /**
+     * Extract a quoted string field from a JS object. Handles both unquoted
+     * keys (`hash:"abc"`) and quoted keys (`"hash":"abc"`) — the `"?` around
+     * [name] makes the regex work either way.
+     */
     private fun extractField(js: String, name: String): String? {
-        val r = Regex("""$name\s*:\s*"([^"]+)"""")
+        val r = Regex(""""?$name"?\s*:\s*"([^"]+)"""")
         return r.find(js)?.groupValues?.get(1)
     }
 
-    /** Extract a numeric field: `expires: 1700000000` / `id_movie: 12345`. */
+    /**
+     * Extract a numeric field from a JS object. Handles both unquoted keys
+     * (`expires:1700000000`) and quoted keys (`"expires":1700000000`).
+     */
     private fun extractNum(js: String, name: String): String? {
-        val r = Regex("""$name\s*:\s*(\d+)""")
+        val r = Regex(""""?$name"?\s*:\s*(\d+)""")
         return r.find(js)?.groupValues?.get(1)
     }
 
