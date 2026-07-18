@@ -1,7 +1,7 @@
 {
-  "version": 12,
-  "updated": "2026-07-empirical-reorder",
-  "description": "Auto-updated list of working TMDB-based stream providers for I'm Done. v11: Added 2Embed sub-servers (VCR, Vesy, XPS) \u2014 each 2Embed embed page exposes multiple upstream sources via streamsrcs.2embed.cc; added as separate servers for more WebView embed redundancy. v10: PARALLEL direct-API race (all 15 extractors fire at once, first verified Stream wins) fixes slow sequential testing + 'some shows won't play'; added SuperEmbed + VidSrcPro extractors; expanded RACE_PROVIDERS cache to track all 15 extractors; added CurtStream + VidSrc.online embed servers. v9: fixed dead VidSrc domains; added MeowTV/KissKH/VidSync direct-API extractors. v8: NoTorrent Stremio addon. v7: VidRock/VidStorm/VidZee/VidNest/VidSrc.ru.",
+  "version": 13,
+  "updated": "2026-07-parallel-race-english-first",
+  "description": "Auto-updated list of working TMDB-based stream providers for I'm Done. v13: ALL-SERVERS parallel race + English-first ranking + candidate-queue failover. Disabled 7 confirmed-dead/403/DNS-dead providers (vidsrc.to, vidsrc.cc, multiembed, vidfast, cinesrc, peachify, vidzee). Re-enabled vidsync.live (confirmed live). 2Embed sub-streams (VCR, Vesy, XPS) retained for redundancy.",
   "servers": [
     {
       "id": "notorrent",
@@ -82,7 +82,7 @@
     },
     {
       "id": "2embed_vesy",
-      "name": "2Embed\u00b7Vesy",
+      "name": "2Embed·Vesy",
       "baseUrl": "https://streamsrcs.2embed.cc",
       "movieUrlTemplate": "{base}/vesy?tmdb={id}",
       "tvUrlTemplate": "{base}/vesy-tv?tmdb={id}&s={season}&e={episode}",
@@ -93,7 +93,7 @@
     },
     {
       "id": "2embed_vcr",
-      "name": "2Embed\u00b7VCR",
+      "name": "2Embed·VCR",
       "baseUrl": "https://streamsrcs.2embed.cc",
       "movieUrlTemplate": "{base}/vcr?tmdb={id}",
       "tvUrlTemplate": "{base}/vcr-tv?tmdb={id}&s={season}&e={episode}",
@@ -104,7 +104,7 @@
     },
     {
       "id": "2embed_xps",
-      "name": "2Embed\u00b7XPS",
+      "name": "2Embed·XPS",
       "baseUrl": "https://streamsrcs.2embed.cc",
       "movieUrlTemplate": "{base}/xps?imdb=tt{id}",
       "tvUrlTemplate": "{base}/xps-tv?imdb=tt{id}&s={season}&e={episode}",
@@ -219,9 +219,9 @@
       "movieUrlTemplate": "{base}/?video_id={id}&tmdb=1",
       "tvUrlTemplate": "{base}/?video_id={id}&tmdb=1&s={season}&e={episode}",
       "tier": 2,
-      "reliability": 79,
+      "reliability": 5,
       "cloudflare": true,
-      "enabled": true
+      "enabled": false
     },
     {
       "id": "smashystream",
@@ -274,9 +274,9 @@
       "movieUrlTemplate": "{base}/v2/embed/movie/{id}",
       "tvUrlTemplate": "{base}/v2/embed/tv/{id}/{season}/{episode}",
       "tier": 2,
-      "reliability": 60,
+      "reliability": 5,
       "cloudflare": true,
-      "enabled": true
+      "enabled": false
     },
     {
       "id": "vidsrc_to",
@@ -285,9 +285,9 @@
       "movieUrlTemplate": "{base}/embed/movie/{id}",
       "tvUrlTemplate": "{base}/embed/tv/{id}/{season}/{episode}",
       "tier": 2,
-      "reliability": 60,
+      "reliability": 5,
       "cloudflare": true,
-      "enabled": true
+      "enabled": false
     },
     {
       "id": "vidsrcme_su",
@@ -417,9 +417,9 @@
       "movieUrlTemplate": "{base}/movie/{id}",
       "tvUrlTemplate": "{base}/tv/{id}/{season}/{episode}",
       "tier": 3,
-      "reliability": 53,
+      "reliability": 5,
       "cloudflare": true,
-      "enabled": true
+      "enabled": false
     },
     {
       "id": "cinesrc",
@@ -428,9 +428,9 @@
       "movieUrlTemplate": "{base}/player/movie.php?id={id}",
       "tvUrlTemplate": "{base}/player/movie.php?id={id}&s={season}&e={episode}",
       "tier": 3,
-      "reliability": 52,
+      "reliability": 5,
       "cloudflare": true,
-      "enabled": true
+      "enabled": false
     },
     {
       "id": "peachify",
@@ -439,9 +439,9 @@
       "movieUrlTemplate": "{base}/player/movie.php?id={id}",
       "tvUrlTemplate": "{base}/player/movie.php?id={id}&s={season}&e={episode}",
       "tier": 3,
-      "reliability": 51,
+      "reliability": 5,
       "cloudflare": true,
-      "enabled": true
+      "enabled": false
     },
     {
       "id": "vidsync",
@@ -472,9 +472,9 @@
       "movieUrlTemplate": "{base}/embed/movie/{id}",
       "tvUrlTemplate": "{base}/embed/tv/{id}/{season}/{episode}",
       "tier": 3,
-      "reliability": 45,
+      "reliability": 5,
       "cloudflare": true,
-      "enabled": true
+      "enabled": false
     },
     {
       "id": "vidsync_live",
@@ -483,9 +483,9 @@
       "movieUrlTemplate": "{base}/movie/{id}",
       "tvUrlTemplate": "{base}/tv/{id}/{season}/{episode}",
       "tier": 3,
-      "reliability": 5,
+      "reliability": 50,
       "cloudflare": true,
-      "enabled": false
+      "enabled": true
     },
     {
       "id": "vidsrc_net",

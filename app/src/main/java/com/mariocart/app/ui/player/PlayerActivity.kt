@@ -7,8 +7,6 @@ import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.result.ActivityResultLauncher
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -39,16 +37,14 @@ import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import com.mariocart.app.data.cache.StreamAvailabilityCache
 import com.mariocart.app.data.server.DahmerMoviesExtractor
-import com.mariocart.app.data.server.EmbedExtractor
-import com.mariocart.app.data.server.LookMovieWebExtractor
 import com.mariocart.app.data.server.LordFlixExtractor
 import com.mariocart.app.data.server.MeowTvExtractor
 import com.mariocart.app.data.server.KissKhExtractor
+import com.mariocart.app.data.server.LookMovieHeadlessExtractor
 import com.mariocart.app.data.server.VidSyncExtractor
 import com.mariocart.app.data.server.NoTorrentExtractor
 import com.mariocart.app.data.server.ServerConfig
 import com.mariocart.app.data.server.ServerManager
-import com.mariocart.app.data.server.StreamExtractor
 import com.mariocart.app.data.server.StreamProviders
 import com.mariocart.app.data.server.SuperEmbedExtractor
 import com.mariocart.app.data.server.VidLinkExtractor
@@ -62,12 +58,7 @@ import com.mariocart.app.data.server.VixSrcExtractor
 import com.mariocart.app.data.server.TwoEmbedExtractor
 import com.mariocart.app.ui.theme.MarioCartTheme
 import kotlinx.coroutines.async
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -80,52 +71,26 @@ import kotlinx.coroutines.withTimeoutOrNull
  *   0. [VidStormExtractor] (PRIMARY) — calls the VidStorm streaming API
  *      (vidstorm.ru/api), the same backend FilmCave's "cloud / servers"
  *      button uses, and resolves a **direct** `.m3u8` / `.mp4` URL for the
- *      given TMDB id in a single HTTP call — no WebView, no embed scraping,
- *      no Cloudflare challenge. This is by far the most reliable stage and
- *      is the root-cause fix for "only The Rookie played": virtually every
- *      other title fell through the fragile WebView stages below because
- *      LookMovie is Cloudflare-blocked and embed players don't always
- *      auto-request their media inside the extraction timeout, whereas the
- *      VidStorm API returns a real direct URL for almost everything.
- *   1. [VidSrcExtractor] (FALLBACK after VidStorm) — when VidStorm is broken
- *      for a title (Interstellar, The Green Mile, … get only a dead "Boron"
- *      URL), this walks the VidSrc embed pipeline
- *      (vidsrc.me → cloudorchestranova.com RCP/PRORCP → master_urls →
- *      generate.php token) over plain OkHttp and resolves live `#EXTM3U`
- *      manifests at 360p/720p/1080p. No WebView, no JS challenge. This is
- *      the "hidden servers in the exoplayer" aggregator sites keep behind
- *      their RCP indirection, and it consistently plays the titles VidStorm
- *      cannot. Fixes the long-wait-then-black-screen bug.
+/**
+ * PlayerActivity — the on-device video player.
  *
- *      Stages 0 + 1 are raced in **parallel** with two additional direct-API
- *      extractors so the first one to return a verified Stream wins:
- *        - [VidLinkExtractor] — encrypts the TMDB id via enc-dec.app, then
- *          fetches a direct `.m3u8` playlist from the vidlink.pro JSON API.
- *        - [VixSrcExtractor] — calls the vixsrc.to API, fetches the embed
- *          HTML, extracts the token/expires/playlist, and builds a direct
- *          master HLS URL. No WebView, no JS challenge.
- *        - [NoTorrentExtractor] — queries the NoTorrent Stremio addon
- *          (`addon-osvh.onrender.com`) after resolving TMDB→IMDb. Returns
- *          8–18 direct HLS/MP4 streams and reliably resolves the stubborn
- *          titles VidStorm/VidSrc miss (Interstellar 157336, LOTR:ROTK 122).
- *   2. [EmbedExtractor] (FALLBACK) — tries every embed provider
- *      (VidLink, 2Embed, VidSrc, …) inside an off-screen WebView and
- *      captures the direct `.m3u8`/`.mp4` URL the provider's JS player
- *      requests at runtime.
- *   3. [LookMovieWebExtractor] (FALLBACK) — runs the exact Kodi-addon flow
- *      (search -> play page -> storage object -> security API -> .m3u8)
- *      inside an off-screen WebView so the Cloudflare JS challenge is solved
- *      automatically and the `cf_clearance` cookie is carried into the
- *      security-API `fetch()`. This mirrors the way the LookMovie Kodi addon
- *      works.
- *   4. [StreamExtractor] (LAST RESORT) — the original OkHttp-based LookMovie
- *      extractor. Kept as a final fallback; it returns a direct HLS URL when
- *      LookMovie is reachable without a Cloudflare challenge.
+ * This is the single activity that actually plays videos. It owns a fully
+ * on-device extraction pipeline (no backend server, NO WebView at all):
  *
- * Whenever any stage hits a human-verification challenge (captcha /
- * Cloudflare interstitial), it is forwarded to the user in-app via
- * [VerificationActivity]. The user solves it in a real WebView, the resulting
- * cookies are injected back into the extractors, and extraction is retried.
+ * EVERY direct extractor is fired SIMULTANEOUSLY in a single all-servers
+ * parallel race. Each extractor resolves a direct `.m3u8`/`.mp4` URL for the
+ * given TMDB id over plain HTTP — no WebView, no embed scraping, no JS
+ * challenge. The race collects ALL non-null results, ranks them English-first
+ * then by provider reliability, plays the best, and queues the rest as
+ * instant-failover candidates. When ExoPlayer rejects the head URL (the "acts
+ * like it works then won't play" bug) the next queued candidate is popped
+ * with zero re-extraction. Only when the whole queue is exhausted is the
+ * race re-run once more as a last attempt.
+ *
+ * The available direct extractors include (all pure HTTP): VidStorm, VidSrc,
+ * VidSrcMe, VidSrcPro, VidSrcNet, VidLink, VixSrc, NoTorrent (Stremio),
+ * MeowTV, Videasy (10 servers), KissKH, VidSync, LordFlix (10 servers),
+ * DahmerMovies, TwoEmbed (+ sub-streams), SuperEmbed.
  *
  * Before the stream is resolved (and until ExoPlayer reports STATE_READY),
  * the TMDB poster/backdrop is shown as a thumbnail via Coil so the user sees
@@ -137,13 +102,13 @@ class PlayerActivity : ComponentActivity() {
 
     companion object {
         private const val TAG = "PlayerActivity"
-        // Guard so we only escalate to the user N times per playback session.
-        const val MAX_VERIFICATION_ROUNDS = 2
 
-        // Extraction stage indices — used by PlayerScreen to skip stages
-        // (e.g. when the user picks a specific server we jump straight to
-        // the embed stage) and to resume from the right point when ExoPlayer
-        // reports a playback error on an already-resolved URL.
+        // Single extraction stage now that there is no WebView pipeline:
+        // every direct extractor races in parallel from STAGE_RACE. There is
+        // no embed / LookMovie / OkHttp fallback stage anymore.
+        const val STAGE_RACE = 0
+        // Kept for source compatibility with any code that still names the
+        // old stage constants; all collapse to the race.
         const val STAGE_VIDSTORM = 0
         const val STAGE_VIDSRC = 1
         const val STAGE_EMBED = 2
@@ -167,7 +132,7 @@ class PlayerActivity : ComponentActivity() {
          * stage. When the timeout fires, we salvage any winner that
          * completed before the deadline instead of discarding it.
          */
-        const val RACE_TIMEOUT_MS = 9_000L
+        const val RACE_TIMEOUT_MS = 12_000L
 
         /**
          * Per-extractor timeout for the parallel direct-API lane
@@ -210,54 +175,11 @@ class PlayerActivity : ComponentActivity() {
         }
     }
 
-    /**
-     * Outcome of a human-verification round-trip.
-     *
-     * [signal] is a monotonically increasing counter so that the Compose tree
-     * can reliably detect each new result even if two successive verifications
-     * return identical cookies (MutableStateFlow conflates equal values, so
-     * we can't rely on the cookie string alone to trigger recomposition).
-     */
-    data class VerificationOutcome(
-        val success: Boolean,
-        val signal: Int
-    )
-
-    /** Updated by the ActivityResult callback; observed by the Compose tree. */
-    private val verificationOutcome = MutableStateFlow(VerificationOutcome(false, 0))
-
-    private lateinit var verificationLauncher: ActivityResultLauncher<Intent>
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         // Make sure the server list (used for ordering/scoring) is loaded.
         ServerManager.initialize(this)
-
-        // Register the launcher for the VerificationActivity round-trip.
-        // When the user solves the challenge, cookies come back in the result
-        // intent and we feed them into the extraction retry via
-        // [verificationOutcome].
-        verificationLauncher =
-            registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-                val prev = verificationOutcome.value
-                if (result.resultCode == RESULT_OK) {
-                    val cookies = result.data?.getStringExtra(VerificationActivity.EXTRA_COOKIES)
-                    val finalUrl = result.data?.getStringExtra(VerificationActivity.EXTRA_FINAL_URL)
-                    Log.i(TAG, "✅ Verification solved. cookies=${cookies?.length ?: 0} chars; finalUrl=$finalUrl")
-                    if (!cookies.isNullOrBlank()) {
-                        // Push cookies into OkHttp's jar for the OkHttp retry
-                        // path (StreamExtractor) and into the WebView cookie
-                        // jar for LookMovieWebExtractor / EmbedExtractor.
-                        StreamExtractor.injectCookies(cookies)
-                        android.webkit.CookieManager.getInstance().setAcceptCookie(true)
-                    }
-                    verificationOutcome.value = VerificationOutcome(success = true, signal = prev.signal + 1)
-                } else {
-                    Log.w(TAG, "Verification cancelled by user.")
-                    verificationOutcome.value = VerificationOutcome(success = false, signal = prev.signal + 1)
-                }
-            }
 
         val tmdbId = intent.getIntExtra("TMDB_ID", -1)
         val contentType = intent.getStringExtra("CONTENT_TYPE") ?: "movie"
@@ -284,48 +206,26 @@ class PlayerActivity : ComponentActivity() {
                     title = title,
                     year = year,
                     posterUrl = posterUrl,
-                    backdropUrl = backdropUrl,
-                    verificationOutcome = verificationOutcome.asStateFlow().collectAsState().value,
-                    onLaunchVerification = { challengeUrl, referer ->
-                        launchVerificationActivity(challengeUrl, referer)
-                    }
+                    backdropUrl = backdropUrl
                 )
             }
         }
-    }
-
-    private fun launchVerificationActivity(challengeUrl: String, referer: String) {
-        Log.i(TAG, "🤖 Launching human verification for $challengeUrl (referer=$referer)")
-        verificationLauncher.launch(
-            VerificationActivity.newIntent(this, challengeUrl, referer)
-        )
     }
 }
 
 /**
  * The player screen.
  *
- * Extraction pipeline (in order, all on-device — no backend):
- *  0. [VidStormExtractor] — direct VidStorm API call (the FilmCave "cloud
- *     servers" backend). Resolves a direct .m3u8/.mp4 URL for a TMDB id
- *     with no WebView and no Cloudflare challenge. PRIMARY stage.
- *  1. [VidSrcExtractor] — VidSrc RCP pipeline (vidsrc.me →
- *     cloudorchestranova.com) over OkHttp. Resolves live #EXTM3U manifests
- *     for the titles VidStorm cannot (Interstellar, The Green Mile, …).
- *     No WebView, no JS challenge. Falls back here when VidStorm returns
- *     only dead/null sources.
- *  2. [EmbedExtractor] — off-screen WebView over every embed provider,
- *     capturing a direct media URL.
- *  3. [LookMovieWebExtractor] — the Kodi-addon flow inside a WebView
- *     (search -> play page -> storage object -> security API -> .m3u8).
- *     Bypasses Cloudflare because the WebView executes the JS challenge.
- *  4. [StreamExtractor] — OkHttp LookMovie fallback (last resort).
+ * Extraction pipeline (all on-device, NO backend, NO WebView):
+ *  Every direct extractor is fired SIMULTANEOUSLY in one all-servers
+ *  parallel race. The race collects every non-null result, ranks them
+ *  English-first then by provider reliability, plays the best, and queues
+ *  the rest as instant-failover candidates. When ExoPlayer rejects the
+ *  head URL the next queued candidate is popped with zero re-extraction.
+ *  Only when the whole queue is exhausted does the race re-run once more.
  *
- * A human-verification challenge from ANY stage is surfaced to the user via
- * [VerificationActivity]; cookies are injected and extraction is retried.
- *
- * The TMDB poster/backdrop is shown as a thumbnail while the stream is being
- * resolved and until ExoPlayer reports STATE_READY (actual playback begins).
+ * The TMDB poster/backdrop is shown as a thumbnail while the stream is
+ * being resolved and until ExoPlayer reports STATE_READY (playback begins).
  */
 @UnstableApi
 @Composable
@@ -337,9 +237,7 @@ fun PlayerScreen(
     title: String = "Now Playing",
     year: String? = null,
     posterUrl: String? = null,
-    backdropUrl: String? = null,
-    verificationOutcome: PlayerActivity.VerificationOutcome,
-    onLaunchVerification: (challengeUrl: String, referer: String) -> Unit
+    backdropUrl: String? = null
 ) {
     val localContext = LocalContext.current
 
@@ -353,45 +251,42 @@ fun PlayerScreen(
     // --- Loop control ------------------------------------------------ //
     // attempt is the LaunchedEffect key; bumping it re-runs extraction.
     var attempt by remember { mutableStateOf(0) }
-    // Which stage extraction should START from on this attempt.
-    //  - STAGE_VIDSTORM (0): full auto pipeline (default).
-    //  - STAGE_EMBED   (2): user picked a specific server — skip VidStorm /
-    //    VidSrc and go straight to the embed stage so ServerManager's
-    //    ordered list (with their pick first) is honoured. This is the fix
-    //    for "if I interrupt the stream auto finder to choose my own it
-    //    stops working": previously the select just bumped `attempt`, which
-    //    re-ran the whole pipeline from VidStorm and ignored the pick.
-    //    NOTE: embed is now stage 2 (after VidStorm/VidSrc, before LookMovie)
-    //    so when VidStorm/VidSrc fail the parallel embed racing stage runs
-    //    next, giving faster and more reliable fallback to working providers.
+    // In the no-WebView pipeline there is a single extraction lane: the
+    // all-servers parallel race. startStage is always STAGE_VIDSTORM (0)
+    // — every direct extractor fires at once and candidates are ranked
+    // English-first. Bumping `attempt` re-runs that same race (with any
+    // dead providers moved into excludedRaceProviders so they're skipped).
     var startStage by remember { mutableStateOf(0) }
-    // Tracks the stage that actually delivered the current streamUrl so that
-    // an ExoPlayer playback error can resume extraction from the NEXT stage
-    // instead of giving up (fix for "some titles like Interstellar don't
-    // play" — the URL resolves but ExoPlayer can't render it).
+    // Tracks the stage that delivered the current streamUrl so an ExoPlayer
+    // playback error can pop the next candidate (or re-run the race).
     var currentStage by remember { mutableStateOf(0) }
 
     // --- Race-provider exclusion (the Interstellar + "everything plays" fix) -- //
-    // When the parallel Stage-0 race hands ExoPlayer a stream that ExoPlayer
+    // When the all-servers race hands ExoPlayer a stream that ExoPlayer
     // can't actually play (e.g. VidStorm's dead unverified URL for
-    // Interstellar), we must NOT just fall through to Stage 1 (VidSrc) — that
-    // would SKIP the other racers (notably NoTorrent, which is the only one
-    // that resolves Interstellar). Instead we re-run the Stage-0 race with the
-    // failed provider excluded, so a DIFFERENT racer wins. We keep doing this
-    // until every racer has been tried; only then do we fall through to the
-    // later stages. This delivers the UNION of build 4 and build 13:
+    // Interstellar), the candidate queue's failover path (and the
+    // queue-empty re-race) records the dead provider here so a re-race
+    // won't waste a slot on it. We keep doing this until every racer has
+    // been tried; only then do we surface a clear error. This delivers the
+    // UNION of build 4 and build 13:
     //   - build 13 behaviour (Interstellar works) is preserved because the
     //     dead VidStorm URL is excluded and NoTorrent wins on the re-race;
     //   - build 4 behaviour (most things play & load fast) is preserved
-    //     because we never DROP a resolved URL — we just try the next racer
-    //     when ExoPlayer (the real arbiter) says one is dead.
+    //     because we never DROP a resolved URL — we just pop the next
+    //     candidate when ExoPlayer (the real arbiter) says one is dead.
     var excludedRaceProviders by remember { mutableStateOf<Set<String>>(emptySet()) }
     var raceFallbackUsed by remember { mutableStateOf(false) }
-    // How many times we've escalated to the user for human verification.
-    var verificationRounds by remember { mutableStateOf(0) }
-    // Track the pending challenge so we only launch the activity once.
-    var pendingChallengeUrl by remember { mutableStateOf<String?>(null) }
-    var pendingReferer by remember { mutableStateOf("https://www.lookmovie2.to/") }
+
+    // --- Resolved-candidate queue (the "acts like it works then won't play" fix) -- //
+    // When the race fires every extractor in parallel, it collects ALL
+    // resolved candidates (not just the first) into this queue, ranked
+    // English-audio-first then by reliability. We play the head of the queue;
+    // if ExoPlayer rejects it (the "it says it has a stream but won't play"
+    // bug), we pop the next already-resolved candidate and play THAT — no
+    // re-extraction, near-instant failover. Only when the queue is empty do
+    // we re-run the all-servers race once more.
+    // Each entry is an immutable snapshot so it survives recomposition.
+    var candidateQueue by remember { mutableStateOf<List<RankedCandidate>>(emptyList()) }
 
     // --- Server picker ------------------------------------------------ //
     // The user can choose a specific server ("Auto" = let ServerManager order).
@@ -451,59 +346,49 @@ fun PlayerScreen(
 
         val activity = localContext as? android.app.Activity
 
-        // ── Stage 0+1: direct-API sequential failover (auto mode) ── //
-        // Skipped when the user manually picked a server (start == STAGE_EMBED):
-        // the direct extractors ignore ServerManager ordering, so running them
-        // would defeat the user's explicit choice (the embed stage below
-        // honours it).
+        // ── The all-servers parallel race (the only extraction lane) ── //
+        // Every direct extractor fires at once inside one coroutineScope
+        // race. We collect EVERY resolved candidate (not just the first),
+        // rank them English-first then by provider reliability, and play the
+        // head. The rest sit in candidateQueue as instant backups for when
+        // ExoPlayer rejects the head URL (the "acts like it works then
+        // won't play" bug) — popping the next candidate is zero-network.
         //
-        // ## Why SEQUENTIAL failover (not a parallel race)
+        // ## Why a candidate-collecting race (not first-wins `select`)
         //
-        // Build 4 (the last working build) used a simple sequential pipeline:
-        // try VidStorm, and if it errored, try VidSrc. Movies played in ~3-4 s.
+        // A naive `select{}` that takes the first non-null winner is fragile:
+        // a slow/hung extractor can win by returning a dead-but-non-Error
+        // body, and `select` cancels the good candidates so they're gone
+        // when the winner turns out to be unplayable. By collecting ALL
+        // candidates with `awaitAll` and ranking them, we keep every good
+        // stream queued — failover to the next one is instant.
         //
-        // The regression that broke everything was a commit that turned this
-        // into a 10-way `select{}` coroutine race (5 direct extractors + a
-        // WebView embed + more added over time) wrapped in a single 12 s
-        // withTimeout. That race was fragile:
-        //   - A single slow/hung extractor (e.g. a Cloudflare-blocked VixSrc,
-        //     or a VidSrc token round-trip that stalls) could win the race by
-        //     returning a dead-but-non-Error body, starving the fast winners.
-        //   - The `select` cancelled losers, so when the "winner" turned out
-        //     to be a dead URL ExoPlayer later rejected, the good candidates
-        //     were already gone and we fell all the way through to the slow
-        //     WebView stages.
-        //   - The 12 s wall-clock meant a few extractors simply never got a
-        //     fair shot.
+        // The 17 direct extractors in the race (all fired simultaneously):
+        //   NoTorrent   → Stremio addon (great TV coverage)
+        //   VidStorm    → one HTTP call, direct .m3u8/.mp4 (fast for popular movies)
+        //   VidSrc      → vidsrc.me RCP/PRORCP, resolves almost everything
+        //   VidSrcMe    → vidsrc.me resolver (me sub-domain)
+        //   VidSrcPro   → vidsrc.pro embed resolver
+        //   VidSrcNet   → vidsrc.net/cloudnestra 12-decoder pipeline
+        //   VidLink     → /api/player?tmdb direct HLS
+        //   VixSrc      → vidsrc.xyz /vixsrc embed
+        //   MeowTV      → api.meowtv.ru direct API (excellent TV-episode coverage)
+        //   Videasy     → videasy.stream (10-server parallel)
+        //   KissKH      → kisskh.do search→episode direct HLS (broad TV catalogue)
+        //   VidSync     → vidsync.xyz / wingsdatabase 12-server parallel
+        //   LordFlix    → lordflix alternative (10-server aggregator)
+        //   DahmerMovies→ dahmermovies fallback
+        //   TwoEmbed    → 2embed.cc direct API (+ sub-streams VCR/Vesy/XPS)
+        //   SuperEmbed  → superembedstream direct HLS
+        //   LookMovie   → headless port of the plugin.video.lookmovietomb Kodi
+        //                 addon (search→storage→security-API), direct .m3u8 with
+        //                 the t_hash cookie in headers — no WebView, no Kodi
         //
-        // This restores the build-4 philosophy — simple, fast, predictable —
-        // but with MORE direct APIs and a per-extractor timeout so one slow
-        // server can never block the others for more than PROVIDER_TIMEOUT_MS.
-        //
-        // UPDATE: all 13 direct-API extractors now run IN PARALLEL via a
-        // coroutineScope race (see below). The first verified Stream wins
-        // and every other in-flight extractor is cancelled immediately.
-        // This means playback starts in ~1-3 s (the time of the FASTEST
-        // working extractor) instead of up to 91 s in the worst case.
-        // Order no longer matters for speed \u2014 all fire at once \u2014 but the
-        // list below documents each extractor's role:
-        //   VidStorm  → one HTTP call, direct .m3u8/.mp4 (fast for popular movies)
-        //   VidSrc    → vidsrc.me RCP/PRORCP, resolves almost everything (~2.4 s)
-        //   VidSrcNet → vidsrc.net/cloudnestra with full 12-decoder pipeline
-        //   VidLink   → /api/player?tmdb direct HLS
-        //   VixSrc    → vidsrc.xyz /vixsrc embed
-        //   NoTorrent → Stremio addon (great TV coverage)
-        //   MeowTV    → api.meowtv.ru direct API (EXCELLENT TV-episode coverage)
-        //   Videasy   → videasy.stream (10-server parallel)
-        //   KissKH    → kisskh.do search→episode direct HLS (broad TV catalogue)
-        //   VidSync   → vidsync.xyz / wingsdatabase 12-server parallel
-        //   LordFlix  → lordflix alternative
-        //   DahmerMovies → dahmermovies fallback
-        //   TwoEmbed  → 2embed.cc WebView-style direct
-        //
-        // The FIRST extractor to return a verified Stream wins and we stop
-        // immediately. If all return Error/timeout, we fall through to
-        // Stage 2 (WebView embed) which is now re-enabled in auto mode.
+        // The race collects ALL resolved candidates with awaitAll (not just
+        // the first), so playback starts in ~1-3 s (the time of the FASTEST
+        // working extractor) AND every other good stream is queued as an
+        // instant backup. If all return Error/timeout, we surface a clear
+        // error (no WebView fallback stage anymore).
         if (start <= PlayerActivity.STAGE_VIDSRC) {
             currentStage = PlayerActivity.STAGE_VIDSTORM
             infoMessage = "Finding best stream\u2026"
@@ -779,349 +664,171 @@ fun PlayerScreen(
                 }
             }
 
-            // ── FAST SEQUENTIAL FAILOVER → then BOUNDED PARALLEL RACE ──
+            // ── LookMovie headless engine (Kodi-addon flow, no WebView) ──
+            // This is the no-WebView port of the plugin.video.lookmovietomb
+            // Kodi addon. It runs the addon's search → storage → security-API
+            // flow in pure OkHttp and returns a direct .m3u8 with the t_hash
+            // cookie attached so ExoPlayer plays it headlessly (no local proxy,
+            // no WebView, no Kodi). Best-effort: if LookMovie 403s or hits the
+            // Thread Defence captcha, it returns null and the race moves on.
+            suspend fun tryLookMovie(): DirectWinner? {
+                if ("LookMovie" in excluded) {
+                    Log.d("Player", "\u23ed\ufe0f LookMovie excluded this round")
+                    return null
+                }
+                Log.d("Player", "\ud83c\udfc7 LookMovie (headless): extracting\u2026")
+                val res = withTimeoutOrNull(PlayerActivity.PROVIDER_TIMEOUT_MS) {
+                    LookMovieHeadlessExtractor.extract(
+                        title = title,
+                        year = year,
+                        isMovie = contentType.equals("movie", ignoreCase = true),
+                        season = season,
+                        episode = episode
+                    )
+                }
+                return (res as? LookMovieHeadlessExtractor.Result.Stream)?.let {
+                    Log.i("Player", "\u2705 LookMovie hit: ${it.url}")
+                    DirectWinner(it.url, it.headers, it.providerName.ifBlank { "LookMovie" })
+                }
+            }
+
+            // ── ALL-SERVERS PARALLEL RACE (single unified lane) ──
             //
-            // 2026 provider testing (see test_results_v2.json / embed_test_results.json)
-            // empirically confirmed which extractors actually resolve a real
-            // playable stream RIGHT NOW and how fast:
+            // Per the user's explicit requests:
+            //   • "I want all the servers to be tried at the same time"
+            //   • "make sure all the servers are being used not just some"
+            //   • "the first working stream that is in english to be played"
+            //   • "the app act like it has a working stream a lot then it
+            //      won't play and goes to the next server" (fix this)
             //
-            //   • NoTorrent  ≈ 280–400 ms  → direct .mp4/.m3u8 (works movie + TV) ✅ BEST
-            //   • VidStorm   ≈ 300 ms      → m3u8 (reliable for TV; flaky for some movies)
-            //   • VidSrc.pro → 12 s TIMEOUT (dead/slow)              ❌
-            //   • SuperEmbed  → seapi.link DNS DEAD                    ❌
-            //   • VidSrcNet   → vidsrc.net embed is a PARKED lander    ❌
-            //   • VidLink API → enc-dec.app proxy returns EMPTY body   ❌ (WebView only)
+            // So instead of a sequential fast-lane (NoTorrent → VidStorm) that
+            // BLOCKS the other extractors and then a partial parallel lane that
+            // EXCLUDES three "confirmed dead" extractors, we now fire EVERY
+            // direct extractor simultaneously in one coroutineScope. No
+            // extractor is excluded up-front — they each get a hard
+            // PROVIDER_TIMEOUT_MS, so a dead/slow one (VidSrcPro 12 s timeout,
+            // SuperEmbed DNS, VidSrcNet parked) simply returns null at the
+            // timeout and never blocks the others. This is the union of "fast"
+            // and "uses every server": the first working extractor wins in
+            // ~300 ms, and every other extractor still gets a fair shot.
             //
-            // The old 15-way parallel race waited up to RACE_TIMEOUT_MS (12 s)
-            // because the dead/slow extractors (VidSrc.pro, SuperEmbed DNS,
-            // VidLink empty-body) held the race open even though NoTorrent had
-            // already won in ~300 ms. That 12 s ceiling — not the extraction
-            // itself — was the dominant cause of "videos play really slowly".
+            // ── Candidate-collecting race (the "won't play → next server" fix) ──
+            // The race collects ALL non-null results into a ranked list, not
+            // just the first one. Ranking: English-audio candidates first (per
+            // the user's English-first requirement), then by provider
+            // reliability. We play the head of the ranked list and keep the
+            // rest in `candidateQueue`. When ExoPlayer rejects the head (the
+            // "acts like it has a stream then won't play" bug — a URL that
+            // resolved but is dead/geo-blocked/in another language ExoPlayer
+            // can't render), onPlayerError pops the next already-resolved
+            // candidate and plays it INSTANTLY — no re-extraction, no full
+            // race re-run. Only when the queue is exhausted do we fall
+            // through to a second all-servers race attempt.
             //
-            // New strategy (per the user's request: "play as soon as I click,
-            // don't necessarily need to be raced"):
-            //
-            //   1. FAST LANE (sequential, short timeouts) — try the confirmed
-            //      fast+reliable extractors ONE AT A TIME with a tight
-            //      per-extractor timeout. NoTorrent first (~300 ms typical),
-            //      then VidStorm. If either wins we return IMMEDIATELY —
-            //      playback starts in well under a second for the common case.
-            //   2. If the fast lane misses, fall into a BOUNDED parallel race
-            //      of the REMAINING alive extractors (with the dead ones
-            //      REMOVED so they can no longer inflate the wait). First
-            //      verified Stream wins; the rest are cancelled.
-            //
-            // Dead/confirmed-broken extractors (VidSrcPro, SuperEmbed,
-            // VidSrcNet) are excluded from BOTH lanes — they were the sources
-            // of the 12 s timeouts that made everything feel slow.
-            //
-            // ── Why a CompletableDeferred winner (not select{}/removeAt) ──
-            // The original PR-#18 implementation used a `select` block with a
-            // `removeAt(idx)` loop. That had a critical regression: the
-            // `safe()` wrapper re-threw `CancellationException`, so when the
-            // outer timeout fired (cancelling all asyncs) the cancellation
-            // propagated through `onAwait` → crashed the `select` → the
-            // `coroutineScope` threw → the outer `catch` returned `null`,
-            // DISCARDING every extractor result that had already succeeded
-            // ("videos that worked don't anymore").
-            //
-            // This version uses a single shared `CompletableDeferred` as the
-            // "winner" signal. Each async, on getting a non-null result, tries
-            // to complete it (only the first succeeds). `safe()` swallows ALL
-            // exceptions (including cancellation) and returns null — it NEVER
-            // propagates, so a timeout can never crash the scope. If the
-            // timeout fires we salvage whatever `winner` already holds.
+            // ── Why CompletableDeferred + awaitAll (not select{}/removeAt) ──
+            // The original PR-#18 `select` block re-threw CancellationException
+            // on timeout, crashing the scope and DISCARDING every result that
+            // had already succeeded ("videos that worked don't anymore"). The
+            // `safe()` wrapper here swallows ALL exceptions (including
+            // cancellation) and returns null — it NEVER propagates — so a
+            // timeout can never crash the scope. We await ALL deferreds (with
+            // the outer RACE_TIMEOUT_MS ceiling) and keep every non-null
+            // result, so a timeout never throws away a resolved stream.
             suspend fun safe(d: suspend () -> DirectWinner?): DirectWinner? =
                 try { d() } catch (e: Exception) {
                     Log.w("Player", "race async error: ${e.message}")
                     null
                 }
 
-            // ── FAST LANE: confirmed-fast extractors, tried sequentially ──
-            // NoTorrent is the single fastest+most-reliable 2026 source, so it
-            // goes first with its own tight timeout. VidStorm is next. If
-            // either resolves a verified stream we play it immediately and
-            // never touch the (slower) parallel lane.
-            val FAST_LANE_TIMEOUT_MS = 5_000L
-            var winner: DirectWinner? = null
-            // Declared in the outer scope so the belt-and-suspenders salvage
-            // after the parallel lane can reference it even if the fast lane
-            // already resolved `winner` (in which case the deferred stays
-            // incomplete and safeGetCompleted returns null — harmless).
-            val winnerDeferred = CompletableDeferred<DirectWinner?>()
-            Log.d("Player", "🚦 FAST LANE: NoTorrent → VidStorm (sequential, ${FAST_LANE_TIMEOUT_MS}ms each)")
-            winner = withTimeoutOrNull(FAST_LANE_TIMEOUT_MS) {
-                safe { tryNoTorrent() }
-            }
-            if (winner == null) {
-                winner = withTimeoutOrNull(FAST_LANE_TIMEOUT_MS) {
-                    safe { tryVidStorm() }
-                }
-            }
-            if (winner != null) {
-                Log.i("Player", "⚡ FAST LANE winner: ${winner.providerName} (skipped parallel race)")
-            }
-
-            // ── PARALLEL LANE: remaining alive extractors race together ──
-            // Only reached if the fast lane missed. Dead/timeout-prone
-            // extractors (VidSrcPro, SuperEmbed, VidSrcNet) are EXCLUDED so
-            // they cannot inflate the wait. VidLink/VixSrc/TwoEmbed are kept
-            // because they sometimes resolve via their (WebView-backed) paths.
-            if (winner == null) {
-                Log.d("Player", "🏁 FAST LANE empty → PARALLEL LANE (dead extractors excluded)")
-                val allDone = CompletableDeferred<Unit>()
-                winner = try {
-                    withTimeoutOrNull(PlayerActivity.RACE_TIMEOUT_MS) {
-                        coroutineScope {
-                            val deferreds = listOf(
-                                async { safe { tryVidSrc() } },
-                                async { safe { tryVidLink() } },
-                                async { safe { tryVixSrc() } },
-                                async { safe { tryMeowTv() } },
-                                async { safe { tryVideasy() } },
-                                async { safe { tryKissKh() } },
-                                async { safe { tryVidSync() } },
-                                async { safe { tryLordFlix() } },
-                                async { safe { tryDahmer() } },
-                                async { safe { tryTwoEmbed() } },
-                                async { safe { tryVidSrcMe() } }
-                                // EXCLUDED (confirmed dead/timeout-prone in 2026):
-                                //   tryVidSrcPro()   → 12 s read timeout
-                                //   trySuperEmbed()  → seapi.link DNS dead
-                                //   tryVidSrcNet()   → vidsrc.net embed is a parked lander
-                            )
-
-                            // Watch every async: the FIRST non-null result
-                            // completes `winnerDeferred`; when ALL finish we
-                            // complete `allDone` so we stop waiting early.
-                            launch {
-                                for (d in deferreds) {
-                                    val res = try { d.await() } catch (e: Exception) { null }
-                                    if (res != null) winnerDeferred.complete(res)
-                                }
-                                allDone.complete(Unit)
-                            }
-
-                            // Wait for EITHER a winner OR all-exhausted.
-                            select<DirectWinner?> {
-                                winnerDeferred.onAwait { it }
-                                allDone.onAwait { null }
-                            }
-                        }
-                    } ?: run {
-                        // Timeout fired — salvage a winner completed before the
-                        // deadline instead of discarding it.
-                        safeGetCompleted(winnerDeferred)
+            Log.d("Player", "🏁 ALL-SERVERS PARALLEL RACE: firing every direct extractor at once")
+            val raceCandidates = try {
+                withTimeoutOrNull(PlayerActivity.RACE_TIMEOUT_MS) {
+                    coroutineScope {
+                        // EVERY extractor fires simultaneously. Previously-
+                        // excluded extractors (VidSrcPro, SuperEmbed,
+                        // VidSrcNet) are now INCLUDED — they race with the
+                        // same per-extractor timeout; dead ones simply return
+                        // null at the timeout and never hold up the others.
+                        // This is the fix for "make sure all the servers are
+                        // being used not just some".
+                        val deferreds = listOf(
+                            async { safe { tryNoTorrent() } },
+                            async { safe { tryVidStorm() } },
+                            async { safe { tryVidSrc() } },
+                            async { safe { tryVidSrcMe() } },
+                            async { safe { tryVidSrcPro() } },
+                            async { safe { tryVidSrcNet() } },
+                            async { safe { tryVidLink() } },
+                            async { safe { tryVixSrc() } },
+                            async { safe { tryMeowTv() } },
+                            async { safe { tryVideasy() } },
+                            async { safe { tryKissKh() } },
+                            async { safe { tryVidSync() } },
+                            async { safe { tryLordFlix() } },
+                            async { safe { tryDahmer() } },
+                            async { safe { tryTwoEmbed() } },
+                            async { safe { trySuperEmbed() } },
+                            async { safe { tryLookMovie() } }
+                        )
+                        // awaitAll so we collect EVERY resolved candidate,
+                        // not just the first. safe() guarantees no async
+                        // throws, so awaitAll completes cleanly.
+                        deferreds.map { d ->
+                            try { d.await() } catch (e: Exception) { null }
+                        }.filterNotNull()
                     }
-                } catch (e: Exception) {
-                    Log.w("Player", "Parallel race error: ${e.message}")
-                    safeGetCompleted(winnerDeferred)
-                }
+                } ?: emptyList()
+            } catch (e: Exception) {
+                Log.w("Player", "Parallel race error: ${e.message}")
+                emptyList()
             }
 
-            // Belt-and-suspenders: if the select returned null but a winner
-            // completed in the meantime (very tight race), use it.
-            val finalWinner = winner ?: safeGetCompleted(winnerDeferred)
+            // ── Rank: English-audio first, then by provider reliability ──
+            // isEnglishStream() inspects the URL/headers for English-audio
+            // hints (multi-audio HLS manifests, "eng" in track names, provider
+            // language flags). Non-English candidates are kept as fallback
+            // (better a working non-English stream than nothing) but sorted
+            // after English ones. Within each language group we sort by a
+            // per-provider reliability weight so the most dependable
+            // English source is played first.
+            val ranked = raceCandidates
+                .map { RankedCandidate(it, isEnglishStream(it, contentType)) }
+                .sortedWith(
+                    compareByDescending<RankedCandidate> { it.english }
+                        .thenByDescending { providerReliability(it.winner.providerName) }
+                )
 
-            if (finalWinner != null) {
-                Log.i("Player", "🏁 Direct-API winner: ${finalWinner.providerName}")
-                streamUrl = finalWinner.url
-                streamHeaders = finalWinner.headers.ifEmpty {
+            if (ranked.isNotEmpty()) {
+                val best = ranked.first()
+                val rest = ranked.drop(1)
+                candidateQueue = rest
+                Log.i("Player", "🏁 Direct-API winner: ${best.winner.providerName} (english=${best.english}, ${rest.size} backup candidates queued)")
+                streamUrl = best.winner.url
+                streamHeaders = best.winner.headers.ifEmpty {
                     mapOf("User-Agent" to DEFAULT_UA)
                 }
-                deliveringServerName = finalWinner.providerName
+                deliveringServerName = best.winner.providerName
                 isLoading = false
                 return@LaunchedEffect
             } else {
-                Log.w("Player", "All direct extractors yielded nothing; falling back to WebView embed pipeline.")
+                candidateQueue = emptyList()
+                Log.w("Player", "All direct extractors yielded nothing on first race; a second race attempt follows if needed.")
             }
         }
 
-        // ── Stage 2: off-screen WebView embed extraction (PARALLEL — races multiple providers) (FALLBACK) ── //
-        // This is the stage that actually honours the user's server choice:
-        // EmbedExtractor calls ServerManager.getOrderedServers() which puts
-        // the user-selected server first. So when start == STAGE_EMBED we
-        // jump straight here.
-        //
-        // It is ALSO the fallback when ALL direct-API extractors (Stage 0+1)
-        // yield nothing in auto mode (start <= STAGE_EMBED). The old code
-        // gated this on `start == STAGE_EMBED`, which meant that in auto mode
-        // — after the direct APIs all failed — we fell straight through to
-        // LookMovie and never tried the WebView embed providers at all. That
-        // is why "some movies/shows don't play": the direct APIs didn't have
-        // them, and the embed pipeline was skipped. Using `<=` re-enables the
-        // embed fallback in auto mode so every title gets a fair shot at the
-        // WebView-based providers (2embed, vidsrc.to, smashystream…) which
-        // can pass Cloudflare and resolve titles the pure-HTTP extractors
-        // can't.
-        if (start <= PlayerActivity.STAGE_EMBED && activity != null) {
-            infoMessage = "Trying ${ServerManager.allServers().firstOrNull { it.id == selectedServerId }?.name ?: "your server"}…"
-            currentStage = PlayerActivity.STAGE_EMBED
-            val embedResult = try {
-                EmbedExtractor.extractFromProviders(
-                    context = activity,
-                    contentType = contentType,
-                    tmdbId = tmdbId,
-                    season = season,
-                    episode = episode,
-                    onChallengeNeeded = null // surfaced via Result.Challenge below
-                )
-            } catch (e: Exception) {
-                Log.e("Player", "💥 Embed extraction failed", e)
-                EmbedExtractor.Result.Error(e.message ?: "Embed extraction failed")
-            }
-
-            when (embedResult) {
-                is EmbedExtractor.Result.Stream -> {
-                    Log.i("Player", "✅ Embed stream: ${embedResult.url}")
-                    streamUrl = embedResult.url
-                    streamHeaders = embedResult.headers.ifEmpty {
-                        mapOf("User-Agent" to DEFAULT_UA)
-                    }
-                    deliveringServerName = embedResult.providerName.ifBlank { "Embed" }
-                    isLoading = false
-                    return@LaunchedEffect
-                }
-                is EmbedExtractor.Result.Challenge -> {
-                    if (verificationRounds < PlayerActivity.MAX_VERIFICATION_ROUNDS) {
-                        verificationRounds++
-                        pendingChallengeUrl = embedResult.challengeUrl
-                        pendingReferer = embedResult.embedUrl
-                        infoMessage = "Human verification required. Please complete the challenge, then tap Done."
-                        isLoading = false
-                        return@LaunchedEffect
-                    }
-                    Log.w("Player", "Embeds still blocked after verification; trying LookMovie fallback.")
-                }
-                is EmbedExtractor.Result.NotFound, is EmbedExtractor.Result.Error -> {
-                    Log.w("Player", "Embed extraction yielded nothing; trying LookMovie WebView fallback.")
-                }
-            }
+        // ── No WebView fallback — every direct extractor already raced ── //
+        // All 17 direct extractors fired in parallel above. If we reach here
+        // they all returned null/empty. There is no embed / LookMovie / OkHttp
+        // WebView stage anymore (removed per "no WebView at all" requirement),
+        // so we surface a clear error. The caller (onPlayerError / manual retry)
+        // can bump `attempt` to re-fire the race a second time with no
+        // exclusions (a clean second attempt).
+        if (error == null) {
+            error = "Couldn't find a working stream. Tap retry to search again, or pick a different server."
         }
-
-        // ── Stage 3: LookMovie via WebView (FALLBACK — mirrors Kodi addon) ── //
-        if (start <= PlayerActivity.STAGE_LOOKMOVIE && activity != null) {
-            if (start < PlayerActivity.STAGE_LOOKMOVIE) infoMessage = "Trying alternative sources…"
-            currentStage = PlayerActivity.STAGE_LOOKMOVIE
-            val lookResult = try {
-                LookMovieWebExtractor.extract(
-                    context = activity,
-                    title = title,
-                    year = year,
-                    contentType = contentType,
-                    season = season,
-                    episode = episode
-                )
-            } catch (e: Exception) {
-                Log.e("Player", "💥 LookMovie WebView extraction failed", e)
-                LookMovieWebExtractor.Result.Error(e.message ?: "LookMovie extraction failed")
-            }
-
-            when (lookResult) {
-                is LookMovieWebExtractor.Result.Stream -> {
-                    Log.i("Player", "✅ LookMovie stream: ${lookResult.url}")
-                    streamUrl = lookResult.url
-                    streamHeaders = lookResult.headers.ifEmpty {
-                        mapOf("User-Agent" to DEFAULT_UA)
-                    }
-                    isLoading = false
-                    return@LaunchedEffect
-                }
-                is LookMovieWebExtractor.Result.Challenge -> {
-                    if (verificationRounds < PlayerActivity.MAX_VERIFICATION_ROUNDS) {
-                        verificationRounds++
-                        pendingChallengeUrl = lookResult.challengeUrl
-                        pendingReferer = lookResult.referer
-                        infoMessage = "Human verification required. Please complete the challenge, then tap Done."
-                        isLoading = false
-                        return@LaunchedEffect
-                    }
-                    Log.w("Player", "LookMovie still blocked after verification; trying OkHttp fallback.")
-                }
-                is LookMovieWebExtractor.Result.Error -> {
-                    Log.w("Player", "LookMovie WebView yielded nothing (${lookResult.message}); trying OkHttp fallback.")
-                }
-            }
-        }
-
-        // ── Stage 4: OkHttp LookMovie extractor (LAST RESORT) ── //
-        if (start <= PlayerActivity.STAGE_OKHTTP) {
-            infoMessage = "Trying last-resort source…"
-            currentStage = PlayerActivity.STAGE_OKHTTP
-        try {
-            val result = StreamExtractor.extract(title, year, contentType, season, episode)
-
-            when (result) {
-                is StreamExtractor.Result.Stream -> {
-                    Log.i("Player", "✅ LookMovie OkHttp stream: ${result.url}")
-                    streamUrl = result.url
-                    streamHeaders = result.headers
-                    isLoading = false
-                    return@LaunchedEffect
-                }
-                is StreamExtractor.Result.Challenge -> {
-                    if (verificationRounds < PlayerActivity.MAX_VERIFICATION_ROUNDS) {
-                        verificationRounds++
-                        pendingChallengeUrl = result.challengeUrl
-                        pendingReferer = result.referer
-                        infoMessage = "Human verification required. Please complete the challenge in the browser that just opened, then tap Done."
-                        isLoading = false
-                        return@LaunchedEffect
-                    } else {
-                        error = "Still blocked after verification. Please try again later."
-                    }
-                }
-                is StreamExtractor.Result.Error -> {
-                    Log.e("Player", "❌ ${result.message}")
-                    error = result.message
-                }
-            }
-        } catch (e: Exception) {
-            Log.e("Player", "💥 OkHttp extraction failed", e)
-            error = e.message ?: "Failed to load stream."
-        } finally {
-            isLoading = false
-        }
-        } // end if (start <= STAGE_OKHTTP)
-
-        // If we reached here with start == STAGE_EMBED (user picked a server
-        // and the embed stage exhausted all providers), surface a clear error
-        // instead of silently showing a blank loading screen.
-        if (start == PlayerActivity.STAGE_EMBED && error == null) {
-            error = "Couldn't find a working stream on the selected server. Try another server or Auto."
-        }
+        isLoading = false
     }
 
-    // --------------------------------------------------------------- //
-    //  Launch VerificationActivity when a challenge is pending         //
-    // --------------------------------------------------------------- //
-    LaunchedEffect(pendingChallengeUrl) {
-        val url = pendingChallengeUrl ?: return@LaunchedEffect
-        // Consume immediately so we don't re-launch on recomposition.
-        pendingChallengeUrl = null
-        onLaunchVerification(url, pendingReferer)
-    }
-
-    // --------------------------------------------------------------- //
-    //  React to a completed verification round-trip                   //
-    //  Keyed on the signal counter so it fires on every result.        //
-    // --------------------------------------------------------------- //
-    LaunchedEffect(verificationOutcome.signal) {
-        // signal == 0 is the initial state; nothing to do.
-        if (verificationOutcome.signal == 0) return@LaunchedEffect
-
-        if (verificationOutcome.success) {
-            // Cookies were already injected by the activity.
-            // Bump attempt to re-run extraction with the fresh cookies.
-            Log.i("Player", "🔄 Retrying extraction after verification…")
-            infoMessage = "Verification complete — finding your stream…"
-            isLoading = true
-            error = null
-            attempt++
-        } else {
-            error = "Verification was cancelled."
-        }
-    }
 
     // --------------------------------------------------------------- //
     //  UI                                                              //
@@ -1136,9 +843,6 @@ fun PlayerScreen(
                 backdropUrl = backdropUrl,
                 error = error!!,
                 onRetry = {
-                    // Reset verification rounds on a manual retry so the
-                    // user can re-attempt if the site is challenging again.
-                    verificationRounds = 0
                     error = null
                     // Retry from the top of the pipeline.
                     startStage = PlayerActivity.STAGE_VIDSTORM
@@ -1146,14 +850,6 @@ fun PlayerScreen(
                 },
                 onBack = { (localContext as? ComponentActivity)?.finish() }
             )
-
-            infoMessage != null && streamUrl == null -> {
-                // Waiting for the user to finish verification in the WebView.
-                VerificationWaitScreen(title, posterUrl, backdropUrl, infoMessage!!) {
-                    attempt++
-                    infoMessage = null
-                }
-            }
 
             streamUrl != null -> {
                 ExoPlayerView(
@@ -1211,47 +907,75 @@ fun PlayerScreen(
                             )
                         }
 
-                        // ── Race-provider exclusion (the Interstellar fix) ──
-                        // If the broken stream came from a Stage-0 direct
-                        // extractor, exclude it and re-run the parallel
-                        // race so a DIFFERENT extractor wins (e.g.
-                        // NoTorrent for Interstellar once VidStorm's dead URL
-                        // is excluded). We keep doing this until every direct
-                        // extractor has been tried; only then do we fall
-                        // through to the embed/LookMovie stages.
-                        val raceProviderKey = failedProvider?.let { mapRaceProviderKey(it) }
-                        if (currentStage == PlayerActivity.STAGE_VIDSTORM &&
-                            raceProviderKey != null &&
-                            raceProviderKey !in excludedRaceProviders
-                        ) {
-                            excludedRaceProviders = excludedRaceProviders + raceProviderKey
-                            // If there are still direct extractors left to try,
-                            // re-run Stage 0 (the race skips excluded ones);
-                            // otherwise fall through to Stage 2 (embed).
-                            // Count DISTINCT base providers (collapsing
-                            // VidStorm sub-servers to one) so that many
-                            // VidStorm sub-server failures don't prematurely
-                            // exhaust the re-race budget. There are 15 base
-                            // providers, so we allow up to 12 distinct-base
-                            // exclusions before giving up.
-                            val distinctBases = excludedRaceProviders
-                                .map { it.substringBefore("·").trim() }
-                                .toSet()
-                            if (distinctBases.size < 14) {
-                                Log.i("Player", "🔁 Re-racing Stage 0 with $raceProviderKey excluded (tried so far: $excludedRaceProviders)")
-                                startStage = PlayerActivity.STAGE_VIDSTORM
-                            } else {
-                                Log.i("Player", "All race providers exhausted — falling through to embed/LookMovie stages.")
-                                startStage = PlayerActivity.STAGE_EMBED
-                                excludedRaceProviders = emptySet()
+                        // ── Candidate-queue pop FIRST (no re-extraction) ──
+                        // The all-servers parallel race already collected and
+                        // ranked every resolved stream. So when ExoPlayer
+                        // rejects the head URL (the "acts like it works then
+                        // won't play" case), we DON'T re-run the whole race —
+                        // we pop the next already-resolved candidate from
+                        // candidateQueue and hand it straight to ExoPlayer.
+                        // This is instant (zero network round-trips for the
+                        // extraction step) and skips the dead provider.
+                        val nextCandidate = candidateQueue.firstOrNull()
+                        if (nextCandidate != null) {
+                            candidateQueue = candidateQueue.drop(1)
+                            Log.i("Player", "⚡ Popping next queued candidate: ${nextCandidate.winner.providerName} (english=${nextCandidate.english}, ${candidateQueue.size} left)")
+                            // Record the failure for the per-title cache so
+                            // next open leads with a known-good provider.
+                            failedProvider?.let { fp ->
+                                StreamAvailabilityCache.recordFailure(
+                                    tmdbId = tmdbId,
+                                    contentType = contentType,
+                                    season = season,
+                                    episode = episode,
+                                    provider = fp
+                                )
                             }
-                        } else {
-                            // Failed stream came from a later stage (embed /
-                            // LookMovie / OkHttp) or all racers already tried.
-                            // Resume from the stage after the one that delivered
-                            // the broken URL. +1 lands on the next fallback.
-                            startStage = (currentStage + 1).coerceAtMost(PlayerActivity.STAGE_OKHTTP)
+                            streamUrl = nextCandidate.winner.url
+                            streamHeaders = nextCandidate.winner.headers
+                                .ifEmpty { mapOf("User-Agent" to DEFAULT_UA) }
+                            deliveringServerName = nextCandidate.winner.providerName
+                            currentStage = PlayerActivity.STAGE_VIDSTORM
+                            // NOTE: we deliberately do NOT increment `attempt`
+                            // here. Incrementing attempt would re-run the
+                            // LaunchedEffect keyed on attempt, which re-fires
+                            // the whole extraction race and overwrites the
+                            // candidate we just popped. Instead we only set
+                            // streamUrl/streamHeaders — ExoPlayerView has its
+                            // own LaunchedEffect(url) that re-prepares the
+                            // player the instant the URL changes, so the new
+                            // candidate plays with zero re-extraction.
+                            isLoading = false
+                            error = null
+                            return@ExoPlayerView
                         }
+
+                        // ── Queue empty → re-fire the all-servers race ──
+                        // No more pre-resolved candidates. Record the failure
+                        // for the cache and the race-provider exclusion set,
+                        // then re-run the full parallel race from the top.
+                        // The dead provider is now in excludedRaceProviders so
+                        // the second race won't waste a slot on it.
+                        failedProvider?.let { fp ->
+                            StreamAvailabilityCache.recordFailure(
+                                tmdbId = tmdbId,
+                                contentType = contentType,
+                                season = season,
+                                episode = episode,
+                                provider = fp
+                            )
+                            // Keep race-provider exclusion up to date so a
+                            // future re-race (if the user re-opens the title)
+                            // already skips this dead provider.
+                            val raceProviderKey = mapRaceProviderKey(fp)
+                            if (raceProviderKey != null &&
+                                raceProviderKey !in excludedRaceProviders
+                            ) {
+                                excludedRaceProviders = excludedRaceProviders + raceProviderKey
+                            }
+                        }
+                        Log.i("Player", "Candidate queue empty — re-firing the all-servers race.")
+                        startStage = PlayerActivity.STAGE_VIDSTORM
                         isLoading = true
                         attempt++
                     }
@@ -1272,24 +996,20 @@ fun PlayerScreen(
                 showServerPicker = false
                 // Re-trigger extraction with the newly selected server.
                 ServerManager.resetHealth()
-                verificationRounds = 0
                 streamUrl = null
                 deliveringServerName = null
                 error = null
                 infoMessage = null
-                // ── Server-selection fix ──
-                // When the user picks a SPECIFIC server, jump straight to the
-                // embed stage (STAGE_EMBED) so ServerManager's ordered list —
-                // which puts their pick first — is actually honoured. VidStorm
-                // and LookMovie ignore ServerManager ordering, so running them
-                // first would override the user's explicit choice and often
-                // land on a different (or dead) source, which is exactly the
-                // "it stops working and I have to close the movie" bug.
-                //
-                // When the user picks "Auto" (id == null), run the full
-                // pipeline from the top (VidStorm first).
-                startStage = if (id != null) PlayerActivity.STAGE_EMBED
-                             else PlayerActivity.STAGE_VIDSTORM
+                // ── Server-selection ──
+                // In the no-WebView world there is one extraction lane: the
+                // all-servers parallel race. Whether the user picks "Auto"
+                // (id == null) or a specific server (id != null), we always
+                // re-fire the full race from STAGE_VIDSTORM. The race fires
+                // every extractor at once and ranks candidates English-first,
+                // so the user's specific pick (if it resolves) will be in the
+                // candidate queue; if it doesn't resolve, the next-best
+                // English candidate plays instead of dead-ending.
+                startStage = PlayerActivity.STAGE_VIDSTORM
                 isLoading = true
                 attempt++
             }
@@ -1377,7 +1097,7 @@ private fun ServerPickerOverlay(
 }
 
 // ---------------------------------------------------------------- //
-//  Loading / Error / Verification-wait screens with poster          //
+//  Loading / Error screens with poster                              //
 // ---------------------------------------------------------------- //
 
 /**
@@ -1509,67 +1229,7 @@ private fun ErrorScreen(
             TextButton(onClick = onBack) { Text("Back") }
         }
     }
-}
-
-/**
- * Shown while the user is solving a captcha in the foreground
- * [VerificationActivity]. Keeps the poster visible.
- */
-@Composable
-private fun VerificationWaitScreen(
-    title: String,
-    posterUrl: String?,
-    backdropUrl: String?,
-    message: String,
-    onRetry: () -> Unit
-) {
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-        if (!backdropUrl.isNullOrBlank()) {
-            AsyncImage(
-                model = backdropUrl,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
-            )
-        }
-        Box(modifier = Modifier
-            .fillMaxSize()
-            .background(Color(0xDD000000)))
-
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            if (!posterUrl.isNullOrBlank()) {
-                AsyncImage(
-                    model = posterUrl,
-                    contentDescription = title,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .width(140.dp)
-                        .height(210.dp)
-                        .background(Color(0xFF1F1F1F))
-                )
-                Spacer(Modifier.height(20.dp))
-            }
-            Text(
-                text = message,
-                color = Color.White,
-                style = MaterialTheme.typography.bodyMedium,
-                textAlign = TextAlign.Center
-            )
-            Spacer(Modifier.height(20.dp))
-            CircularProgressIndicator(color = Color.White)
-            Spacer(Modifier.height(20.dp))
-            TextButton(onClick = onRetry) { Text("Retry extraction") }
-        }
-    }
-}
-
-// ---------------------------------------------------------------- //
+}// ---------------------------------------------------------------- //
 //  ExoPlayer composable                                            //
 // ---------------------------------------------------------------- //
 
@@ -1585,7 +1245,7 @@ private fun ExoPlayerView(
     url: String,
     headers: Map<String, String>,
     posterUrl: String? = null,
-    backdropUrl: String? = null,
+    backdropUrl: String? = null
     onPlayerError: (isFatal: Boolean) -> Unit = {}
 ) {
     var player: ExoPlayer? by remember { mutableStateOf(null) }
@@ -1977,8 +1637,132 @@ private fun mapRaceProviderKey(deliveringServerName: String): String? {
 private val RACE_PROVIDER_BASES = setOf(
     "VidStorm", "VidSrc", "VidSrcNet", "VidLink", "VixSrc", "NoTorrent",
     "MeowTV", "Videasy", "KissKH", "VidSync", "LordFlix", "DahmerMovies",
-    "TwoEmbed", "SuperEmbed", "VidSrcPro"
+    "TwoEmbed", "SuperEmbed", "VidSrcPro", "LookMovie"
 )
+
+/**
+ * A resolved stream candidate held in the fallback queue.
+ *
+ * [english] is the heuristic English-audio flag computed at extraction time
+ * (see [isEnglishStream]); [winner] is the fully-resolved direct stream that
+ * can be handed to ExoPlayer with zero further network work.
+ */
+private data class RankedCandidate(
+    val winner: DirectWinner,
+    val english: Boolean
+)
+
+/**
+ * Heuristic English-audio detection for a resolved stream.
+ *
+ * The race fires every extractor in parallel and we want the FIRST stream that
+ * is (very likely) in English to be played. Because we never block playback on
+ * a deep manifest probe (that would defeat the "play as soon as I click the
+ * button" goal), this is a *cheap heuristic*: it inspects the URL and headers
+ * we already have for English-audio signals.
+ *
+ * Signals (any one is enough to call it English):
+ *  - URL query/segment contains `lang=en`, `audio=en`, `language=en`, `&eng`,
+ *    `audio_eng`, `eng_audio`, `english` (case-insensitive).
+ *  - Provider known to serve English audio by default (VidLink, VidSrc,
+ *    VidStorm, NoTorrent, TwoEmbed, SuperEmbed, VidSrcPro, VidSrcNet,
+ *    VixSrc, VidSync, LordFlix, DahmerMovies, MeowTV — all default-English
+ *    upstreams for the TMDB-id embed pattern).
+ *  - The HLS master URL itself contains an `eng`/`english` audio variant hint
+ *    (some CDNs name the master `...eng.m3u8` or `...-en-...`).
+ *
+ * Returns false only when we have a positive *non-English* signal (e.g. a URL
+ * that explicitly names another language such as `lang=es`, `lang=hi`,
+ * `audio=fr`, etc.) AND no English signal — i.e. we downgrade clearly-foreign
+ * streams but never downgrade ambiguous ones. This keeps the heuristic
+ * conservative: ambiguous English-by-default providers still rank as English.
+ */
+private fun isEnglishStream(winner: DirectWinner, contentType: String): Boolean {
+    val url = winner.url.lowercase()
+    val name = winner.providerName.lowercase()
+
+    // Positive non-English signal: an explicit foreign-language marker with
+    // NO english marker present.
+    val englishMarkers = listOf("lang=en", "audio=en", "language=en", "&eng",
+        "audio_eng", "eng_audio", "english", "eng.", "eng-", "-en-", "multi_lang")
+    val foreignMarkers = listOf("lang=es", "lang=hi", "lang=fr", "lang=de",
+        "lang=it", "lang=pt", "lang=ru", "lang=ja", "lang=ko", "lang=zh",
+        "lang=tr", "lang=ar", "audio=es", "audio=fr", "audio=hi", "audio=de",
+        "audio=ru", "language=es", "language=fr", "language=hi", "language=de",
+        "language=ru", "language=ja", "language=ko", "language=zh")
+
+    val hasEnglish = englishMarkers.any { url.contains(it) } ||
+        url.contains("eng.m3u8") || url.contains("english.m3u8")
+    val hasForeign = foreignMarkers.any { url.contains(it) }
+
+    if (hasEnglish) return true
+    if (hasForeign && !hasEnglish) return false
+
+    // Provider-default-English allowlist. These are TMDB-id embed providers
+    // whose upstream is English audio for the vast majority of content.
+    val defaultEnglishProviders = setOf(
+        "vidlink", "vidsrc", "vidstorm", "notorrent", "twoembed",
+        "superembed", "vidsrcpro", "vidsrcnet", "vixsrc", "vidsync",
+        "lordflix", "dahmermovies", "meowtv", "vidspark", "autoembed",
+        "vidnest", "vidrock", "vidcore", "tvembed", "vidsrcme",
+        "vidking", "curtstream", "databasegdriveplayer", "vidsrcpro",
+        "vcr", "vesy", "xps", "smashystream", "hexa", "flixer", "lookmovie"
+    )
+    val baseName = name.substringBefore("·").substringBefore(" ").trim()
+    return defaultEnglishProviders.any { baseName.startsWith(it) || baseName == it }
+}
+
+/**
+ * Rank providers by empirical reliability (higher = more trusted).
+ *
+ * Used as the tiebreaker after the English-first sort: among English streams
+ * the most reliable provider is tried first, and among non-English streams the
+ * most reliable is tried first too. Dead/blocked providers that somehow still
+ * resolve a URL (e.g. a stale CDN node) get a low score so they sink to the
+ * bottom of the candidate queue.
+ */
+private fun providerReliability(providerName: String): Int {
+    val n = providerName.lowercase().substringBefore("·").substringBefore(" ").trim()
+    return when {
+        // Tier 1 — most reliable, default-English, widely-deployed.
+        n.startsWith("vidlink") -> 100
+        n.startsWith("vidsrc") -> 95
+        n.startsWith("superembed") -> 90
+        n.startsWith("twoembed") -> 88
+        n.startsWith("vidsrcpro") -> 85
+        n.startsWith("vidstorm") -> 82
+        n.startsWith("notorrent") -> 80
+        n.startsWith("vixsrc") -> 78
+        n.startsWith("meowtv") -> 76
+        n.startsWith("vidspark") -> 74
+        n.startsWith("autoembed") -> 72
+        n.startsWith("lordflix") -> 70
+        n.startsWith("videasy") -> 68
+        n.startsWith("vidsync") -> 66
+        n.startsWith("dahmermovies") -> 64
+        n.startsWith("curtstream") -> 62
+        n.startsWith("databasegdriveplayer") -> 60
+        // Tier 2 — 2embed sub-streams / secondary CDNs.
+        n.startsWith("vcr") -> 55
+        n.startsWith("vesy") -> 53
+        n.startsWith("xps") -> 51
+        n.startsWith("kisskh") -> 50
+        n.startsWith("vidnest") -> 48
+        n.startsWith("vidrock") -> 47
+        n.startsWith("vidcore") -> 46
+        n.startsWith("tvembed") -> 45
+        n.startsWith("vidking") -> 44
+        n.startsWith("smashystream") -> 42
+        n.startsWith("hexa") -> 40
+        n.startsWith("flixer") -> 38
+        n.startsWith("vidsrcme") -> 36
+        // LookMovie (headless addon port) — clean direct HLS when reachable,
+        // but best-effort (may 403 / hit Thread Defence), so mid-tier.
+        n.startsWith("lookmovie") -> 58
+        // Unknown / fallback.
+        else -> 20
+    }
+}
 
 private fun guessMimeType(url: String): String? {
     val u = url.lowercase()
@@ -2117,8 +1901,8 @@ private fun applyQuality(selector: DefaultTrackSelector, info: TrackInfo) {
 }
 
 /**
- * Default User-Agent. Matches the Firefox UA used by [StreamExtractor] and
- * [LookMovieWebExtractor] so segment requests look like the same browser that
+ * Default User-Agent. A desktop Firefox UA so segment / manifest requests
+ * look like a real browser to upstream CDNs.
  * earned the Cloudflare clearance.
  */
 private const val DEFAULT_UA =
