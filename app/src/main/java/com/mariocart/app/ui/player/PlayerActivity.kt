@@ -1296,7 +1296,7 @@ private fun ExoPlayerView(
     url: String,
     headers: Map<String, String>,
     posterUrl: String? = null,
-    backdropUrl: String? = null
+    backdropUrl: String? = null,
     onPlayerError: (isFatal: Boolean) -> Unit = {}
 ) {
     var player: ExoPlayer? by remember { mutableStateOf(null) }
