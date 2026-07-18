@@ -1,7 +1,28 @@
+import java.util.Properties
+import java.io.FileInputStream
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
 }
+
+// ──────────────────────────────────────────────────────────────────────
+// Release signing setup.
+//
+// In GitHub Actions the keystore + passwords are injected from repository
+// secrets (KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD).
+// Locally, if a keystore.properties file is present in the project root,
+// it is read instead. If neither is available we fall back to the debug
+// signing key so `assembleRelease` still works for ad-hoc local testing,
+// but CI ALWAYS signs with the real key.
+// ──────────────────────────────────────────────────────────────────────
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+val keystoreProperties = Properties()
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+}
+
+val hasEnvSigningKey = !System.getenv("KEYSTORE_FILE").isNullOrEmpty()
 
 android {
     namespace = "com.mariocart.app"
@@ -19,22 +40,6 @@ android {
         versionName = "1.3.0"
 
         buildConfigField("String", "TMDB_API_KEY", "\"a15c24c2a5c00487b179f5d4b53b72b0\"")
-    }
-
-    // ──────────────────────────────────────────────────────────────────────
-    // Release signing config.
-    //
-    // In GitHub Actions the keystore + passwords are injected from
-    // repository secrets (KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS,
-    // KEY_PASSWORD). Locally, if a keystore.properties file is present in
-    // the project root, it is read instead. If neither is available we
-    // fall back to the debug signing key so `assembleRelease` still works
-    // for ad-hoc local testing — but CI ALWAYS signs with the real key.
-    // ──────────────────────────────────────────────────────────────────────
-    val keystorePropertiesFile = rootProject.file("keystore.properties")
-    val keystoreProperties = java.util.Properties()
-    if (keystorePropertiesFile.exists()) {
-        keystoreProperties.load(java.io.FileInputStream(keystorePropertiesFile))
     }
 
     signingConfigs {
@@ -68,8 +73,7 @@ android {
             // Sign release builds with the stable key defined above.
             // If no key material is configured, Gradle falls back to the
             // debug signing config so local builds never hard-fail.
-            val storeFilePath = System.getenv("KEYSTORE_FILE")
-            if (!storeFilePath.isNullOrEmpty() || keystoreProperties.isNotEmpty()) {
+            if (hasEnvSigningKey || keystoreProperties.isNotEmpty()) {
                 signingConfig = signingConfigs.getByName("release")
             } else {
                 signingConfig = signingConfigs.getByName("debug")
