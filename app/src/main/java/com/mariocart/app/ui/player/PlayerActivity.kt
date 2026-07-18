@@ -36,6 +36,7 @@ import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import com.mariocart.app.data.cache.StreamAvailabilityCache
+import com.mariocart.app.data.engine.KodiEngine
 import com.mariocart.app.data.server.DahmerMoviesExtractor
 import com.mariocart.app.data.server.LordFlixExtractor
 import com.mariocart.app.data.server.MeowTvExtractor
@@ -144,6 +145,16 @@ class PlayerActivity : ComponentActivity() {
          * are excluded, the overall worst-case wait is max(6s, RACE_TIMEOUT).
          */
         const val PROVIDER_TIMEOUT_MS = 6_000L
+
+        /**
+         * Budget for the engine-first step: the time we're willing to wait
+         * for the background Kodi-like engine to hand us a pre-resolved
+         * LookMovie stream before falling back to the full parallel race.
+         * A cache hit returns in ~0 ms; a cold resolve gets this long. Kept
+         * short (4 s) so a slow LookMovie resolve never delays playback more
+         * than the race would have \u2014 the race then covers it.
+         */
+        const val ENGINE_FIRST_TIMEOUT_MS = 4_000L
 
         /**
          * Factory used by [com.mariocart.app.ui.MainActivity].
@@ -394,6 +405,55 @@ fun PlayerScreen(
             infoMessage = "Finding best stream\u2026"
 
             val excluded = excludedRaceProviders
+
+            // \u2500\u2500 ENGINE-FIRST: ask the background Kodi-like engine \u2500\u2500 //
+            // The KodiEngine runs the LookMovieTomb addon flow in the
+            // background (pure headless OkHttp, no WebView) and caches
+            // resolved streams. Before we fire the full 17-extractor race,
+            // ask the engine: if it already has a fresh, pre-resolved
+            // stream for this title (or resolves one within a short budget),
+            // play it INSTANTLY and skip the race entirely. This is the
+            // "Kodi-like engine running in the background" payoff \u2014 a hot
+            // title starts in ~0 ms (cache hit) instead of the race's
+            // 1\u20133 s. On a miss we fall through to the unchanged parallel
+            // race, which still includes tryLookMovie(), so there is zero
+            // regression: the engine is purely additive.
+            //
+            // We also kick a background pre-resolve here so the engine keeps
+            // working ahead for the next title while the race (if needed)
+            // runs.
+            if (start <= PlayerActivity.STAGE_VIDSRC && "LookMovie" !in excluded) {
+                runCatching {
+                    val engine = KodiEngine.get()
+                    val req = KodiEngine.ResolveRequest(
+                        title = title,
+                        year = year,
+                        isMovie = contentType.equals("movie", ignoreCase = true),
+                        season = season,
+                        episode = episode
+                    )
+                    // Short budget: a cache hit returns immediately; a cold
+                    // resolve gets up to ENGINE_FIRST_TIMEOUT_MS before we
+                    // give up and let the full race cover it.
+                    val resolved = engine.awaitResolve(req, PlayerActivity.ENGINE_FIRST_TIMEOUT_MS)
+                    if (resolved != null) {
+                        Log.i("Player", "\u26a1 Engine-first hit: ${resolved.providerName} (fromCache=${resolved.fromCache}) \u2192 ${resolved.url}")
+                        candidateQueue = emptyList()
+                        streamUrl = resolved.url
+                        streamHeaders = resolved.headers.ifEmpty {
+                            mapOf("User-Agent" to DEFAULT_UA)
+                        }
+                        deliveringServerName = resolved.providerName
+                        isLoading = false
+                        return@LaunchedEffect
+                    } else {
+                        // No hit yet \u2014 make sure a background resolve is in
+                        // flight (so a re-open or the candidate queue can
+                        // benefit) and proceed to the race.
+                        engine.preResolve(req)
+                    }
+                }
+            }
 
             // Each helper: skip if excluded, run the extractor with a hard
             // per-extractor timeout, and return a DirectWinner only on a

@@ -5,6 +5,14 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
+    <!-- Foreground service for the headless Kodi-like stream engine
+         (runs the LookMovieTomb addon flow in the background; no UI/WebView).
+         POST_NOTIFICATIONS lets the low-priority service notification show
+         on Android 13+. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <!-- Declare touchscreen as optional so it installs on TV -->
     <uses-feature
         android:name="android.hardware.touchscreen"
@@ -48,6 +56,14 @@
             android:name=".ui.player.VerificationActivity"
             android:exported="false"
             android:theme="@style/Theme.MarioCart" />
+
+        <!-- Headless Kodi-like stream engine (foreground service).
+             Runs the LookMovieTomb addon flow in the background; NO WebView.
+             Keeps resolved streams warm so PlayerActivity can play instantly. -->
+        <service
+            android:name=".data.engine.KodiEngineService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
         <!-- FileProvider for sharing the downloaded APK with the system installer -->
         <provider

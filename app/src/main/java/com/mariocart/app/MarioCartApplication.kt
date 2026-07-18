@@ -38,6 +38,13 @@ class MarioCartApplication : Application(), ImageLoaderFactory {
         // can lead with a known-good provider and the race can skip providers
         // already known to be dead for a given movie/show.
         com.mariocart.app.data.cache.StreamAvailabilityCache.init(this)
+
+        // Start the "Kodi-like" background engine. This inits the headless
+        // (pure OkHttp, NO WebView) LookMovieTomb addon flow and launches the
+        // foreground service that keeps it alive so it can pre-resolve movie
+        // sources in the background. PlayerActivity asks this engine first.
+        com.mariocart.app.data.engine.KodiEngine.init(this)
+        com.mariocart.app.data.engine.KodiEngineService.start(this)
     }
 
     override fun newImageLoader(): ImageLoader {
