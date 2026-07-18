@@ -62,7 +62,10 @@ jobs:
         run: |
           APK="app/build/outputs/apk/release/app-release.apk"
           ls -la "$APK"
-          $ANDROID_HOME/build-tools/*/apksigner verify --verbose --print-certs "$APK" | sed -n '1,20p'
+          # Find the build-tools apksigner and run it with the 'verify' subcommand.
+          APKSIGNER="$(ls $ANDROID_HOME/build-tools/*/apksigner | tail -1)"
+          echo "Using apksigner: $APKSIGNER"
+          "$APKSIGNER" verify --verbose --print-certs "$APK" | sed -n '1,25p'
 
       - name: Get version info
         id: version
