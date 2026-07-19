@@ -25,6 +25,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -39,6 +41,7 @@ import com.mariocart.app.ui.theme.Bg3
 import com.mariocart.app.ui.theme.Red
 import com.mariocart.app.ui.theme.TextPrimary
 import com.mariocart.app.ui.util.responsiveDims
+import com.mariocart.app.ui.util.rememberInitialFocusRequester
 
 @Composable
 fun BrowseScreen(
@@ -50,6 +53,10 @@ fun BrowseScreen(
     val isLoading by viewModel.isLoading.collectAsState()
     val allGenres = MOVIE_GENRES + TV_GENRES
     val dims = responsiveDims()
+
+    // On a no-pointer TV box, land D-pad focus on the first genre pill so the
+    // user has a known starting point when they open Browse.
+    val firstGenreFocusRequester = rememberInitialFocusRequester()
 
     LazyColumn(
         modifier = Modifier
@@ -81,7 +88,8 @@ fun BrowseScreen(
                                 if (genre.id.isEmpty()) null else genre,
                                 genre.type
                             )
-                        }
+                        },
+                        focusRequester = if (genre === allGenres.first()) firstGenreFocusRequester else null
                     )
                 }
             }
@@ -143,7 +151,8 @@ fun BrowseScreen(
 private fun GenrePill(
     genre: Genre,
     isSelected: Boolean,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    focusRequester: FocusRequester? = null
 ) {
     Text(
         text = genre.name,
@@ -151,6 +160,7 @@ private fun GenrePill(
         fontSize = 13.sp,
         fontWeight = FontWeight.Medium,
         modifier = Modifier
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .clip(RoundedCornerShape(20.dp))
             .background(if (isSelected) Red else Bg3)
             .clickable(onClick = onClick)

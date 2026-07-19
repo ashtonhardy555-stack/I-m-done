@@ -26,6 +26,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -37,6 +39,7 @@ import com.mariocart.app.ui.components.HeroBanner
 import com.mariocart.app.ui.theme.Bg3
 import com.mariocart.app.ui.theme.Red
 import com.mariocart.app.ui.theme.TextPrimary
+import com.mariocart.app.ui.util.rememberInitialFocusRequester
 
 private data class GenreChip(val emoji: String, val label: String, val genreId: String)
 
@@ -69,12 +72,17 @@ fun HomeScreen(
     val topRated by viewModel.topRated.collectAsState()
     val popularMovies by viewModel.popularMovies.collectAsState()
 
+    // On a no-pointer TV box, land D-pad focus on the hero Play button the
+    // moment Home appears so the user always knows where they are.
+    val playFocusRequester = rememberInitialFocusRequester()
+
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         item {
             HeroBanner(
                 items = heroItems,
                 onPlayClick = onItemClick,
-                onMoreInfo = onItemClick
+                onMoreInfo = onItemClick,
+                playFocusRequester = playFocusRequester
             )
         }
         item {

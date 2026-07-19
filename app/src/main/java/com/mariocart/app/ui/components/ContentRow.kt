@@ -20,6 +20,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -43,7 +45,10 @@ fun ContentRow(
     items: List<TmdbItem>,
     onItemClick: (TmdbItem) -> Unit,
     onLoadMore: (() -> Unit)? = null,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    /** If provided, attached to the FIRST card so a screen can land D-pad
+     *  focus there when it appears (no-pointer TV boxes). */
+    firstCardFocusRequester: FocusRequester? = null
 ) {
     val dims = responsiveDims()
     val listState = rememberLazyListState()
@@ -106,7 +111,8 @@ fun ContentRow(
                 ContentCard(
                     item = item,
                     onClick = { onItemClick(item) },
-                    dims = dims
+                    dims = dims,
+                    focusRequester = if (idx == 0) firstCardFocusRequester else null
                 )
             }
         }

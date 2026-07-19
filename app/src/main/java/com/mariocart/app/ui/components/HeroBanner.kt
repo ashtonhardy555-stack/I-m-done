@@ -36,6 +36,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -72,7 +74,8 @@ fun HeroBanner(
     items: List<TmdbItem>,
     onPlayClick: (TmdbItem) -> Unit,
     onMoreInfo: ((TmdbItem) -> Unit)? = null,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    playFocusRequester: FocusRequester? = null
 ) {
     if (items.isEmpty()) return
 
@@ -224,7 +227,8 @@ fun HeroBanner(
                     containerColor = Color.White,
                     contentColor = Color.Black,
                     isTv = dims.isTv,
-                    onClick = { onPlayClick(currentItem) }
+                    onClick = { onPlayClick(currentItem) },
+                    focusRequester = playFocusRequester
                 )
                 // ⓘ More Info — translucent grey, like Netflix.
                 HeroButton(
@@ -248,7 +252,8 @@ private fun HeroButton(
     containerColor: Color,
     contentColor: Color,
     isTv: Boolean,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    focusRequester: FocusRequester? = null
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
@@ -261,13 +266,15 @@ private fun HeroButton(
             contentColor = contentColor
         ),
         shape = RoundedCornerShape(4.dp),
-        modifier = Modifier.then(
-            if (isFocused && isTv) {
-                Modifier.border(2.dp, Red, RoundedCornerShape(4.dp))
-            } else {
-                Modifier
-            }
-        )
+        modifier = Modifier
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+            .then(
+                if (isFocused && isTv) {
+                    Modifier.border(2.dp, Red, RoundedCornerShape(4.dp))
+                } else {
+                    Modifier
+                }
+            )
     ) {
         Icon(icon, contentDescription = null, modifier = Modifier.size(20.dp))
         Spacer(Modifier.width(6.dp))

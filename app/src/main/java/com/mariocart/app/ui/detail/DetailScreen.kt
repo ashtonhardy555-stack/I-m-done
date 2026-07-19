@@ -39,6 +39,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -61,6 +63,7 @@ import com.mariocart.app.ui.theme.TextMuted
 import com.mariocart.app.ui.theme.TextPrimary
 import com.mariocart.app.ui.util.ResponsiveDims
 import com.mariocart.app.ui.util.responsiveDims
+import com.mariocart.app.ui.util.rememberInitialFocusRequester
 
 /**
  * Netflix-style detail screen for **movies**.
@@ -94,6 +97,10 @@ fun DetailScreen(
 
     LaunchedEffect(item.id) { viewModel.load(item) }
 
+    // On a no-pointer TV box, land D-pad focus on the Play button when the
+    // movie detail opens so the user always knows where they are.
+    val playFocusRequester = rememberInitialFocusRequester()
+
     // Resolve the best available backdrop + overview + meta while the full
     // detail loads (fall back to the lightweight list item).
     val backdropUrl = movieDetail?.backdropUrl ?: item.backdropUrl
@@ -118,7 +125,8 @@ fun DetailScreen(
                     overview = overview,
                     onBack = onBack,
                     onPlay = { onPlayMovie(item) },
-                    dims = dims
+                    dims = dims,
+                    playFocusRequester = playFocusRequester
                 )
             }
 
@@ -178,7 +186,8 @@ private fun DetailBackdrop(
     overview: String,
     onBack: () -> Unit,
     onPlay: () -> Unit,
-    dims: ResponsiveDims
+    dims: ResponsiveDims,
+    playFocusRequester: FocusRequester? = null
 ) {
     val context = LocalContext.current
     val backdropRequest = remember(backdropUrl) {
@@ -298,7 +307,8 @@ private fun DetailBackdrop(
             PlayButton(
                 text = "Play",
                 onClick = onPlay,
-                dims = dims
+                dims = dims,
+                focusRequester = playFocusRequester
             )
 
             // Overview (Netflix shows the synopsis below the buttons)
@@ -324,7 +334,8 @@ private fun DetailBackdrop(
 private fun PlayButton(
     text: String,
     onClick: () -> Unit,
-    dims: ResponsiveDims
+    dims: ResponsiveDims,
+    focusRequester: FocusRequester? = null
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
@@ -337,6 +348,7 @@ private fun PlayButton(
     Row(
         modifier = Modifier
             .scale(scale)
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .clip(RoundedCornerShape(6.dp))
             .background(PlayWhite)
             .then(

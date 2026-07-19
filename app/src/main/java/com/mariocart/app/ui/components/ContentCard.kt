@@ -9,7 +9,8 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
-import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -63,23 +64,17 @@ fun ContentCard(
 }
 
 /**
- * Netflix-style content card.
- *
- * Signature behaviours that match the real Netflix:
- *  • On focus / hover the card scales UP (~1.08×) with a spring and lifts
- *    with a red-tinted shadow — the "card grows toward you" effect.
- *  • A red focus ring (border) appears when the D-pad lands on it (TV).
- *  • A subtle dark gradient at the bottom of the poster so titles stay
- *    readable when the info strip is collapsed.
- *  • The poster fills the whole card; title/year sit in a thin caption bar
- *    beneath, exactly like Netflix's browse rows.
+ * Optional [FocusRequester] lets a parent screen ask the system to land D-pad
+ * focus on a specific card (e.g. the first card in a row) so the user always
+ * has a known starting point when they enter a screen on a no-pointer TV box.
  */
 @Composable
 fun ContentCard(
     item: TmdbItem,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    dims: ResponsiveDims
+    dims: ResponsiveDims,
+    focusRequester: FocusRequester? = null
 ) {
     val context = LocalContext.current
     val interactionSource = remember { MutableInteractionSource() }
@@ -133,12 +128,22 @@ fun ContentCard(
                 }
             )
             .background(Bg3)
+            // Single focusable node: .clickable() already registers a
+            // focusable node for D-pad navigation. We previously ALSO called
+            // .focusable(interactionSource) which created a SECOND focusable
+            // node sharing the same interaction source — on a no-pointer TV
+            // remote the D-pad focus oscillated between the two nodes and
+            // collectIsFocusedAsState() flipped false, making the red ring
+            // flash and disappear. Removing the redundant .focusable() leaves
+            // exactly one focus target, so the ring STAYS on the card until
+            // the user moves to the next one. Enter / D-pad-center is still
+            // routed to onClick by .clickable().
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
                 onClick = onClick
             )
-            .focusable(interactionSource = interactionSource)
             .then(
                 if (active) {
                     Modifier.border(3.dp, Red, RoundedCornerShape(6.dp))

@@ -12,6 +12,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -25,6 +26,7 @@ import com.mariocart.app.ui.theme.Red
 import com.mariocart.app.ui.theme.TextMuted
 import com.mariocart.app.ui.theme.TextPrimary
 import com.mariocart.app.ui.util.responsiveDims
+import com.mariocart.app.ui.util.rememberInitialFocusRequester
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -50,6 +52,10 @@ fun UpdatesScreen() {
     }
 
     val dims = responsiveDims()
+
+    // On a no-pointer TV box, land D-pad focus on the first action button so
+    // the user has a known starting point when they open Updates.
+    val actionFocusRequester = rememberInitialFocusRequester()
 
     Column(
         modifier = Modifier
@@ -100,6 +106,7 @@ fun UpdatesScreen() {
                                     isChecking = false
                                 }
                             },
+                            modifier = Modifier.focusRequester(actionFocusRequester),
                             shape = RoundedCornerShape(8.dp)
                         ) { Text("Retry", color = TextPrimary) }
                     }
@@ -195,7 +202,9 @@ fun UpdatesScreen() {
                                         }
                                     }
                                 },
-                                modifier = Modifier.fillMaxWidth(),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .focusRequester(actionFocusRequester),
                                 colors = ButtonDefaults.buttonColors(containerColor = Red),
                                 shape = RoundedCornerShape(8.dp)
                             ) { Text("Download & Install", color = Color.White, fontWeight = FontWeight.Bold) }

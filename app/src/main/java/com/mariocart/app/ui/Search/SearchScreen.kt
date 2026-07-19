@@ -35,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -51,6 +52,7 @@ import com.mariocart.app.ui.theme.Bg
 import com.mariocart.app.ui.theme.Red
 import com.mariocart.app.ui.theme.TextMuted
 import com.mariocart.app.ui.util.responsiveDims
+import com.mariocart.app.ui.util.rememberInitialFocusRequester
 
 @Composable
 fun SearchScreen(
@@ -65,6 +67,13 @@ fun SearchScreen(
     val dims = responsiveDims()
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
+
+    // On a no-pointer TV box, land D-pad focus in the search field when the
+    // screen opens so the user can start typing right away.
+    val searchFieldFocusRequester = rememberInitialFocusRequester()
+    // Focus target for the first result card — used after the user presses
+    // Done/Enter on the keypad so they can immediately D-pad to a movie.
+    val firstResultFocusRequester = remember { FocusRequester() }
 
     LaunchedEffect(initialGenre) {
         if (initialGenre != null) {
@@ -103,12 +112,21 @@ fun SearchScreen(
             singleLine = true,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
             keyboardActions = KeyboardActions(onDone = {
-                // Pressing Enter / Done on the remote keyboard hides it so
-                // the user can D-pad through the results grid.
+                // Pressing Enter / Done on the remote keypad hides it so the
+                // user can D-pad through the results grid and pick a movie.
                 keyboard?.hide()
                 focusManager.clearFocus()
+                // If there are already results on screen, jump focus to the
+                // first one so the user isn't left stranded with nothing
+                // focused on a no-pointer TV box.
+                if (results.isNotEmpty()) {
+                    runCatching { firstResultFocusRequester.requestFocus() }
+                }
             }),
-            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .focusRequester(searchFieldFocusRequester)
+                .padding(vertical = 12.dp),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = Red,
                 unfocusedBorderColor = TextMuted,
@@ -137,7 +155,12 @@ fun SearchScreen(
                     items = results,
                     key = { item -> "${item.id}_${item.contentType}" }
                 ) { item ->
-                    ContentCard(item = item, onClick = { onItemClick(item) }, dims = dims)
+                    ContentCard(
+                        item = item,
+                        onClick = { onItemClick(item) },
+                        dims = dims,
+                        focusRequester = if (item === results.first()) firstResultFocusRequester else null
+                    )
                 }
             }
         } else if (query.length >= 2) {

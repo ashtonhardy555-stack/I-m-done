@@ -71,6 +71,20 @@ class SeasonEpisodeViewModel : ViewModel() {
         // If we're already showing data for this exact show, do nothing.
         if (loadedTvId == tvId && _seasons.value.isNotEmpty()) return
 
+        // SWITCHING SHOWS: fully wipe the previous show's state so the user
+        // never sees show A's seasons / episodes / hero detail / "More Like
+        // This" lingering while show B loads. Without this reset the
+        // activity-scoped ViewModel keeps the old show's data on screen
+        // (the hero showed the previous show, the episode list kept the old
+        // episodes, etc.) whenever you opened a different show.
+        if (loadedTvId != null && loadedTvId != tvId) {
+            _seasons.value = emptyList()
+            _episodes.value = emptyList()
+            _showDetail.value = null
+            _similar.value = emptyList()
+            _selectedSeason.value = 1
+        }
+
         // Instant path: serve cached seasons immediately and refresh quietly.
         val cached = seasonCache[tvId]
         if (cached != null) {
@@ -86,6 +100,7 @@ class SeasonEpisodeViewModel : ViewModel() {
 
         // First-ever open of this show: show the spinner while we fetch.
         _fromCache.value = false
+        loadedTvId = tvId
         fetchSeasons(tvId, showLoading = true)
         fetchShowDetail(tvId)
     }

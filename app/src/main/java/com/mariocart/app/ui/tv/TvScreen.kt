@@ -16,6 +16,7 @@ import com.mariocart.app.data.model.TmdbItem
 import com.mariocart.app.ui.components.ContentRow
 import com.mariocart.app.ui.theme.TextPrimary
 import com.mariocart.app.ui.util.responsiveDims
+import com.mariocart.app.ui.util.rememberInitialFocusRequester
 
 @Composable
 fun TvScreen(
@@ -25,6 +26,10 @@ fun TvScreen(
     val popular by viewModel.popular.collectAsState()
     val topRated by viewModel.topRated.collectAsState()
     val dims = responsiveDims()
+
+    // On a no-pointer TV box, land D-pad focus on the first card of the first
+    // row so the user has a known starting point when they open TV Shows.
+    val firstCardFocusRequester = rememberInitialFocusRequester()
 
     LazyColumn(
         modifier = Modifier
@@ -44,7 +49,8 @@ fun TvScreen(
             ContentRow(
                 title = "Popular Shows", emoji = "\uD83D\uDCFA",
                 items = popular, onItemClick = onItemClick,
-                onLoadMore = { viewModel.loadMore() }
+                onLoadMore = { viewModel.loadMore() },
+                firstCardFocusRequester = firstCardFocusRequester
             )
         }
         item {
