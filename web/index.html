@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#141414" />
+  <meta name="description" content="I'm Done — Web Edition. Stream movies and TV shows via the LookMovie extractor and Kodi engine." />
+  <title>I'm Done — Web Edition</title>
+  <link rel="preconnect" href="https://image.tmdb.org" />
+  <link rel="stylesheet" href="css/theme.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>" />
+<script src="https://sites.super.myninja.ai/_assets/ninja-daytona-script.js"></script>
+</head>
+<body>
+  <div id="app"></div>
+
+  <!-- HLS.js for .m3u8 playback (replaces ExoPlayer from the Android app) -->
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.min.js"></script>
+
+  <!-- Core engine modules (port of the Android app's data layer) -->
+  <script src="js/tmdb.js"></script>
+  <script src="js/watchProgress.js"></script>
+  <script src="js/lookmovie.js"></script>
+  <script src="js/kodiEngine.js"></script>
+
+  <!-- SPA controller -->
+  <script src="js/app.js"></script>
+</body>
+</html>
