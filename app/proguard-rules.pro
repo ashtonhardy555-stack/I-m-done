@@ -1,7 +1,7 @@
 # Retrofit
 -keepattributes Signature
 -keepattributes *Annotation*
--keep class com.mariocart.app.data.model.** { *; }
+-keep class com.freeflix.app.data.model.** { *; }
 -dontwarn okhttp3.**
 -dontwarn retrofit2.**
 
