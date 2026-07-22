@@ -25,11 +25,11 @@ if (keystorePropertiesFile.exists()) {
 val hasEnvSigningKey = !System.getenv("KEYSTORE_FILE").isNullOrEmpty()
 
 android {
-    namespace = "com.freeflix.app"
+    namespace = "com.ashtonhardy.piratesfilmcove"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.freeflix.app"
+        applicationId = "com.ashtonhardy.piratesfilmcove"
         minSdk = 21
         targetSdk = 34
         // versionCode is the CI run number (CI_BUILD_NUMBER env var) when
