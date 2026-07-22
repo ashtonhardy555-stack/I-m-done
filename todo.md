@@ -38,5 +38,5 @@ Kodi engine.
 - [x] Update engine-first ResolveRequest in PlayerActivity to include tmdbId
 
 ### Phase 5: Build & Test
-- [ ] Create PR with the new extractors
-- [ ] Monitor the CI build to ensure it passes
+- [x] Create PR with the new extractors (PR #44)
+- [x] Monitor the CI build to ensure it passes (run #29890036015 SUCCESS in 4m19s)
