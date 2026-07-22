@@ -25,11 +25,11 @@ if (keystorePropertiesFile.exists()) {
 val hasEnvSigningKey = !System.getenv("KEYSTORE_FILE").isNullOrEmpty()
 
 android {
-    namespace = "com.mariocart.app"
+    namespace = "com.freeflix.app"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.mariocart.app"
+        applicationId = "com.freeflix.app"
         minSdk = 21
         targetSdk = 34
         // versionCode is the CI run number (CI_BUILD_NUMBER env var) when
