@@ -73,19 +73,13 @@ class HomeViewModel : ViewModel() {
     private val _filtering = MutableStateFlow(false)
     val filtering: StateFlow<Boolean> = _filtering
 
-    // canLoadMore flags (per row)
+    // ── canLoadMore flags (per row) ───────────────────────────────────── //
     // Each flag is true while there are more pages available to load via the
-    // row loadMoreX() function. Set true on initial load (TMDB returns ~20
+    // row's loadMoreX() function. Set true on initial load (TMDB returns ~20
     // items per page, so page 1 always implies more), then set false once a
-    // loadMore() returns fewer than a full page -- that means we hit the
-    // end of the catalog and the Load More button should disappear.
-    //
-    // IMPORTANT: the size check uses the RAW TMDB page size (before
-    // StreamAvailabilityChecker.filterAvailable() and before the isMovie
-    // filter), NOT the filtered/streamable count. The old code checked the
-    // filtered size, which caused premature disappearance: the trending feed
-    // returns ~20 mixed items but only ~10 are movies, so the filtered size
-    // was < 20 even though TMDB had plenty more pages.
+    // loadMore() returns fewer than a full page or only duplicates — that
+    // means we've hit the end of the catalog and the "Load More" button
+    // should disappear.
     private val _canLoadMoreTrending = MutableStateFlow(true)
     val canLoadMoreTrending: StateFlow<Boolean> = _canLoadMoreTrending
 
@@ -334,21 +328,10 @@ class HomeViewModel : ViewModel() {
             _isLoadingMore.value = true
             trendingPage++
             val existing = _trending.value.map { it.id }.toSet()
-            // Fetch the raw trending page first, THEN filter to movies + dedup.
-            // The raw page includes both movies and TV, so we must check the
-            // RAW size against pageSize — not the movie-filtered size — to
-            // decide whether there are more TMDB pages. Using the filtered
-            // size was the premature-disappear bug: the trending feed returns
-            // ~20 mixed items but only ~10 are movies, so more.size < 20 even
-            // though TMDB has plenty more pages to load.
-            val rawPage = repo.getTrending(trendingPage)
-            val more = rawPage.filter { it.isMovie && it.id !in existing }
+            val more = repo.getTrending(trendingPage).filter { it.isMovie && it.id !in existing }
             if (more.isEmpty()) {
-                // No NEW movies on this page — but if the raw page was a full
-                // page there may still be more pages with movies, so keep
-                // the flag true (the user just gets no new cards this round).
-                // Only flip false if the raw page itself was short (end of TMDB).
-                _canLoadMoreTrending.value = rawPage.size >= pageSize
+                // Page returned only duplicates / non-movies — end of catalog.
+                _canLoadMoreTrending.value = false
                 _isLoadingMore.value = false
                 return@withLock
             }
@@ -360,9 +343,8 @@ class HomeViewModel : ViewModel() {
                 val moreIds = more.map { it.id }.toSet()
                 _trending.value = _trending.value.filter { it.id !in moreIds } + availableMore
             }
-            // End of catalog only if the RAW TMDB page was smaller than a
-            // full page — NOT the stream-filtered or movie-filtered size.
-            _canLoadMoreTrending.value = rawPage.size >= pageSize
+            // End of catalog if the raw batch was smaller than a full page.
+            _canLoadMoreTrending.value = more.size >= pageSize
             _isLoadingMore.value = false
         }
     }
