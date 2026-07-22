@@ -51,6 +51,10 @@ import com.mariocart.app.data.server.KissKhExtractor
 import com.mariocart.app.data.server.LookMovieHeadlessExtractor
 import com.mariocart.app.data.server.VidSyncExtractor
 import com.mariocart.app.data.server.NoTorrentExtractor
+import com.mariocart.app.data.server.AnnasCinemaExtractor
+import com.mariocart.app.data.server.NovaStreamExtractor
+import com.mariocart.app.data.server.NuvioStreamsExtractor
+import com.mariocart.app.data.server.SmashStreamsExtractor
 import com.mariocart.app.data.server.ServerConfig
 import com.mariocart.app.data.server.ServerManager
 import com.mariocart.app.data.server.StreamProviders
@@ -649,7 +653,7 @@ fun PlayerScreen(
         // candidates with `awaitAll` and ranking them, we keep every good
         // stream queued — failover to the next one is instant.
         //
-        // The 17 direct extractors in the race (all fired simultaneously):
+        // The 21 direct extractors in the race (all fired simultaneously):
         //   NoTorrent   → Stremio addon (great TV coverage)
         //   VidStorm    → one HTTP call, direct .m3u8/.mp4 (fast for popular movies)
         //   VidSrc      → vidsrc.me RCP/PRORCP, resolves almost everything
@@ -669,6 +673,10 @@ fun PlayerScreen(
         //   LookMovie   → headless port of the plugin.video.lookmovietomb Kodi
         //                 addon (search→storage→security-API), direct .m3u8 with
         //                 the t_hash cookie in headers — no WebView, no Kodi
+        //   SmashStreams → Stremio addon (embed.smashystream.xyz), headless OkHttp
+        //   NuvioStreams → Stremio addon (nuviostreams.hayd.uk), headless OkHttp
+        //   AnnasCinema → Stremio addon aggregator, headless OkHttp
+        //   NovaStream  → Stremio addon, headless OkHttp
         //
         // The race collects ALL resolved candidates with awaitAll (not just
         // the first), so playback starts in ~1-3 s (the time of the FASTEST
@@ -684,7 +692,7 @@ fun PlayerScreen(
             // \u2500\u2500 ENGINE-FIRST: ask the background Kodi-like engine \u2500\u2500 //
             // The KodiEngine runs the LookMovieTomb addon flow in the
             // background (pure headless OkHttp, no WebView) and caches
-            // resolved streams. Before we fire the full 17-extractor race,
+            // resolved streams. Before we fire the full 21-extractor race,
             // ask the engine: if it already has a fresh, pre-resolved
             // stream for this title (or resolves one within a short budget),
             // play it INSTANTLY and skip the race entirely. This is the
@@ -705,7 +713,8 @@ fun PlayerScreen(
                         year = year,
                         isMovie = contentType.equals("movie", ignoreCase = true),
                         season = currentSeason,
-                        episode = currentEpisode
+                        episode = currentEpisode,
+                        tmdbId = tmdbId
                     )
                     // Short budget: a cache hit returns immediately; a cold
                     // resolve gets up to ENGINE_FIRST_TIMEOUT_MS before we
@@ -846,6 +855,74 @@ fun PlayerScreen(
                 return (res as? NoTorrentExtractor.Result.Stream)?.let {
                     Log.i("Player", "\u2705 NoTorrent hit: ${it.url}")
                     DirectWinner(it.url, it.headers, it.providerName.ifBlank { "NoTorrent" })
+                }
+            }
+
+            // -- Headless Stremio-style extractors (same pattern as NoTorrent) --
+            // These are pure-OkHttp extractors that resolve TMDB id to a
+            // direct stream URL via Stremio addon APIs. They run in the same
+            // parallel race as all other extractors and are also wired into
+            // the KodiEngine's addon list (see KodiEngine.kt). Each follows
+            // the same (tmdbId, contentType, season, episode) signature as
+            // NoTorrentExtractor.
+
+            suspend fun trySmashStreams(): DirectWinner? {
+                if ("SmashStreams" in excluded) {
+                    Log.d("Player", "\u23ed\ufe0f SmashStreams excluded this round")
+                    return null
+                }
+                Log.d("Player", "\ud83c\udfc7 SmashStreams: extracting\u2026")
+                val res = withTimeoutOrNull(PlayerActivity.PROVIDER_TIMEOUT_MS) {
+                    SmashStreamsExtractor.extract(tmdbId, contentType, currentSeason, currentEpisode)
+                }
+                return (res as? SmashStreamsExtractor.Result.Stream)?.let {
+                    Log.i("Player", "\u2705 SmashStreams hit: ${it.url}")
+                    DirectWinner(it.url, it.headers, it.providerName.ifBlank { "SmashStreams" })
+                }
+            }
+
+            suspend fun tryNuvioStreams(): DirectWinner? {
+                if ("NuvioStreams" in excluded) {
+                    Log.d("Player", "\u23ed\ufe0f NuvioStreams excluded this round")
+                    return null
+                }
+                Log.d("Player", "\ud83c\udfc7 NuvioStreams: extracting\u2026")
+                val res = withTimeoutOrNull(PlayerActivity.PROVIDER_TIMEOUT_MS) {
+                    NuvioStreamsExtractor.extract(tmdbId, contentType, currentSeason, currentEpisode)
+                }
+                return (res as? NuvioStreamsExtractor.Result.Stream)?.let {
+                    Log.i("Player", "\u2705 NuvioStreams hit: ${it.url}")
+                    DirectWinner(it.url, it.headers, it.providerName.ifBlank { "NuvioStreams" })
+                }
+            }
+
+            suspend fun tryAnnasCinema(): DirectWinner? {
+                if ("AnnasCinema" in excluded) {
+                    Log.d("Player", "\u23ed\ufe0f AnnasCinema excluded this round")
+                    return null
+                }
+                Log.d("Player", "\ud83c\udfc7 AnnasCinema: extracting\u2026")
+                val res = withTimeoutOrNull(PlayerActivity.PROVIDER_TIMEOUT_MS) {
+                    AnnasCinemaExtractor.extract(tmdbId, contentType, currentSeason, currentEpisode)
+                }
+                return (res as? AnnasCinemaExtractor.Result.Stream)?.let {
+                    Log.i("Player", "\u2705 AnnasCinema hit: ${it.url}")
+                    DirectWinner(it.url, it.headers, it.providerName.ifBlank { "AnnasCinema" })
+                }
+            }
+
+            suspend fun tryNovaStream(): DirectWinner? {
+                if ("NovaStream" in excluded) {
+                    Log.d("Player", "\u23ed\ufe0f NovaStream excluded this round")
+                    return null
+                }
+                Log.d("Player", "\ud83c\udfc7 NovaStream: extracting\u2026")
+                val res = withTimeoutOrNull(PlayerActivity.PROVIDER_TIMEOUT_MS) {
+                    NovaStreamExtractor.extract(tmdbId, contentType, currentSeason, currentEpisode)
+                }
+                return (res as? NovaStreamExtractor.Result.Stream)?.let {
+                    Log.i("Player", "\u2705 NovaStream hit: ${it.url}")
+                    DirectWinner(it.url, it.headers, it.providerName.ifBlank { "NovaStream" })
                 }
             }
 
@@ -1098,6 +1175,10 @@ fun PlayerScreen(
                         val deferreds = listOf(
                             async { safe { tryLookMovie() } },
                             async { safe { tryNoTorrent() } },
+                            async { safe { trySmashStreams() } },
+                            async { safe { tryNuvioStreams() } },
+                            async { safe { tryAnnasCinema() } },
+                            async { safe { tryNovaStream() } },
                             async { safe { tryVidStorm() } },
                             async { safe { tryVidSrc() } },
                             async { safe { tryVidSrcMe() } },
@@ -2341,7 +2422,8 @@ private fun mapRaceProviderKey(deliveringServerName: String): String? {
 private val RACE_PROVIDER_BASES = setOf(
     "VidStorm", "VidSrc", "VidSrcNet", "VidLink", "VixSrc", "NoTorrent",
     "MeowTV", "Videasy", "KissKH", "VidSync", "LordFlix", "DahmerMovies",
-    "TwoEmbed", "SuperEmbed", "VidSrcPro", "LookMovie"
+    "TwoEmbed", "SuperEmbed", "VidSrcPro", "LookMovie",
+    "SmashStreams", "NuvioStreams", "AnnasCinema", "NovaStream"
 )
 
 /**
@@ -2410,7 +2492,8 @@ private fun isEnglishStream(winner: DirectWinner, contentType: String): Boolean 
         "lordflix", "dahmermovies", "meowtv", "vidspark", "autoembed",
         "vidnest", "vidrock", "vidcore", "tvembed", "vidsrcme",
         "vidking", "curtstream", "databasegdriveplayer", "vidsrcpro",
-        "vcr", "vesy", "xps", "smashystream", "hexa", "flixer", "lookmovie"
+        "vcr", "vesy", "xps", "smashystream", "hexa", "flixer", "lookmovie",
+        "smashstreams", "nuviostreams", "annascinema", "novastream"
     )
     val baseName = name.substringBefore("·").substringBefore(" ").trim()
     return defaultEnglishProviders.any { baseName.startsWith(it) || baseName == it }
@@ -2436,6 +2519,15 @@ private fun providerReliability(providerName: String): Int {
         n.startsWith("vidsrcpro") -> 85
         n.startsWith("vidstorm") -> 82
         n.startsWith("notorrent") -> 80
+        // Headless Stremio-style extractors (same TMDB-id addon pattern as
+        // NoTorrent). These are new additions wired through the KodiEngine.
+        // They resolve direct stream URLs via Stremio addon APIs, so they're
+        // reasonably reliable but unproven at scale. Placed just below
+        // NoTorrent which is the mature reference for this pattern.
+        n.startsWith("nuviostreams") -> 79
+        n.startsWith("smashstreams") -> 77
+        n.startsWith("novastream") -> 75
+        n.startsWith("annascinema") -> 73
         n.startsWith("vixsrc") -> 78
         n.startsWith("meowtv") -> 76
         n.startsWith("vidspark") -> 74
