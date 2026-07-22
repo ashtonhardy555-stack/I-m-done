@@ -26,6 +26,8 @@ fun MoviesScreen(
 ) {
     val popular by viewModel.popular.collectAsState()
     val topRated by viewModel.topRated.collectAsState()
+    val canLoadMorePopular by viewModel.canLoadMorePopular.collectAsState()
+    val canLoadMoreTopRated by viewModel.canLoadMoreTopRated.collectAsState()
     val dims = responsiveDims()
 
     // On a no-pointer TV box, land D-pad focus on the first Popular card the
@@ -57,6 +59,7 @@ fun MoviesScreen(
                 title = "Popular Movies", emoji = "\uD83C\uDFAC",
                 items = popular, onItemClick = onItemClick,
                 onLoadMore = { viewModel.loadMore() },
+                canLoadMore = canLoadMorePopular,
                 firstCardFocusRequester = firstCardFocusRequester
             )
         }
@@ -64,7 +67,8 @@ fun MoviesScreen(
             ContentRow(
                 title = "Top Rated", emoji = "\uD83C\uDFC6",
                 items = topRated, onItemClick = onItemClick,
-                onLoadMore = { viewModel.loadMoreTopRated() }
+                onLoadMore = { viewModel.loadMoreTopRated() },
+                canLoadMore = canLoadMoreTopRated
             )
         }
     }

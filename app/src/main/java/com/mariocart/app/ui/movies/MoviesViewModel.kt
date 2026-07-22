@@ -28,6 +28,19 @@ class MoviesViewModel : ViewModel() {
     private val _isLoadingMore = MutableStateFlow(false)
     val isLoadingMore: StateFlow<Boolean> = _isLoadingMore
 
+    // -- canLoadMore flags -----------------------------------------------
+    // Each row exposes a flag that the UI uses to show/hide its Load More
+    // button.  TMDB returns ~20 items per page; when a loadMore() fetch
+    // returns fewer than `pageSize` items (or only duplicates), we flip the
+    // flag to false so the button disappears once the catalog is exhausted.
+    private val pageSize = 20
+
+    private val _canLoadMorePopular = MutableStateFlow(true)
+    val canLoadMorePopular: StateFlow<Boolean> = _canLoadMorePopular
+
+    private val _canLoadMoreTopRated = MutableStateFlow(true)
+    val canLoadMoreTopRated: StateFlow<Boolean> = _canLoadMoreTopRated
+
     /** True while filtering a row down to only-streamable titles. */
     private val _filtering = MutableStateFlow(false)
     val filtering: StateFlow<Boolean> = _filtering
@@ -80,6 +93,11 @@ class MoviesViewModel : ViewModel() {
                 _popular.value = _popular.value.filter { it.id !in moreIds } + availableMore
             }
             _isLoadingMore.value = false
+            // End-of-catalog: TMDB sent fewer than a full page (or every
+            // item was a duplicate), so there's nothing more to load.
+            if (more.size < pageSize) {
+                _canLoadMorePopular.value = false
+            }
         }
     }
 
@@ -103,6 +121,11 @@ class MoviesViewModel : ViewModel() {
                 _topRated.value = _topRated.value.filter { it.id !in moreIds } + availableMore
             }
             _isLoadingMore.value = false
+            // End-of-catalog: TMDB sent fewer than a full page (or every
+            // item was a duplicate), so there's nothing more to load.
+            if (more.size < pageSize) {
+                _canLoadMoreTopRated.value = false
+            }
         }
     }
 
