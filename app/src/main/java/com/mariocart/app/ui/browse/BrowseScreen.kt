@@ -62,6 +62,7 @@ fun BrowseScreen(
     val items by viewModel.items.collectAsState()
     val selectedGenre by viewModel.selectedGenre.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
+    val canLoadMore by viewModel.canLoadMore.collectAsState()
     val allGenres = MOVIE_GENRES + TV_GENRES
     val dims = responsiveDims()
 
@@ -154,10 +155,11 @@ fun BrowseScreen(
             )
         }
 
-        // "Show More" footer - shown whenever there are cards. While a loadMore()
-        // is in flight the button shows a spinner and is disabled; otherwise it's
-        // a fully D-pad-focusable button with the app's red focus ring.
-        if (items.isNotEmpty()) {
+        // "Show More" footer - shown only when there are cards AND there's
+        // more to load (canLoadMore). When the genre catalog is exhausted
+        // canLoadMore flips to false and the button disappears. While a
+        // loadMore() is in flight the button shows a spinner and is disabled.
+        if (items.isNotEmpty() && canLoadMore) {
             item(span = { GridItemSpan(dims.gridColumns) }) {
                 ShowMoreButton(
                     isLoading = isLoading,

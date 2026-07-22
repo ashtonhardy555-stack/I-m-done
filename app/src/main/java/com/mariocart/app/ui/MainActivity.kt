@@ -17,6 +17,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -375,9 +376,16 @@ private fun AppRoot() {
             }
 
             // Content fills the full width; the rail overlays it when visible.
+            // The inner focusGroup() is the key to the "scroll left without
+            // opening the side rail" behaviour: it intercepts Left/Right D-pad
+            // events for card-to-card movement within rows. Only when the
+            // focus is already at the far-left edge of a row (nothing further
+            // left to move to) does the focusGroup let the key bubble up to
+            // the onKeyEvent handler below, which then reveals the rail.
             Box(
                 modifier = Modifier
                     .fillMaxSize()
+                    .focusGroup()
                     .onKeyEvent { event ->
                         // Reveal the side rail when the user presses Left and
                         // it is currently hidden — i.e. "at the beginning of a

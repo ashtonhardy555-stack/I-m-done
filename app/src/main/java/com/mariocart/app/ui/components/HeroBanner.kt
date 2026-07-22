@@ -18,12 +18,14 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -42,6 +44,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -298,6 +301,64 @@ fun HeroBanner(
                     isTv = dims.isTv,
                     onClick = { onMoreInfo?.invoke(currentItem) ?: onPlayClick(currentItem) },
                     onFocusChanged = { focused -> moreInfoFocused = focused }
+                )
+            }
+        }
+
+        // -- Scroll-down hint -------------------------------------------- //
+        // A subtle "scroll down for more" indicator pinned to the bottom-center
+        // of the hero so the user knows there's more content below.  A small
+        // chevron that gently bounces up and down + a tiny caption, both
+        // semi-transparent so they never fight the hero artwork for attention.
+        // Fades out once a hero button is focused (the user has "arrived") so
+        // it's never in the way.
+        val scrollHintAlpha by androidx.compose.animation.core.animateFloatAsState(
+            targetValue = if (heroFocused) 0f else 1f,
+            animationSpec = androidx.compose.animation.core.tween(400),
+            label = "scrollHintAlpha"
+        )
+        if (scrollHintAlpha > 0.01f) {
+            // Bouncing offset for the chevron (2-second loop).
+            val infiniteTransition = androidx.compose.animation.core.rememberInfiniteTransition(
+                label = "scrollHintBounce"
+            )
+            val bounceOffset by infiniteTransition.animateFloat(
+                initialValue = 0f,
+                targetValue = 8f,
+                animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+                    animation = androidx.compose.animation.core.tween(
+                        durationMillis = 800,
+                        easing = androidx.compose.animation.core.FastOutSlowInEasing
+                    ),
+                    repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
+                ),
+                label = "bounceOffset"
+            )
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = if (dims.isTv) 12.dp + dims.safeAreaBottom else 8.dp)
+            ) {
+                Text(
+                    text = "Scroll down for more",
+                    color = TextMuted,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier
+                        .background(Color.Black.copy(alpha = 0.45f * scrollHintAlpha))
+                        .alpha(scrollHintAlpha)
+                        .padding(horizontal = 12.dp, vertical = 4.dp)
+                )
+                Spacer(Modifier.height(4.dp))
+                Icon(
+                    imageVector = Icons.Default.KeyboardArrowDown,
+                    contentDescription = "Scroll down",
+                    tint = TextMuted.copy(alpha = scrollHintAlpha),
+                    modifier = Modifier
+                        .size(28.dp)
+                        .alpha(scrollHintAlpha)
+                        .offset(y = bounceOffset.dp)
                 )
             }
         }

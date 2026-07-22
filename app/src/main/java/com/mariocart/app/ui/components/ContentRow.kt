@@ -49,10 +49,14 @@ import com.mariocart.app.ui.util.responsiveDims
  * The row title is white, bold, and left-aligned. Cards are spaced like
  * Netflix's browse rows and use the focus-scale behaviour from [ContentCard].
  *
- * When [onLoadMore] is supplied, a "Load More ›" button is rendered as the
- * LAST item inside the horizontal row (after all the cards) instead of
- * floating next to the title. This keeps the top of the row clean and puts
- * the affordance where the user naturally lands after scrolling to the end.
+ * When [onLoadMore] is supplied AND [canLoadMore] is true, a "Load More ›"
+ * button is rendered as the LAST item inside the horizontal row (after all
+ * the cards) instead of floating next to the title. This keeps the top of the
+ * row clean and puts the affordance where the user naturally lands after
+ * scrolling to the end. The button is only shown when the ViewModel reports
+ * that there are more pages available — once the catalog is exhausted
+ * ([canLoadMore] == false) the button disappears so the user never sees a
+ * dead "Load More" with nothing behind it.
  */
 @Composable
 fun ContentRow(
@@ -62,6 +66,15 @@ fun ContentRow(
     onItemClick: (TmdbItem) -> Unit,
     onLoadMore: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
+    /**
+     * Whether there are more items available to load. The "Load More" button
+     * is only rendered when this is true (and [onLoadMore] is non-null).
+     * When false (or null) the row ends cleanly after the last card — no
+     * dead button. Defaults to true for backward compatibility so existing
+     * callers that pass [onLoadMore] without a flag keep their button until
+     * they wire up proper end-of-catalog detection.
+     */
+    canLoadMore: Boolean = true,
     /** If provided, attached to the FIRST card so a screen can land D-pad
      *  focus there when it appears (no-pointer TV boxes). */
     firstCardFocusRequester: FocusRequester? = null
@@ -123,7 +136,10 @@ fun ContentRow(
             // "Load More" tile — last item in the row. Matches a card's
             // footprint so the row scrolls naturally to reveal it, and is
             // fully D-pad focusable with the same red highlight as cards.
-            if (onLoadMore != null) {
+            // Only rendered when the ViewModel reports more pages are
+            // available ([canLoadMore]); once the catalog is exhausted the
+            // button is gone so there's no dead "Load More" at the end.
+            if (onLoadMore != null && canLoadMore) {
                 item(key = "load_more") {
                     LoadMoreButton(
                         onClick = onLoadMore,

@@ -93,6 +93,16 @@ fun HomeScreen(
     val recommended by viewModel.recommended.collectAsState()
     val progressMap by viewModel.progressMap.collectAsState()
 
+    // canLoadMore flags — each is true while there are more pages available
+    // for that row. Passed into ContentRow so the "Load More" button hides
+    // once the catalog is exhausted (no dead button at the end of a row).
+    val canLoadMoreTrending by viewModel.canLoadMoreTrending.collectAsState()
+    val canLoadMoreNowPlaying by viewModel.canLoadMoreNowPlaying.collectAsState()
+    val canLoadMorePopularTV by viewModel.canLoadMorePopularTV.collectAsState()
+    val canLoadMoreTopRated by viewModel.canLoadMoreTopRated.collectAsState()
+    val canLoadMorePopularMovies by viewModel.canLoadMorePopularMovies.collectAsState()
+    val canLoadMoreRecommended by viewModel.canLoadMoreRecommended.collectAsState()
+
     // Refresh Continue Watching whenever the Home screen is (re)composed to
     // the foreground — the user may have just finished / partially watched a
     // title in the player, so the row should reflect that immediately.
@@ -118,28 +128,18 @@ fun HomeScreen(
                 playFocusRequester = playFocusRequester
             )
         }
-        // ── Continue Watching ─────────────────────────────────────── //
-        // Only rendered when the user has unfinished titles. Clicking a card
-        // resumes directly from the saved position (via onResume) instead of
-        // opening the detail screen.
-        if (continueWatching.isNotEmpty()) {
-            item {
-                ContinueWatchingRow(
-                    items = continueWatching,
-                    progressMap = progressMap,
-                    onItemClick = onItemClick,
-                    onResume = onResume
-                )
-            }
-        }
-        // ── Recommended for You ───────────────────────────────────── //
+        // -- Recommended for You -----------------------------------------
         // Genre-based recommendations from the user's watch history. Only
         // rendered once there's a watch history to base recommendations on.
+        // Now has its own Load More button so the user can page through
+        // every recommended title without leaving Home.
         if (recommended.isNotEmpty()) {
             item {
                 ContentRow(
                     title = "Recommended for You", emoji = "\u2B50",
-                    items = recommended, onItemClick = onItemClick
+                    items = recommended, onItemClick = onItemClick,
+                    onLoadMore = { viewModel.loadMoreRecommended() },
+                    canLoadMore = canLoadMoreRecommended
                 )
             }
         }
@@ -150,35 +150,54 @@ fun HomeScreen(
             ContentRow(
                 title = "Trending Now", emoji = "\uD83D\uDD25",
                 items = trending, onItemClick = onItemClick,
-                onLoadMore = { viewModel.loadMoreTrending() }
+                onLoadMore = { viewModel.loadMoreTrending() },
+                canLoadMore = canLoadMoreTrending
             )
         }
         item {
             ContentRow(
                 title = "New in Theatres", emoji = "\uD83C\uDFAC",
                 items = nowPlaying, onItemClick = onItemClick,
-                onLoadMore = { viewModel.loadMoreNowPlaying() }
+                onLoadMore = { viewModel.loadMoreNowPlaying() },
+                canLoadMore = canLoadMoreNowPlaying
             )
         }
         item {
             ContentRow(
                 title = "Popular TV Shows", emoji = "\uD83D\uDCFA",
                 items = popularTV, onItemClick = onItemClick,
-                onLoadMore = { viewModel.loadMorePopularTV() }
+                onLoadMore = { viewModel.loadMorePopularTV() },
+                canLoadMore = canLoadMorePopularTV
             )
         }
         item {
             ContentRow(
                 title = "Top Rated Movies", emoji = "\u2B50",
                 items = topRated, onItemClick = onItemClick,
-                onLoadMore = { viewModel.loadMoreTopRated() }
+                onLoadMore = { viewModel.loadMoreTopRated() },
+                canLoadMore = canLoadMoreTopRated
             )
         }
         // NOTE: a second "Popular Movies" row used to live here but was
-        // removed — it was near-identical to "Top Rated Movies" (both are
+        // removed -- it was near-identical to "Top Rated Movies" (both are
         // movie rows ranked by a popularity/rating signal) and the user
         // flagged the duplication. Trending Now + New in Theatres already
         // cover the "popular" angle, so the home page no longer repeats it.
+        // -- Continue Watching ------------------------------------------
+        // MOVED to the bottom of the Home feed (was 2nd, right under the
+        // hero). Placing it last means the fresh content rows get the
+        // prime "above the fold" real estate and the continue-watching
+        // cards act as a natural "pick up where you left off" footer.
+        if (continueWatching.isNotEmpty()) {
+            item {
+                ContinueWatchingRow(
+                    items = continueWatching,
+                    progressMap = progressMap,
+                    onItemClick = onItemClick,
+                    onResume = onResume
+                )
+            }
+        }
     }
 }
 
