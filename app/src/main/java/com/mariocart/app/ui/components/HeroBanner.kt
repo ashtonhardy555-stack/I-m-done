@@ -310,57 +310,54 @@ fun HeroBanner(
         // of the hero so the user knows there's more content below.  A small
         // chevron that gently bounces up and down + a tiny caption, both
         // semi-transparent so they never fight the hero artwork for attention.
-        // Fades out once a hero button is focused (the user has "arrived") so
-        // it's never in the way.
+        // Fades out (alpha -> 0) once a hero button is focused (the user has
+        // "arrived") so it's never in the way. No conditional composable calls
+        // — the alpha animation alone controls visibility.
         val scrollHintAlpha by androidx.compose.animation.core.animateFloatAsState(
             targetValue = if (heroFocused) 0f else 1f,
             animationSpec = androidx.compose.animation.core.tween(400),
             label = "scrollHintAlpha"
         )
-        if (scrollHintAlpha > 0.01f) {
-            // Bouncing offset for the chevron (2-second loop).
-            val infiniteTransition = androidx.compose.animation.core.rememberInfiniteTransition(
-                label = "scrollHintBounce"
-            )
-            val bounceOffset by infiniteTransition.animateFloat(
-                initialValue = 0f,
-                targetValue = 8f,
-                animationSpec = androidx.compose.animation.core.infiniteRepeatable(
-                    animation = androidx.compose.animation.core.tween(
-                        durationMillis = 800,
-                        easing = androidx.compose.animation.core.FastOutSlowInEasing
-                    ),
-                    repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
+        val infiniteTransition = androidx.compose.animation.core.rememberInfiniteTransition(
+            label = "scrollHintBounce"
+        )
+        val bounceOffset by infiniteTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = 8f,
+            animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+                animation = androidx.compose.animation.core.tween(
+                    durationMillis = 800,
+                    easing = androidx.compose.animation.core.FastOutSlowInEasing
                 ),
-                label = "bounceOffset"
-            )
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
+                repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
+            ),
+            label = "bounceOffset"
+        )
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = if (dims.isTv) 12.dp + dims.safeAreaBottom else 8.dp)
+                .alpha(scrollHintAlpha)
+        ) {
+            Text(
+                text = "Scroll down for more",
+                color = TextMuted,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
                 modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = if (dims.isTv) 12.dp + dims.safeAreaBottom else 8.dp)
-            ) {
-                Text(
-                    text = "Scroll down for more",
-                    color = TextMuted,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier
-                        .background(Color.Black.copy(alpha = 0.45f * scrollHintAlpha))
-                        .alpha(scrollHintAlpha)
-                        .padding(horizontal = 12.dp, vertical = 4.dp)
-                )
-                Spacer(Modifier.height(4.dp))
-                Icon(
-                    imageVector = Icons.Default.KeyboardArrowDown,
-                    contentDescription = "Scroll down",
-                    tint = TextMuted.copy(alpha = scrollHintAlpha),
-                    modifier = Modifier
-                        .size(28.dp)
-                        .alpha(scrollHintAlpha)
-                        .offset(y = bounceOffset.dp)
-                )
-            }
+                    .background(Color.Black.copy(alpha = 0.45f * scrollHintAlpha))
+                    .padding(horizontal = 12.dp, vertical = 4.dp)
+            )
+            Spacer(Modifier.height(4.dp))
+            Icon(
+                imageVector = Icons.Default.KeyboardArrowDown,
+                contentDescription = "Scroll down",
+                tint = TextMuted.copy(alpha = scrollHintAlpha),
+                modifier = Modifier
+                    .size(28.dp)
+                    .offset(y = bounceOffset.dp)
+            )
         }
     }
 }
