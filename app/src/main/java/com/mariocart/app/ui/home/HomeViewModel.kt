@@ -73,19 +73,13 @@ class HomeViewModel : ViewModel() {
     private val _filtering = MutableStateFlow(false)
     val filtering: StateFlow<Boolean> = _filtering
 
-    // canLoadMore flags (per row)
+    // ── canLoadMore flags (per row) ───────────────────────────────────── //
     // Each flag is true while there are more pages available to load via the
-    // row loadMoreX() function. Set true on initial load (TMDB returns ~20
+    // row's loadMoreX() function. Set true on initial load (TMDB returns ~20
     // items per page, so page 1 always implies more), then set false once a
-    // loadMore() returns fewer than a full page -- that means we hit the
-    // end of the catalog and the Load More button should disappear.
-    //
-    // IMPORTANT: the size check uses the RAW TMDB page size (before
-    // StreamAvailabilityChecker.filterAvailable() and before the isMovie
-    // filter), NOT the filtered/streamable count. The old code checked the
-    // filtered size, which caused premature disappearance: the trending feed
-    // returns ~20 mixed items but only ~10 are movies, so the filtered size
-    // was < 20 even though TMDB had plenty more pages.
+    // loadMore() returns fewer than a full page or only duplicates — that
+    // means we've hit the end of the catalog and the "Load More" button
+    // should disappear.
     private val _canLoadMoreTrending = MutableStateFlow(true)
     val canLoadMoreTrending: StateFlow<Boolean> = _canLoadMoreTrending
 
@@ -107,86 +101,30 @@ class HomeViewModel : ViewModel() {
     // TMDB returns ~20 results per page. Used to detect end-of-catalog.
     private val pageSize = 20
 
-    // ── Initial loading + error state ─────────────────────────────────── //
-    // isInitialLoading: true from construction until the first batch of
-    //   network rows arrives (trending + nowPlaying + popularTV + topRated).
-    //   The Home screen shows a spinner / skeleton while this is true so
-    //   the user never sees a blank black screen on launch.
-    // initialError: set if EVERY network row failed to load. The Home screen
-    //   shows a retry button so the user can recover from a flaky connection
-    //   without having to close and reopen the app.
-    private val _isInitialLoading = MutableStateFlow(true)
-    val isInitialLoading: StateFlow<Boolean> = _isInitialLoading
-
-    private val _initialError = MutableStateFlow<String?>(null)
-    val initialError: StateFlow<String?> = _initialError
-
-    /** Retries the full initial load (called by the Home screen retry button). */
-    fun retry() {
-        _initialError.value = null
-        _isInitialLoading.value = true
-        loadAll()
-    }
-
     init { loadAll() }
 
     private fun loadAll() {
         // Continue watching is local (no network) so it loads instantly and
         // appears at the top of the Home screen before anything else.
         loadContinueWatching()
-        // Launch all network rows concurrently and track how many succeeded
-        // so we can flip isInitialLoading false and set initialError only
-        // if EVERY row failed (a single row failing is not an error — the
-        // other rows still show content).
-        var succeeded = 0
-        var failed = 0
-        val totalNetRows = 4
-        fun markResult(ok: Boolean) {
-            if (ok) succeeded++ else failed++
-            if (succeeded + failed >= totalNetRows) {
-                _isInitialLoading.value = false
-                if (succeeded == 0) {
-                    _initialError.value = "Couldn't load content. Check your connection and try again."
-                }
-            }
+        viewModelScope.launch {
+            val trending = repo.getTrending()
+            _heroItems.value = trending.filter { it.backdropPath != null }.take(8)
+            _trending.value = trending.filter { it.isMovie }.take(15)
+            // Refine the trending row to only-streamable titles.
+            refineRow(_trending)
         }
         viewModelScope.launch {
-            try {
-                val trending = repo.getTrending()
-                _heroItems.value = trending.filter { it.backdropPath != null }.take(8)
-                _trending.value = trending.filter { it.isMovie }.take(15)
-                refineRow(_trending)
-            } catch (_: Exception) {
-            } finally {
-                markResult(_trending.value.isNotEmpty())
-            }
+            _nowPlaying.value = repo.getNowPlaying()
+            refineRow(_nowPlaying)
         }
         viewModelScope.launch {
-            try {
-                _nowPlaying.value = repo.getNowPlaying()
-                refineRow(_nowPlaying)
-            } catch (_: Exception) {
-            } finally {
-                markResult(_nowPlaying.value.isNotEmpty())
-            }
+            _popularTV.value = repo.getPopularTV()
+            refineRow(_popularTV)
         }
         viewModelScope.launch {
-            try {
-                _popularTV.value = repo.getPopularTV()
-                refineRow(_popularTV)
-            } catch (_: Exception) {
-            } finally {
-                markResult(_popularTV.value.isNotEmpty())
-            }
-        }
-        viewModelScope.launch {
-            try {
-                _topRated.value = repo.getTopRatedMovies()
-                refineRow(_topRated)
-            } catch (_: Exception) {
-            } finally {
-                markResult(_topRated.value.isNotEmpty())
-            }
+            _topRated.value = repo.getTopRatedMovies()
+            refineRow(_topRated)
         }
         viewModelScope.launch {
             _popularMovies.value = repo.getPopularMovies()
@@ -390,21 +328,10 @@ class HomeViewModel : ViewModel() {
             _isLoadingMore.value = true
             trendingPage++
             val existing = _trending.value.map { it.id }.toSet()
-            // Fetch the raw trending page first, THEN filter to movies + dedup.
-            // The raw page includes both movies and TV, so we must check the
-            // RAW size against pageSize — not the movie-filtered size — to
-            // decide whether there are more TMDB pages. Using the filtered
-            // size was the premature-disappear bug: the trending feed returns
-            // ~20 mixed items but only ~10 are movies, so more.size < 20 even
-            // though TMDB has plenty more pages to load.
-            val rawPage = repo.getTrending(trendingPage)
-            val more = rawPage.filter { it.isMovie && it.id !in existing }
+            val more = repo.getTrending(trendingPage).filter { it.isMovie && it.id !in existing }
             if (more.isEmpty()) {
-                // No NEW movies on this page — but if the raw page was a full
-                // page there may still be more pages with movies, so keep
-                // the flag true (the user just gets no new cards this round).
-                // Only flip false if the raw page itself was short (end of TMDB).
-                _canLoadMoreTrending.value = rawPage.size >= pageSize
+                // Page returned only duplicates / non-movies — end of catalog.
+                _canLoadMoreTrending.value = false
                 _isLoadingMore.value = false
                 return@withLock
             }
@@ -416,9 +343,8 @@ class HomeViewModel : ViewModel() {
                 val moreIds = more.map { it.id }.toSet()
                 _trending.value = _trending.value.filter { it.id !in moreIds } + availableMore
             }
-            // End of catalog only if the RAW TMDB page was smaller than a
-            // full page — NOT the stream-filtered or movie-filtered size.
-            _canLoadMoreTrending.value = rawPage.size >= pageSize
+            // End of catalog if the raw batch was smaller than a full page.
+            _canLoadMoreTrending.value = more.size >= pageSize
             _isLoadingMore.value = false
         }
     }

@@ -39,15 +39,7 @@ android {
         versionCode = (System.getenv("CI_BUILD_NUMBER") ?: "3").toIntOrNull() ?: 3
         versionName = "1.4.0"
 
-        // TMDB API key: injected from the TMDB_API_KEY environment variable
-        // (a GitHub Secret in CI) so the key never lives in the repo source.
-        // Falls back to a local.properties key or a hardcoded key so the app
-        // still compiles without a secret. In CI the secret should be set;
-        // the hardcoded fallback ensures the build never breaks.
-        val tmdbKey = System.getenv("TMDB_API_KEY")
-            ?: gradleLocalProperties("TMDB_API_KEY")
-            ?: "a15c24c2a5c00487b179f5d4b53b72b0"
-        buildConfigField("String", "TMDB_API_KEY", "\"$tmdbKey\"")
+        buildConfigField("String", "TMDB_API_KEY", "\"a15c24c2a5c00487b179f5d4b53b72b0\"")
     }
 
     signingConfigs {
@@ -140,17 +132,4 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
-}
-
-/**
- * Reads a property from `local.properties` in the project root (if it
- * exists) so local dev can supply secrets like the TMDB API key without
- * committing them. Returns null if the file or property is missing.
- */
-fun gradleLocalProperties(key: String): String? {
-    val f = rootProject.file("local.properties")
-    if (!f.exists()) return null
-    val props = Properties()
-    props.load(FileInputStream(f))
-    return props.getProperty(key)
 }

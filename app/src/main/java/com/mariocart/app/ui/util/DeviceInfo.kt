@@ -104,10 +104,8 @@ data class ResponsiveDims(
     /**
      * Vertical space to reserve at the top of a non-hero screen so its
      * title / first content row is NOT hidden behind the transparent
-     * overlay top bar. Applies to BOTH phone and TV — the top bar overlays
-     * the hero on Home (so it never covers content there) but floats above
-     * the solid content rows on Movies / TV Shows / Browse / Updates, so
-     * those screens push their first row down by this amount to clear it.
+     * overlay top bar (phone layout only). On TV the side rail is used
+     * instead of an overlay top bar, so this is 0.
      */
     val topContentPadding: Dp,
     /**
@@ -157,32 +155,18 @@ data class ResponsiveDims(
             // rowPadding already provides left/right spacing; the safe-area
             // inset is added separately so it applies even on hero/edge cases.
             rowPadding = 40.dp,
-            // Hero height tuned so the FULL hero (backdrop artwork + title +
-            // overview + Play / More Info buttons) fits within the visible
-            // viewport on a 1080p Android TV with the transparent top bar
-            // overlaying it. Previously 680dp, which was taller than the
-            // visible area after the top bar, so the top half of the hero
-            // artwork was clipped/off-screen and couldn't be scrolled to.
-            // ~500dp keeps the whole hero visible at once even on a
-            // density-2.0 (xhdpi) 1080p TV where the viewport is ~540dp
-            // tall; the hero + 27dp top safe-area = 527dp, leaving room for
-            // the "scroll down for more" hint at the bottom edge.
-            heroHeight = 500.dp,
+            heroHeight = 680.dp,
             heroTitleSize = 44,
             navIconSize = 30.dp,
             navLabelSize = 13,
             // TV screens are wide — 5 columns fills the space nicely.
             gridColumns = 5,
-            // TV now uses the same transparent overlay top bar as the phone
-            // (the side rail was removed). Non-hero screens (Movies/TV
-            // Shows/Browse/Updates) need to clear the top bar so their first
-            // row isn't hidden behind it. The top bar sits over the hero on
-            // Home (transparent gradient, hero stays fully visible) but
-            // floats above the solid content rows on other tabs, so we reserve
-            // the bar height + status/safe-area inset here.
-            topContentPadding = 72.dp,
-            // No side rail anymore — content uses the full width.
-            navRailWidth = 0.dp,
+            // No overlay top bar on TV (side rail layout) — nothing to clear.
+            topContentPadding = 0.dp,
+            // Persistent collapsed rail width (icons only). Expands on focus
+            // but content is laid out to clear this fixed width so it never
+            // overlaps a card even mid-expand.
+            navRailWidth = 72.dp,
             // Android TV safe-area / overscan margins (5% guideline).
             safeAreaHorizontal = 48.dp,
             safeAreaTop = 27.dp,

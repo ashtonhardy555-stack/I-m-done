@@ -16,8 +16,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -94,8 +92,6 @@ fun HomeScreen(
     val continueWatching by viewModel.continueWatching.collectAsState()
     val recommended by viewModel.recommended.collectAsState()
     val progressMap by viewModel.progressMap.collectAsState()
-    val isInitialLoading by viewModel.isInitialLoading.collectAsState()
-    val initialError by viewModel.initialError.collectAsState()
 
     // canLoadMore flags — each is true while there are more pages available
     // for that row. Passed into ContentRow so the "Load More" button hides
@@ -134,76 +130,6 @@ fun HomeScreen(
             .focusGroup()
             .padding(top = dims.safeAreaTop)
     ) {
-        // ── Initial loading state ───────────────────────────────────────── //
-        // While the first batch of network content is loading AND we don't
-        // have any content yet, show a centered spinner so the user never
-        // sees a blank black screen on launch.
-        if (isInitialLoading && heroItems.isEmpty() && trending.isEmpty()) {
-            item {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(if (dims.isTv) 500.dp else 360.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    androidx.compose.material3.CircularProgressIndicator(
-                        color = Red,
-                        strokeWidth = 3.dp,
-                        modifier = Modifier.size(if (dims.isTv) 56.dp else 40.dp)
-                    )
-                }
-            }
-        }
-        // ── Error state ─────────────────────────────────────────────────── //
-        // If every network row failed and we have no content at all, show an
-        // error message with a retry button.
-        if (initialError != null && heroItems.isEmpty() && trending.isEmpty()) {
-            item {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(
-                            top = if (dims.isTv) 120.dp else 80.dp,
-                            start = 24.dp,
-                            end = 24.dp
-                        ),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text(
-                        text = initialError ?: "",
-                        color = TextPrimary,
-                        fontSize = if (dims.isTv) 18.sp else 16.sp,
-                        fontWeight = FontWeight.Medium,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                    )
-                    Spacer(modifier = Modifier.height(20.dp))
-                    val retryInteraction = remember { MutableInteractionSource() }
-                    val retryFocused by retryInteraction.collectIsFocusedAsState()
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Red)
-                            .then(
-                                if (retryFocused) Modifier.border(2.dp, Color.White, RoundedCornerShape(6.dp))
-                                else Modifier
-                            )
-                            .clickable(
-                                interactionSource = retryInteraction,
-                                indication = null,
-                                onClick = { viewModel.retry() }
-                            )
-                            .padding(horizontal = 28.dp, vertical = 12.dp)
-                    ) {
-                        Text(
-                            text = "Retry",
-                            color = Color.White,
-                            fontSize = if (dims.isTv) 16.sp else 14.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-            }
-        }
         item {
             HeroBanner(
                 items = heroItems,

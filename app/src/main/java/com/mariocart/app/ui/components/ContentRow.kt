@@ -108,12 +108,13 @@ fun ContentRow(
             // vertical headroom so the scale + shadow aren't cut off.
             verticalAlignment = Alignment.CenterVertically,
             // focusGroup(): makes this row OWN its horizontal D-pad traversal.
-            // Without it, a Left press mid-row would bubble up to the
-            // screen-level focusGroup and escape the row. With focusGroup on
-            // the row, Left/Right is consumed here for card-to-card movement,
-            // and only a Left press on the FIRST card (nothing further left
-            // to move to) reaches the outer LazyColumn — which now scrolls the
-            // page (no side rail anymore, just the top bar above the content).
+            // Without it, a Left press mid-row bubbles up to the screen-level
+            // focusGroup (which only traps vertical nav) and then to the
+            // content Box's onKeyEvent — which opens the side rail even though
+            // the user was just trying to move left one card. With focusGroup
+            // on the row, Left/Right is consumed here for card-to-card
+            // movement, and only a Left press on the FIRST card (nothing
+            // further left to move to) reaches the outer handler → rail.
             modifier = Modifier.focusGroup()
         ) {
             items(

@@ -7,10 +7,13 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -22,9 +25,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -36,7 +41,6 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LocalCafe
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material.icons.filled.Upgrade
 import androidx.compose.material3.AlertDialog
@@ -57,9 +61,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -70,8 +81,8 @@ import com.mariocart.app.ui.home.HomeScreen
 import com.mariocart.app.ui.movies.MoviesScreen
 import com.mariocart.app.ui.player.PlayerActivity
 import com.mariocart.app.ui.search.SearchScreen
-import com.mariocart.app.ui.settings.SettingsScreen
 import com.mariocart.app.ui.theme.Bg
+import com.mariocart.app.ui.theme.Bg2
 import com.mariocart.app.ui.theme.Bg3
 import com.mariocart.app.ui.theme.NetflixTheme
 import com.mariocart.app.ui.theme.Red
@@ -88,7 +99,6 @@ private enum class Tab(val label: String, val icon: ImageVector) {
     Movies("Movies", Icons.Default.Movie),
     TV("TV Shows", Icons.Default.Tv),
     Browse("Browse", Icons.Default.GridView),
-    Settings("Settings", Icons.Default.Settings),
     Updates("Updates", Icons.Default.Upgrade)
 }
 
@@ -122,12 +132,15 @@ private fun AppRoot() {
     var selectedTv by remember { mutableStateOf<TmdbItem?>(null) }
     var searchGenre by remember { mutableStateOf<String?>(null) }
 
-    // The app now uses a single transparent overlay top bar on BOTH phone
-    // and TV (the old TV side rail was removed). There is no side rail to
-    // pop open, so pressing D-pad Left on the home screen ONLY navigates
-    // the horizontal content rows — exactly what you want when scrolling
-    // back through movies you passed. The hero banner is fully visible
-    // because nothing overlays its left edge.
+    // TV-only: the side rail is HIDDEN by default and only slides in when the
+    // user presses Left while already on the first card of a row. Selecting a
+    // nav item slides it back away so it never covers content while browsing.
+    var sideNavVisible by remember { mutableStateOf(false) }
+    val sideNavFocusRequester = remember { FocusRequester() }
+    // True only during the one-time startup reveal of the rail. While true the
+    // rail auto-retracts after a few seconds (if the user hasn't picked an
+    // item or pressed Right to dismiss it) so it never lingers over content.
+    var sideNavAutoShown by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         com.mariocart.app.ui.AutoUpdater.checkAndPrompt(context)
@@ -273,6 +286,12 @@ private fun AppRoot() {
         showSearch = false
         searchGenre = null
     }
+    // TV: Back also dismisses the side rail (if visible) before anything else
+    // peels off, so a TV remote user is never stuck with the rail on screen.
+    BackHandler(enabled = sideNavVisible) {
+        sideNavVisible = false
+        sideNavAutoShown = false
+    }
 
     // ── One-time Buy Me a Coffee dialog (phone, first launch only) ────── //
     if (showBmcDialog) {
@@ -314,27 +333,149 @@ private fun AppRoot() {
         return
     }
 
-    // ── Unified layout: a single transparent overlay top bar for BOTH phone
-    //    and TV. The old TV side rail was removed so that pressing D-pad Left
-    //    on the home screen ONLY navigates the horizontal content rows
-    //    (scrolling back through movies) — there is no sidebar to pop open and
-    //    cover the hero banner. The top bar overlays the hero on Home with a
-    //    transparent gradient (so the full hero stays visible) and floats
-    //    above the solid content on other tabs (whose first row is pushed down
-    //    by topContentPadding to clear it).
-    Box(modifier = Modifier.fillMaxSize().background(Bg)) {
-        NetflixScreenSwitch(
-            currentTab = currentTab,
-            onItemClick = onItemClick,
-            onSearchWithGenre = onSearchWithGenre,
-            onResume = onResume
-        )
-        NetflixTopBar(
-            currentTab = currentTab,
-            onTabSelected = { currentTab = it },
-            onSearchClick = { showSearch = true },
-            isTv = dims.isTv
-        )
+    // ── Layout: TV uses a side navigation rail; phones use the Netflix top bar ──
+    if (dims.isTv) {
+        // The side rail is hidden by default. It slides in (overlapping the
+        // left edge of the content) only when the user presses Left while on
+        // the first card of a row — i.e. "at the beginning of a line". It
+        // slides back out as soon as a nav item is chosen, so it never gets
+        // in the way while scrolling through movies/shows.
+        //
+        // ONE-TIME STARTUP REVEAL: the first time the TV layout appears we
+        // slide the rail in and land focus on it so the user immediately
+        // discovers that a side menu exists (otherwise a no-pointer TV remote
+        // user could browse for a long time without ever realising it's
+        // there). After a few seconds — if they haven't picked an item or
+        // pressed Right to dismiss — it auto-retracts so it doesn't linger
+        // over the content. They can always bring it back with a Left press.
+        LaunchedEffect(Unit) {
+            kotlinx.coroutines.delay(400)
+            sideNavVisible = true
+            sideNavAutoShown = true
+        }
+        // Auto-retract the startup-revealed rail after a grace period. This
+        // only fires for the auto-shown reveal (sideNavAutoShown == true);
+        // a user-invoked Left-press reveal (sideNavAutoShown == false) stays
+        // until they explicitly dismiss it.
+        LaunchedEffect(sideNavVisible, sideNavAutoShown) {
+            if (sideNavVisible && sideNavAutoShown) {
+                kotlinx.coroutines.delay(4500)
+                sideNavVisible = false
+                sideNavAutoShown = false
+            }
+        }
+
+        Box(modifier = Modifier.fillMaxSize().background(Bg)) {
+            // When the side rail becomes visible, land D-pad focus on it so
+            // the user can immediately navigate the nav items.
+            LaunchedEffect(sideNavVisible) {
+                if (sideNavVisible) {
+                    kotlinx.coroutines.delay(120)
+                    runCatching { sideNavFocusRequester.requestFocus() }
+                }
+            }
+
+            // Content fills the full width; the rail overlays it when visible.
+            //
+            // D-PAD LEFT / SIDEBAR FIX:
+            // The onKeyEvent that opens the side rail is on the OUTER Box,
+            // and the focusGroup() is on the INNER Box. This ordering is
+            // critical: the inner focusGroup() gets FIRST crack at every
+            // key event. When the user presses Left and there IS a card to
+            // the left of the current focus, the focusGroup consumes the event
+            // (moves focus left) and it never reaches the outer onKeyEvent.
+            // Only when the focus is already at the FAR-LEFT edge of a row
+            // (nothing further left to move to) does the focusGroup let the
+            // event bubble up to the outer onKeyEvent, which then reveals the
+            // side rail. This is the correct "only open the sidebar at the
+            // beginning of a line" behaviour.
+            //
+            // The previous bug was that onKeyEvent and focusGroup() were on
+            // the SAME Box, so onKeyEvent intercepted every Left press BEFORE
+            // the focusGroup could consume it for card-to-card navigation —
+            // making the sidebar open on every single Left press.
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .onKeyEvent { event ->
+                        // Reveal the side rail when the user presses Left and
+                        // it is currently hidden — i.e. "at the beginning of a
+                        // line". This only fires when the inner focusGroup()
+                        // did NOT consume the Left event (focus was already at
+                        // the far-left edge). A manual reveal is NOT
+                        // auto-shown, so it stays until dismissed.
+                        if (!sideNavVisible &&
+                            event.type == KeyEventType.KeyUp &&
+                            event.key == Key.DirectionLeft
+                        ) {
+                            sideNavAutoShown = false
+                            sideNavVisible = true
+                            true
+                        } else {
+                            false
+                        }
+                    }
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .focusGroup()
+                ) {
+                    NetflixScreenSwitch(
+                        currentTab = currentTab,
+                        onItemClick = onItemClick,
+                        onSearchWithGenre = onSearchWithGenre,
+                        onResume = onResume
+                    )
+                }
+            }
+
+            // Sliding side rail — overlays the content's left edge.
+            AnimatedVisibility(
+                visible = sideNavVisible,
+                enter = slideInHorizontally(animationSpec = tween(220)) { fullWidth -> -fullWidth },
+                exit = slideOutHorizontally(animationSpec = tween(220)) { fullWidth -> -fullWidth },
+                modifier = Modifier.align(Alignment.CenterStart)
+            ) {
+                TvSideNav(
+                    currentTab = currentTab,
+                    onTabSelected = {
+                        currentTab = it
+                        sideNavVisible = false
+                        sideNavAutoShown = false
+                    },
+                    onSearchClick = {
+                        showSearch = true
+                        sideNavVisible = false
+                        sideNavAutoShown = false
+                    },
+                    onDismiss = {
+                        sideNavVisible = false
+                        sideNavAutoShown = false
+                    },
+                    // Show the "press Left anytime" hint only during the
+                    // startup auto-reveal, so first-time users learn the
+                    // gesture but returning users aren't nagged.
+                    showHint = sideNavAutoShown,
+                    focusRequester = sideNavFocusRequester
+                )
+            }
+        }
+    } else {
+        // Phone: transparent Netflix top bar that fades to solid on tab change.
+        Box(modifier = Modifier.fillMaxSize().background(Bg)) {
+            NetflixScreenSwitch(
+                currentTab = currentTab,
+                onItemClick = onItemClick,
+                onSearchWithGenre = onSearchWithGenre,
+                onResume = onResume
+            )
+            NetflixTopBar(
+                currentTab = currentTab,
+                onTabSelected = { currentTab = it },
+                onSearchClick = { showSearch = true }
+            )
+        }
     }
 }
 
@@ -362,30 +503,22 @@ private fun NetflixScreenSwitch(
             Tab.Movies -> MoviesScreen(onItemClick = onItemClick)
             Tab.TV -> TvScreen(onItemClick = onItemClick)
             Tab.Browse -> BrowseScreen(onItemClick = onItemClick)
-            Tab.Settings -> SettingsScreen()
             Tab.Updates -> UpdatesScreen()
         }
     }
 }
 
 // ──────────────────────────────────────────────────────────────────── //
-// ──────────────────────────────────────────────────────────────────────────── //
-//  Unified top navigation bar (phone AND TV)                                //
-//  Transparent over the hero, with a top→bottom black gradient so the        //
-//  white text always reads. Tabs are D-pad focusable with the red            //
-//  underline that Netflix uses for the active section. On TV the focused     //
-//  tab gets a red focus ring + larger text/icons so it reads from the        //
-//  couch. It never steals initial focus — each screen grabs focus on its     //
-//  hero Play button / first card via rememberInitialFocusRequester, so the   //
-//  user starts on content. The top bar is reached by pressing D-pad Up       //
-//  from the topmost content row.                                            //
-// ──────────────────────────────────────────────────────────────────────────── //
+//  Netflix top navigation bar (phone)                                 //
+//  Transparent over the hero, with a top→bottom black gradient so the //
+//  white text always reads. Tabs are D-pad focusable with the red     //
+//  underline that Netflix uses for the active section.                //
+// ──────────────────────────────────────────────────────────────────── //
 @Composable
 private fun NetflixTopBar(
     currentTab: Tab,
     onTabSelected: (Tab) -> Unit,
-    onSearchClick: () -> Unit,
-    isTv: Boolean = false
+    onSearchClick: () -> Unit
 ) {
     Surface(color = Color.Transparent, shadowElevation = 0.dp) {
         Column(
@@ -394,17 +527,14 @@ private fun NetflixTopBar(
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(
-                            Color.Black.copy(alpha = if (isTv) 0.9f else 0.85f),
+                            Color.Black.copy(alpha = 0.85f),
                             Color.Black.copy(alpha = 0.4f),
                             Color.Transparent
                         )
                     )
                 )
                 .statusBarsPadding()
-                .padding(
-                    horizontal = if (isTv) 32.dp else 16.dp,
-                    vertical = if (isTv) 14.dp else 10.dp
-                )
+                .padding(horizontal = 16.dp, vertical = 10.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -412,7 +542,7 @@ private fun NetflixTopBar(
             ) {
                 // Inline nav tabs — Netflix shows these in the top bar.
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(if (isTv) 28.dp else 20.dp),
+                    horizontalArrangement = Arrangement.spacedBy(20.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.weight(1f)
                 ) {
@@ -420,20 +550,15 @@ private fun NetflixTopBar(
                         TopNavTab(
                             tab = tab,
                             isSelected = tab == currentTab,
-                            onClick = { onTabSelected(tab) },
-                            isTv = isTv
+                            onClick = { onTabSelected(tab) }
                         )
                     }
                 }
-                IconButton(
-                    onClick = onSearchClick,
-                    modifier = if (isTv) Modifier.size(44.dp) else Modifier
-                ) {
+                IconButton(onClick = onSearchClick) {
                     Icon(
                         Icons.Default.Search,
                         contentDescription = "Search",
-                        tint = Color.White,
-                        modifier = if (isTv) Modifier.size(28.dp) else Modifier
+                        tint = Color.White
                     )
                 }
             }
@@ -442,24 +567,158 @@ private fun NetflixTopBar(
 }
 
 @Composable
-private fun TopNavTab(
-    tab: Tab,
-    isSelected: Boolean,
-    onClick: () -> Unit,
-    isTv: Boolean = false
-) {
+private fun TopNavTab(tab: Tab, isSelected: Boolean, onClick: () -> Unit) {
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
     val color = if (isSelected) Color.White else TextMuted
 
     Column(
         modifier = Modifier
-            .clip(RoundedCornerShape(6.dp))
-            // On TV show a red focus ring so the user can tell which tab
-            // is focused while navigating the top bar with the D-pad.
+            .clip(RoundedCornerShape(4.dp))
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick
+            )
+            .padding(vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = tab.label,
+            color = if (isFocused && !isSelected) TextPrimary else color,
+            fontSize = 14.sp,
+            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+        )
+        Spacer(Modifier.height(4.dp))
+        // Red underline under the active tab (Netflix active-section marker).
+        Box(
+            modifier = Modifier
+                .width(if (isSelected) 24.dp else 0.dp)
+                .height(3.dp)
+                .background(Red, RoundedCornerShape(2.dp))
+        )
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────── //
+//  TV side navigation rail (Android TV)                               //
+//  Vertical icon+label rail with the red focus highlight.             //
+// ──────────────────────────────────────────────────────────────────── //
+@Composable
+private fun TvSideNav(
+    currentTab: Tab,
+    onTabSelected: (Tab) -> Unit,
+    onSearchClick: () -> Unit,
+    onDismiss: () -> Unit = {},
+    showHint: Boolean = false,
+    focusRequester: FocusRequester? = null
+) {
+    Surface(
+        color = Bg2,
+        shadowElevation = 0.dp,
+        modifier = Modifier
+            .fillMaxHeight()
+            .width(120.dp)
+            // Pressing Right while focused inside the rail slides it back
+            // away (D-pad dismiss without having to pick an item). Back is
+            // handled by the BackHandler in AppRoot.
+            .onKeyEvent { event ->
+                if (event.type == KeyEventType.KeyUp && event.key == Key.DirectionRight) {
+                    onDismiss()
+                    true
+                } else false
+            }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxHeight()
+                .padding(vertical = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            // One-time discoverability hint: a small chip at the top of the
+            // rail that tells first-time users they can reopen this menu with
+            // a Left press at any time. Only shown during the startup
+            // auto-reveal; returning users never see it.
+            if (showHint) {
+                SideNavHintChip()
+            }
+            // The first item (Search) receives the shared focus requester so
+            // the rail grabs D-pad focus as soon as it slides in.
+            TvNavItem(
+                icon = Icons.Default.Search,
+                label = "Search",
+                isSelected = false,
+                onClick = onSearchClick,
+                focusRequester = focusRequester
+            )
+            Tab.entries.forEach { tab ->
+                TvNavItem(
+                    icon = tab.icon,
+                    label = tab.label,
+                    isSelected = tab == currentTab,
+                    onClick = { onTabSelected(tab) }
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Small "press ← anytime" hint shown at the top of the side rail during the
+ * one-time startup reveal. Non-focusable (it's purely informational) so it
+ * never steals D-pad focus from the first real nav item below it.
+ */
+@Composable
+private fun SideNavHintChip() {
+    Column(
+        modifier = Modifier
+            .width(100.dp)
+            .padding(bottom = 4.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(Red.copy(alpha = 0.18f))
+            .padding(vertical = 6.dp, horizontal = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = "◀ Menu",
+            color = Red,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold
+        )
+        Text(
+            text = "press Left\nto reopen",
+            color = TextMuted,
+            fontSize = 9.sp,
+            fontWeight = FontWeight.Normal,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            lineHeight = 11.sp
+        )
+    }
+}
+
+@Composable
+private fun TvNavItem(
+    icon: ImageVector,
+    label: String,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    focusRequester: FocusRequester? = null
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isFocused by interactionSource.collectIsFocusedAsState()
+    val color = if (isSelected) Red else TextPrimary
+    val highlight = isFocused || isSelected
+
+    Column(
+        modifier = Modifier
+            .width(100.dp)
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (highlight) Red.copy(alpha = 0.15f) else Color.Transparent)
             .then(
-                if (isTv && isFocused) {
-                    Modifier.border(2.dp, Red, RoundedCornerShape(6.dp))
+                if (isFocused) {
+                    Modifier.border(2.dp, Red, RoundedCornerShape(10.dp))
                 } else {
                     Modifier
                 }
@@ -469,25 +728,21 @@ private fun TopNavTab(
                 indication = null,
                 onClick = onClick
             )
-            .padding(
-                horizontal = if (isTv) 6.dp else 0.dp,
-                vertical = if (isTv) 8.dp else 6.dp
-            ),
+            .padding(vertical = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(
-            text = tab.label,
-            color = if (isFocused && !isSelected) TextPrimary else color,
-            fontSize = if (isTv) 18.sp else 14.sp,
-            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+        Icon(
+            icon,
+            contentDescription = label,
+            tint = color,
+            modifier = Modifier.size(28.dp)
         )
         Spacer(Modifier.height(4.dp))
-        // Red underline under the active tab (Netflix active-section marker).
-        Box(
-            modifier = Modifier
-                .width(if (isSelected) (if (isTv) 32.dp else 24.dp) else 0.dp)
-                .height(3.dp)
-                .background(Red, RoundedCornerShape(2.dp))
+        Text(
+            label,
+            color = color,
+            fontSize = 12.sp,
+            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
         )
     }
 }
