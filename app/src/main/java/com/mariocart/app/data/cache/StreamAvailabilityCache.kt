@@ -90,21 +90,6 @@ object StreamAvailabilityCache {
         appContext = context.applicationContext
     }
 
-    /**
-     * Clears all in-memory + on-disk stream-availability records. Called from
-     * the Settings screen's "Clear Stream Cache" action so the next play
-     * re-probes every provider from scratch (useful if a provider changed
-     * their URL scheme or the user wants a clean slate).
-     */
-    fun clearAll(context: Context) {
-        appContext = context.applicationContext
-        store.clear()
-        loaded = true
-        val cacheFile = File(context.cacheDir, "stream_availability.json")
-        if (cacheFile.exists()) cacheFile.delete()
-        Log.i(TAG, "Stream availability cache cleared")
-    }
-
     private fun keyFor(
         tmdbId: Int, contentType: String, season: Int, episode: Int
     ): String = "$tmdbId|$contentType|$season|$episode"

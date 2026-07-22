@@ -36,7 +36,6 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LocalCafe
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material.icons.filled.Upgrade
 import androidx.compose.material3.AlertDialog
@@ -70,7 +69,6 @@ import com.mariocart.app.ui.home.HomeScreen
 import com.mariocart.app.ui.movies.MoviesScreen
 import com.mariocart.app.ui.player.PlayerActivity
 import com.mariocart.app.ui.search.SearchScreen
-import com.mariocart.app.ui.settings.SettingsScreen
 import com.mariocart.app.ui.theme.Bg
 import com.mariocart.app.ui.theme.Bg3
 import com.mariocart.app.ui.theme.NetflixTheme
@@ -88,7 +86,6 @@ private enum class Tab(val label: String, val icon: ImageVector) {
     Movies("Movies", Icons.Default.Movie),
     TV("TV Shows", Icons.Default.Tv),
     Browse("Browse", Icons.Default.GridView),
-    Settings("Settings", Icons.Default.Settings),
     Updates("Updates", Icons.Default.Upgrade)
 }
 
@@ -362,7 +359,6 @@ private fun NetflixScreenSwitch(
             Tab.Movies -> MoviesScreen(onItemClick = onItemClick)
             Tab.TV -> TvScreen(onItemClick = onItemClick)
             Tab.Browse -> BrowseScreen(onItemClick = onItemClick)
-            Tab.Settings -> SettingsScreen()
             Tab.Updates -> UpdatesScreen()
         }
     }
