@@ -42,6 +42,10 @@ class BrowseViewModel : ViewModel() {
     private val _canLoadMore = MutableStateFlow(true)
     val canLoadMore: StateFlow<Boolean> = _canLoadMore
 
+    /** True while a loadMore() is in flight (distinct from initial load). */
+    private val _loadingMore = MutableStateFlow(false)
+    val loadingMore: StateFlow<Boolean> = _loadingMore
+
     private var page = 1
 
     init {
@@ -74,6 +78,16 @@ class BrowseViewModel : ViewModel() {
                 if (ctx != null) {
                     val available = StreamAvailabilityChecker.filterAvailable(ctx, raw)
                     _items.value = available
+                    // If the first page filtered down to very few streamable
+                    // titles but TMDB still has more pages, auto-load the next
+                    // page so the user always sees a reasonable grid + the
+                    // "Show More" button. This fixes the "no load more button
+                    // at the end" issue where aggressive availability filtering
+                    // left the grid with only 2-3 cards and the user thought
+                    // there was nothing more to load.
+                    if (_canLoadMore.value && available.size < 6) {
+                        autoLoadNextPage()
+                    }
                 }
             } catch (e: Exception) {
                 _error.value = "Couldn't load content. Check your connection."
@@ -86,11 +100,47 @@ class BrowseViewModel : ViewModel() {
         }
     }
 
+    /**
+     * Auto-loads the next page of the current genre and appends the
+     * streamable subset. Called when the first page filters down to too few
+     * items so the user isn't left with a nearly-empty grid and no visible
+     * "Show More" button. Runs in the background without clobbering the
+     * existing results.
+     */
+    private suspend fun autoLoadNextPage() {
+        try {
+            val genre = _selectedGenre.value
+            val nextPage = 2
+            val raw = repo.discover(
+                type = genre?.type ?: "movie",
+                genreId = genre?.id?.takeIf { it.isNotEmpty() },
+                page = nextPage
+            )
+            if (raw.size < pageSize) {
+                _canLoadMore.value = false
+            }
+            val existing = _items.value.map { it.id }.toSet()
+            val fresh = raw.filter { it.id !in existing }
+            if (fresh.isEmpty()) {
+                _canLoadMore.value = false
+                return
+            }
+            val ctx = appContext() ?: return
+            val availableMore = StreamAvailabilityChecker.filterAvailable(ctx, fresh)
+            page = nextPage
+            _items.value = _items.value + availableMore
+        } catch (e: Exception) {
+            // Silently fail — the first page is still visible.
+            _canLoadMore.value = false
+        }
+    }
+
     fun loadMore() {
         viewModelScope.launch {
             loadMutex.withLock {
-                if (_isLoading.value) return@withLock
-                _isLoading.value = true
+                if (_isLoading.value || _loadingMore.value) return@withLock
+                if (!_canLoadMore.value) return@withLock
+                _loadingMore.value = true
                 var more: List<TmdbItem> = emptyList()
                 try {
                     val genre = _selectedGenre.value
@@ -115,7 +165,7 @@ class BrowseViewModel : ViewModel() {
                 } catch (e: Exception) {
                     _error.value = "Couldn't load more content."
                 } finally {
-                    _isLoading.value = false
+                    _loadingMore.value = false
                     _filtering.value = false
                     // End-of-catalog: TMDB sent fewer than a full page (or
                     // every item was a duplicate), so there's nothing more.

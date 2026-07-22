@@ -175,7 +175,14 @@ fun SearchScreen(
                             event.key == Key.NumPadEnter ||
                             event.key == Key.DirectionCenter)) {
                         keyboard?.hide()
-                        focusManager.clearFocus()
+                        // NOTE: we intentionally do NOT call focusManager.
+                        // clearFocus() here — doing so can cause the TV
+                        // Leanback IME to fire a final onValueChange with
+                        // an empty string, which would clear the search
+                        // results right after the user committed the
+                        // search. Hiding the keyboard is sufficient to
+                        // close the on-screen keypad and let the user
+                        // D-pad through the results grid.
                         searchCommitted = true
                         true
                     } else false

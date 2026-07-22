@@ -50,11 +50,11 @@ class TvViewModel : ViewModel() {
     private fun load() {
         viewModelScope.launch {
             _popular.value = repo.getPopularTV()
-            refineRow(_popular)
+            refineRow(_popular, _canLoadMorePopular)
         }
         viewModelScope.launch {
             _topRated.value = repo.getTopRatedTV()
-            refineRow(_topRated)
+            refineRow(_topRated, _canLoadMoreTopRated)
         }
     }
 
@@ -63,8 +63,16 @@ class TvViewModel : ViewModel() {
      * results immediately (already set by the caller) so the row isn't empty,
      * then probes availability and replaces the list with the filtered subset.
      * Titles with no playable source are hidden.
+     *
+     * If the filtered result is very short (fewer than 6 streamable titles)
+     * but TMDB still has more pages, auto-loads the next page so the row
+     * always has a reasonable number of cards and the Load More button is
+     * visible.
      */
-    private suspend fun refineRow(row: MutableStateFlow<List<TmdbItem>>) {
+    private suspend fun refineRow(
+        row: MutableStateFlow<List<TmdbItem>>,
+        canLoadMoreFlag: MutableStateFlow<Boolean>
+    ) {
         val ctx = appContext() ?: return
         val raw = row.value
         if (raw.isEmpty()) return
@@ -72,14 +80,56 @@ class TvViewModel : ViewModel() {
         try {
             val available = StreamAvailabilityChecker.filterAvailable(ctx, raw)
             row.value = available
+            // If the first page filtered down to very few streamable titles
+            // but TMDB still has more pages, auto-load the next page so the
+            // user always sees a reasonable number of cards + the Load More
+            // button.
+            if (canLoadMoreFlag.value && available.size < 6) {
+                autoLoadNextPage(row, canLoadMoreFlag)
+            }
         } finally {
             _filtering.value = false
+        }
+    }
+
+    /**
+     * Auto-loads the next page of a row and appends the streamable subset.
+     * Called when the first page filters down to too few items.
+     */
+    private suspend fun autoLoadNextPage(
+        row: MutableStateFlow<List<TmdbItem>>,
+        canLoadMoreFlag: MutableStateFlow<Boolean>
+    ) {
+        try {
+            val ctx = appContext() ?: return
+            val isPopular = row === _popular
+            val nextPage = if (isPopular) popularPage + 1 else topRatedPage + 1
+            val raw = if (isPopular) {
+                repo.getPopularTV(nextPage)
+            } else {
+                repo.getTopRatedTV(nextPage)
+            }
+            if (raw.size < pageSize) {
+                canLoadMoreFlag.value = false
+            }
+            val existing = row.value.map { it.id }.toSet()
+            val fresh = raw.filter { it.id !in existing }
+            if (fresh.isEmpty()) {
+                canLoadMoreFlag.value = false
+                return
+            }
+            val availableMore = StreamAvailabilityChecker.filterAvailable(ctx, fresh)
+            if (isPopular) popularPage = nextPage else topRatedPage = nextPage
+            row.value = row.value + availableMore
+        } catch (e: Exception) {
+            canLoadMoreFlag.value = false
         }
     }
 
     fun loadMore() = viewModelScope.launch {
         loadMutex.withLock {
             if (_isLoadingMore.value) return@withLock
+            if (!_canLoadMorePopular.value) return@withLock
             _isLoadingMore.value = true
             popularPage++
             val existing = _popular.value.map { it.id }.toSet()
@@ -104,11 +154,12 @@ class TvViewModel : ViewModel() {
     /**
      * Loads the next page of top-rated TV shows and appends the new (deduped)
      * titles to the Top Rated Shows row, then filters the batch down to only
-     * streamable titles \u2014 mirroring [loadMore] for the Popular row.
+     * streamable titles — mirroring [loadMore] for the Popular row.
      */
     fun loadMoreTopRated() = viewModelScope.launch {
         loadMutex.withLock {
             if (_isLoadingMore.value) return@withLock
+            if (!_canLoadMoreTopRated.value) return@withLock
             _isLoadingMore.value = true
             topRatedPage++
             val existing = _topRated.value.map { it.id }.toSet()

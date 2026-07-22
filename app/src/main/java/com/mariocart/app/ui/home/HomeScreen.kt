@@ -119,7 +119,17 @@ fun HomeScreen(
     // the LazyColumn into empty space — nothing focused, user stranded on a
     // no-pointer TV remote. focusGroup() makes the focusable children a single
     // unit so Up stops at the top element and Down stops at the bottom.
-    LazyColumn(modifier = Modifier.fillMaxSize().focusGroup()) {
+    // On TV we add the top safe-area inset (overscan margin) so the hero
+    // banner's top edge is never clipped by the TV bezel — this fixes the
+    // "can't see the full top banner" issue where the top of the hero was
+    // cut off on Android TV displays.
+    val dims = responsiveDims()
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .focusGroup()
+            .padding(top = dims.safeAreaTop)
+    ) {
         item {
             HeroBanner(
                 items = heroItems,

@@ -63,6 +63,7 @@ fun BrowseScreen(
     val selectedGenre by viewModel.selectedGenre.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val canLoadMore by viewModel.canLoadMore.collectAsState()
+    val loadingMore by viewModel.loadingMore.collectAsState()
     val allGenres = MOVIE_GENRES + TV_GENRES
     val dims = responsiveDims()
 
@@ -162,7 +163,7 @@ fun BrowseScreen(
         if (items.isNotEmpty() && canLoadMore) {
             item(span = { GridItemSpan(dims.gridColumns) }) {
                 ShowMoreButton(
-                    isLoading = isLoading,
+                    isLoading = loadingMore,
                     onClick = { viewModel.loadMore() }
                 )
             }

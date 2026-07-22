@@ -376,22 +376,34 @@ private fun AppRoot() {
             }
 
             // Content fills the full width; the rail overlays it when visible.
-            // The inner focusGroup() is the key to the "scroll left without
-            // opening the side rail" behaviour: it intercepts Left/Right D-pad
-            // events for card-to-card movement within rows. Only when the
-            // focus is already at the far-left edge of a row (nothing further
-            // left to move to) does the focusGroup let the key bubble up to
-            // the onKeyEvent handler below, which then reveals the rail.
+            //
+            // D-PAD LEFT / SIDEBAR FIX:
+            // The onKeyEvent that opens the side rail is on the OUTER Box,
+            // and the focusGroup() is on the INNER Box. This ordering is
+            // critical: the inner focusGroup() gets FIRST crack at every
+            // key event. When the user presses Left and there IS a card to
+            // the left of the current focus, the focusGroup consumes the event
+            // (moves focus left) and it never reaches the outer onKeyEvent.
+            // Only when the focus is already at the FAR-LEFT edge of a row
+            // (nothing further left to move to) does the focusGroup let the
+            // event bubble up to the outer onKeyEvent, which then reveals the
+            // side rail. This is the correct "only open the sidebar at the
+            // beginning of a line" behaviour.
+            //
+            // The previous bug was that onKeyEvent and focusGroup() were on
+            // the SAME Box, so onKeyEvent intercepted every Left press BEFORE
+            // the focusGroup could consume it for card-to-card navigation —
+            // making the sidebar open on every single Left press.
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .focusGroup()
                     .onKeyEvent { event ->
                         // Reveal the side rail when the user presses Left and
                         // it is currently hidden — i.e. "at the beginning of a
-                        // line". The LaunchedEffect above then moves focus
-                        // into the rail once it appears. A manual reveal is
-                        // NOT auto-shown, so it stays until dismissed.
+                        // line". This only fires when the inner focusGroup()
+                        // did NOT consume the Left event (focus was already at
+                        // the far-left edge). A manual reveal is NOT
+                        // auto-shown, so it stays until dismissed.
                         if (!sideNavVisible &&
                             event.type == KeyEventType.KeyUp &&
                             event.key == Key.DirectionLeft
@@ -404,12 +416,18 @@ private fun AppRoot() {
                         }
                     }
             ) {
-                NetflixScreenSwitch(
-                    currentTab = currentTab,
-                    onItemClick = onItemClick,
-                    onSearchWithGenre = onSearchWithGenre,
-                    onResume = onResume
-                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .focusGroup()
+                ) {
+                    NetflixScreenSwitch(
+                        currentTab = currentTab,
+                        onItemClick = onItemClick,
+                        onSearchWithGenre = onSearchWithGenre,
+                        onResume = onResume
+                    )
+                }
             }
 
             // Sliding side rail — overlays the content's left edge.
