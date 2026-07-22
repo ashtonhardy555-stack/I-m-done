@@ -1,42 +1,40 @@
-# Add Headless Kodi-Style Server Extractors
+# Fix: Android TV UX — top bar, fully-visible hero banner, and Load More button
 
-## Context
-The app has a "Kodi-like headless engine" (KodiEngine) that runs the LookMovie
-addon flow (search → storage → security API → .m3u8) in pure OkHttp (no WebView,
-no Kodi runtime). The user wants MORE servers added that work the same way —
-headless, pure OkHttp extractors that resolve direct stream URLs through the
-Kodi engine.
+## Goals (all for Android TV)
+1. **Replace the side rail with a top bar** so pressing Left to scroll back through movies doesn't pop open a sidebar.
+2. **Hero banner fully visible** — the top half is cut off and can't be selected/seen. Make the hero banner fully visible (no clipping), keep the Play button selected by default, and make sure the user knows there's more content below.
+3. **Load More button** — missing on category/genre screens, and sometimes disappears prematurely after pressing it on the home screen.
 
 ## Tasks
 
-### Phase 1: Research & Understand Existing Architecture
-- [x] Merge PR #43 (animateFloat fix) — build was broken
-- [x] Verify the build passes after merge (run #29888416981 SUCCESS)
-- [x] Read LookMovieHeadlessExtractor.kt — the reference implementation
-- [x] Read KodiEngine.kt — the addon orchestration layer (Addon interface)
-- [x] Read PlayerActivity.kt — the parallel race that uses all extractors
-- [x] Read existing extractor patterns (VidStorm, NoTorrent, VidLink, VixSrc, etc.)
-- [x] Research Stremio addon API endpoints (NuvioStreams, etc.)
+### 1. MainActivity.kt — replace TV side rail with top bar
+- [x] Remove the entire TV side-rail layout branch (state, onKeyEvent, AnimatedVisibility, TvSideNav).
+- [x] Remove the side-rail BackHandler.
+- [x] Remove the side-rail auto-reveal/auto-retract LaunchedEffects.
+- [x] Unify the layout: one Box with NetflixScreenSwitch + NetflixTopBar overlay for BOTH phone and TV.
+- [x] Remove the now-dead TvSideNav / SideNavHintChip / TvNavItem composables.
+- [x] Make NetflixTopBar D-pad focusable for TV (red focus ring, larger sizing) without stealing initial focus from the hero Play button.
 
-### Phase 2: Create New Headless Extractors (Kodi-style, pure OkHttp)
-- [x] Create SmashStreamsExtractor.kt — Stremio addon API (JSON streams)
-- [x] Create NuvioStreamsExtractor.kt — Stremio addon with direct stream URLs
-- [x] Create AnnasCinemaExtractor.kt — Stremio addon aggregator
-- [x] Create NovaStreamExtractor.kt — Stremio addon with direct stream URLs
+### 2. DeviceInfo.kt ResponsiveDims
+- [x] Add a TV topContentPadding so non-hero screens push their first row below the top bar.
+- [x] Set navRailWidth = 0 for TV (no side rail anymore).
+- [x] Adjust TV heroHeight so the full hero fits within the visible viewport.
 
-### Phase 3: Wire Into KodiEngine (Addon interface)
-- [x] Add each new extractor as a KodiEngine.Addon adapter
-- [x] Ensure they participate in the engine's pre-resolve / cache flow
-- [x] Extend ResolveRequest to include tmdbId + contentType
+### 3. HeroBanner.kt — full visibility + Play selected + "more below" hint
+- [x] Hero height reduced to 500dp so full hero fits in TV viewport.
+- [x] Keep the Play button as the default D-pad focus.
+- [x] "scroll down for more" hint stays visible (55% alpha) even when Play is focused.
+- [x] Hero content bottom-aligned with safe-area bottom inset.
 
-### Phase 4: Wire Into PlayerActivity Parallel Race
-- [x] Add try*() helper for each new extractor (SmashStreams, NuvioStreams, AnnasCinema, NovaStream)
-- [x] Add each to the deferreds list in the parallel race
-- [x] Add provider reliability weights for new providers
-- [x] Add new providers to RACE_PROVIDER_BASES set
-- [x] Add new providers to isEnglishStream default-English allowlist
-- [x] Update engine-first ResolveRequest in PlayerActivity to include tmdbId
+### 4. Load More button fixes
+- [x] Investigate ContentRow.kt for the Load More button.
+- [x] Investigate SearchScreen.kt / BrowseScreen.kt — both already have Load More buttons.
+- [x] Fix the premature-disappear bug in HomeViewModel.kt (loadMoreTrending now checks raw TMDB page size, not movie-filtered size).
+- [x] Update ContentRow.kt comment to reference top bar instead of old side rail.
+- [x] Update HomeViewModel.kt canLoadMore comment to document the raw-size fix.
 
-### Phase 5: Build & Test
-- [x] Create PR with the new extractors (PR #44)
-- [x] Monitor the CI build to ensure it passes (run #29890036015 SUCCESS in 4m19s)
+### 5. Build / compile check
+- [x] Run a gradle compile to ensure no errors. (BUILD SUCCESSFUL — only pre-existing warnings, no errors)
+
+### 6. Commit + push branch + open PR
+- [ ] Create a feature branch, commit, push, and open a pull request.
