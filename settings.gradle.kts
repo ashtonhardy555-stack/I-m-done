@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Freeflix"
+rootProject.name = "PiratesfilmCove"
 include(":app")

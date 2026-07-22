@@ -1,7 +1,7 @@
 # Retrofit
 -keepattributes Signature
 -keepattributes *Annotation*
--keep class com.freeflix.app.data.model.** { *; }
+-keep class com.ashtonhardy.piratesfilmcove.data.model.** { *; }
 -dontwarn okhttp3.**
 -dontwarn retrofit2.**
 
