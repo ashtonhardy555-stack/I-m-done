@@ -2,7 +2,11 @@ package com.mariocart.app.data.engine
 
 import android.content.Context
 import android.util.Log
+import com.mariocart.app.data.server.AnnasCinemaExtractor
 import com.mariocart.app.data.server.LookMovieHeadlessExtractor
+import com.mariocart.app.data.server.NovaStreamExtractor
+import com.mariocart.app.data.server.NuvioStreamsExtractor
+import com.mariocart.app.data.server.SmashStreamsExtractor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -66,8 +70,17 @@ class KodiEngine private constructor(private val context: Context) {
         val year: String?,
         val isMovie: Boolean,
         val season: Int,
-        val episode: Int
-    )
+        val episode: Int,
+        /** TMDB id — needed by Stremio-style addons (NoTorrent, SmashStreams,
+         *  NuvioStreams, AnnasCinema, NovaStream) to resolve IMDb ids. May be
+         *  0 if the caller only has title/year (e.g. a pre-resolve from a
+         *  browse screen that doesn't have the TMDB id handy). LookMovie
+         *  (the primary addon) doesn't need it. */
+        val tmdbId: Int = 0
+    ) {
+        /** Convenience: "movie" or "tv" for Stremio addon calls. */
+        val contentType: String get() = if (isMovie) "movie" else "tv"
+    }
 
     /** A successfully resolved stream. */
     data class ResolvedStream(
@@ -117,8 +130,70 @@ class KodiEngine private constructor(private val context: Context) {
         }
     }
 
-    /** Addons consulted, in priority order. */
-    private val addons = mutableListOf<Addon>(lookmovieAddon)
+    // -- Stremio-style addon adapters --
+    // These use the TMDB id (from ResolveRequest.tmdbId) to resolve a direct
+    // playable stream URL via their respective Stremio addon APIs. They are
+    // headless (pure OkHttp, no WebView) -- the same approach as
+    // LookMovieHeadlessExtractor. They only run when tmdbId is available.
+
+    private val smashStreamsAddon = object : Addon {
+        override val id = "smashstreams"
+        override suspend fun resolve(req: ResolveRequest): AddonResult {
+            if (req.tmdbId <= 0) return AddonResult.Error("SmashStreams: no tmdbId")
+            val r = SmashStreamsExtractor.extract(req.tmdbId, req.contentType, req.season, req.episode)
+            return when (r) {
+                is SmashStreamsExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "SmashStreams" })
+                is SmashStreamsExtractor.Result.Error -> AddonResult.Error(r.message)
+            }
+        }
+    }
+
+    private val nuvioStreamsAddon = object : Addon {
+        override val id = "nuviostreams"
+        override suspend fun resolve(req: ResolveRequest): AddonResult {
+            if (req.tmdbId <= 0) return AddonResult.Error("NuvioStreams: no tmdbId")
+            val r = NuvioStreamsExtractor.extract(req.tmdbId, req.contentType, req.season, req.episode)
+            return when (r) {
+                is NuvioStreamsExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "NuvioStreams" })
+                is NuvioStreamsExtractor.Result.Error -> AddonResult.Error(r.message)
+            }
+        }
+    }
+
+    private val annasCinemaAddon = object : Addon {
+        override val id = "annascinema"
+        override suspend fun resolve(req: ResolveRequest): AddonResult {
+            if (req.tmdbId <= 0) return AddonResult.Error("AnnasCinema: no tmdbId")
+            val r = AnnasCinemaExtractor.extract(req.tmdbId, req.contentType, req.season, req.episode)
+            return when (r) {
+                is AnnasCinemaExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "AnnasCinema" })
+                is AnnasCinemaExtractor.Result.Error -> AddonResult.Error(r.message)
+            }
+        }
+    }
+
+    private val novaStreamAddon = object : Addon {
+        override val id = "novastream"
+        override suspend fun resolve(req: ResolveRequest): AddonResult {
+            if (req.tmdbId <= 0) return AddonResult.Error("NovaStream: no tmdbId")
+            val r = NovaStreamExtractor.extract(req.tmdbId, req.contentType, req.season, req.episode)
+            return when (r) {
+                is NovaStreamExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "NovaStream" })
+                is NovaStreamExtractor.Result.Error -> AddonResult.Error(r.message)
+            }
+        }
+    }
+
+    /** Addons consulted, in priority order. LookMovie first (the reference
+     *  headless extractor and the engine's primary addon), then the
+     *  Stremio-style addons that need TMDB ids. */
+    private val addons = mutableListOf<Addon>(
+        lookmovieAddon,
+        smashStreamsAddon,
+        nuvioStreamsAddon,
+        annasCinemaAddon,
+        novaStreamAddon
+    )
 
     // \u2500\u2500 scope \u2500\u2500
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -255,8 +330,8 @@ class KodiEngine private constructor(private val context: Context) {
         val job = scope.launch {
             try {
                 Log.d(TAG, "background resolve: '${req.title}' S${req.season}E${req.episode} (movie=${req.isMovie})")
-                // Run addons in order; first Stream wins. (Only LookMovie for now,
-                // but the loop makes the pluggable design real.)
+                // Run addons in order; first Stream wins. LookMovie is first
+                // (the primary headless addon), then the Stremio-style addons.
                 var lastErr: String? = null
                 for (addon in addons) {
                     val r = addon.resolve(req)
