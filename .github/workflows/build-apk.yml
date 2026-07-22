@@ -1,8 +1,11 @@
 name: Build & Release APK
 
 on:
-  push:
-    branches: [ "main" ]
+  # Auto-build on push is paused so the in-app updater does not see a
+  # newer-than-build-63 release until we are ready to move forward.
+  # Re-enable by changing this back to:
+  #   push:
+  #     branches: [ "main" ]
   workflow_dispatch:
 
 permissions:
