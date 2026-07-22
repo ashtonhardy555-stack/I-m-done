@@ -311,11 +311,13 @@ fun HeroBanner(
         // of the hero so the user knows there's more content below.  A small
         // chevron that gently bounces up and down + a tiny caption, both
         // semi-transparent so they never fight the hero artwork for attention.
-        // Fades out (alpha -> 0) once a hero button is focused (the user has
-        // "arrived") so it's never in the way. No conditional composable calls
-        // — the alpha animation alone controls visibility.
+        // When no hero button is focused it shows at full strength; once a
+        // hero button is focused it dims to a subtle (but still visible)
+        // level so the user ALWAYS knows there's more content below the hero
+        // — it never fully disappears, so even with the Play button selected
+        // the "more below" affordance stays on screen.
         val scrollHintAlpha by androidx.compose.animation.core.animateFloatAsState(
-            targetValue = if (heroFocused) 0f else 1f,
+            targetValue = if (heroFocused) 0.55f else 1f,
             animationSpec = androidx.compose.animation.core.tween(400),
             label = "scrollHintAlpha"
         )
