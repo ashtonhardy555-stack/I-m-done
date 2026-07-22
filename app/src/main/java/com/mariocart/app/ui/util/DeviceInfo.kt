@@ -155,7 +155,7 @@ data class ResponsiveDims(
             // rowPadding already provides left/right spacing; the safe-area
             // inset is added separately so it applies even on hero/edge cases.
             rowPadding = 40.dp,
-            heroHeight = 600.dp,
+            heroHeight = 680.dp,
             heroTitleSize = 44,
             navIconSize = 30.dp,
             navLabelSize = 13,

@@ -96,6 +96,15 @@ class SearchViewModel : ViewModel() {
     }
 
     fun updateQuery(newQuery: String) {
+        // Guard against spurious re-issues: if the query hasn't actually
+        // changed, don't cancel the in-flight search job and don't re-run
+        // the debounce. This fixes the "searches disappear if you sit on
+        // the keypad too long" issue — the TV Leanback IME can send
+        // repeated onValueChange callbacks with the same value (e.g. when
+        // the IME auto-dismisses or re-composes), which previously
+        // cancelled the running search job and either re-debounced forever
+        // or cleared results.
+        if (newQuery == _query.value) return
         _query.value = newQuery
         // Once the user starts typing, drop the genre preset.
         if (newQuery.isNotBlank()) presetGenre = null
