@@ -107,30 +107,86 @@ class HomeViewModel : ViewModel() {
     // TMDB returns ~20 results per page. Used to detect end-of-catalog.
     private val pageSize = 20
 
+    // ── Initial loading + error state ─────────────────────────────────── //
+    // isInitialLoading: true from construction until the first batch of
+    //   network rows arrives (trending + nowPlaying + popularTV + topRated).
+    //   The Home screen shows a spinner / skeleton while this is true so
+    //   the user never sees a blank black screen on launch.
+    // initialError: set if EVERY network row failed to load. The Home screen
+    //   shows a retry button so the user can recover from a flaky connection
+    //   without having to close and reopen the app.
+    private val _isInitialLoading = MutableStateFlow(true)
+    val isInitialLoading: StateFlow<Boolean> = _isInitialLoading
+
+    private val _initialError = MutableStateFlow<String?>(null)
+    val initialError: StateFlow<String?> = _initialError
+
+    /** Retries the full initial load (called by the Home screen retry button). */
+    fun retry() {
+        _initialError.value = null
+        _isInitialLoading.value = true
+        loadAll()
+    }
+
     init { loadAll() }
 
     private fun loadAll() {
         // Continue watching is local (no network) so it loads instantly and
         // appears at the top of the Home screen before anything else.
         loadContinueWatching()
-        viewModelScope.launch {
-            val trending = repo.getTrending()
-            _heroItems.value = trending.filter { it.backdropPath != null }.take(8)
-            _trending.value = trending.filter { it.isMovie }.take(15)
-            // Refine the trending row to only-streamable titles.
-            refineRow(_trending)
+        // Launch all network rows concurrently and track how many succeeded
+        // so we can flip isInitialLoading false and set initialError only
+        // if EVERY row failed (a single row failing is not an error — the
+        // other rows still show content).
+        var succeeded = 0
+        var failed = 0
+        val totalNetRows = 4
+        fun markResult(ok: Boolean) {
+            if (ok) succeeded++ else failed++
+            if (succeeded + failed >= totalNetRows) {
+                _isInitialLoading.value = false
+                if (succeeded == 0) {
+                    _initialError.value = "Couldn't load content. Check your connection and try again."
+                }
+            }
         }
         viewModelScope.launch {
-            _nowPlaying.value = repo.getNowPlaying()
-            refineRow(_nowPlaying)
+            try {
+                val trending = repo.getTrending()
+                _heroItems.value = trending.filter { it.backdropPath != null }.take(8)
+                _trending.value = trending.filter { it.isMovie }.take(15)
+                refineRow(_trending)
+            } catch (_: Exception) {
+            } finally {
+                markResult(_trending.value.isNotEmpty())
+            }
         }
         viewModelScope.launch {
-            _popularTV.value = repo.getPopularTV()
-            refineRow(_popularTV)
+            try {
+                _nowPlaying.value = repo.getNowPlaying()
+                refineRow(_nowPlaying)
+            } catch (_: Exception) {
+            } finally {
+                markResult(_nowPlaying.value.isNotEmpty())
+            }
         }
         viewModelScope.launch {
-            _topRated.value = repo.getTopRatedMovies()
-            refineRow(_topRated)
+            try {
+                _popularTV.value = repo.getPopularTV()
+                refineRow(_popularTV)
+            } catch (_: Exception) {
+            } finally {
+                markResult(_popularTV.value.isNotEmpty())
+            }
+        }
+        viewModelScope.launch {
+            try {
+                _topRated.value = repo.getTopRatedMovies()
+                refineRow(_topRated)
+            } catch (_: Exception) {
+            } finally {
+                markResult(_topRated.value.isNotEmpty())
+            }
         }
         viewModelScope.launch {
             _popularMovies.value = repo.getPopularMovies()
