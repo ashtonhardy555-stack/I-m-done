@@ -156,18 +156,6 @@ fun BrowseScreen(
             )
         }
 
-        // "Show More" footer - shown only when there are cards AND there's
-        // more to load (canLoadMore). When the genre catalog is exhausted
-        // canLoadMore flips to false and the button disappears. While a
-        // loadMore() is in flight the button shows a spinner and is disabled.
-        if (items.isNotEmpty() && canLoadMore) {
-            item(span = { GridItemSpan(dims.gridColumns) }) {
-                ShowMoreButton(
-                    isLoading = loadingMore,
-                    onClick = { viewModel.loadMore() }
-                )
-            }
-        }
     }
 }
 

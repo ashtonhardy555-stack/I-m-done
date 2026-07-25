@@ -58,8 +58,6 @@ fun MoviesScreen(
             ContentRow(
                 title = "Popular Movies", emoji = "\uD83C\uDFAC",
                 items = popular, onItemClick = onItemClick,
-                onLoadMore = { viewModel.loadMore() },
-                canLoadMore = canLoadMorePopular,
                 firstCardFocusRequester = firstCardFocusRequester
             )
         }
@@ -67,8 +65,6 @@ fun MoviesScreen(
             ContentRow(
                 title = "Top Rated", emoji = "\uD83C\uDFC6",
                 items = topRated, onItemClick = onItemClick,
-                onLoadMore = { viewModel.loadMoreTopRated() },
-                canLoadMore = canLoadMoreTopRated
             )
         }
     }

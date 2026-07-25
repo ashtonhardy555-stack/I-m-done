@@ -343,19 +343,6 @@ fun SearchScreen(
                 )
             }
 
-            // ── "Load More" footer (full width) ──────────────────────────
-            // Shown only when there are cards AND there's more to load
-            // (canLoadMore). While a loadMore() is in flight the button
-            // shows a spinner and is disabled.
-            if (canLoadMore) {
-                item(span = { GridItemSpan(dims.gridColumns) }) {
-                    SearchLoadMoreButton(
-                        isLoading = loadingMore,
-                        isTv = dims.isTv,
-                        onClick = { viewModel.loadMore() }
-                    )
-                }
-            }
         } else if (!isLoading && query.length >= 2) {
             // ── Empty state for a committed text search ─────────────────
             item(span = { GridItemSpan(dims.gridColumns) }) {

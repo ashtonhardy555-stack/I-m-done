@@ -46,6 +46,11 @@ class BrowseViewModel : ViewModel() {
     private val _loadingMore = MutableStateFlow(false)
     val loadingMore: StateFlow<Boolean> = _loadingMore
 
+    // Max pages to fetch per genre so the grid shows all the titles
+    // that fit without a Show More button. ~6 pages ≈ ~120 titles
+    // before the streamable filter.
+    private val maxPages = 6
+
     private var page = 1
 
     init {
@@ -60,34 +65,23 @@ class BrowseViewModel : ViewModel() {
         viewModelScope.launch {
             _isLoading.value = true
             try {
-                val raw = repo.discover(
+                // Fetch ALL pages for the genre so the grid shows every
+                // title that fits without a Show More button. We aggregate
+                // up to [maxPages] pages, dedup by id, and stop early when
+                // a page returns fewer than a full page (end of catalog).
+                val raw = loadAllPagesDiscover(
                     type = genre?.type ?: type,
-                    genreId = genre?.id?.takeIf { it.isNotEmpty() },
-                    page = 1
+                    genreId = genre?.id?.takeIf { it.isNotEmpty() }
                 )
-                // Show the raw results immediately so the grid isn't empty
-                // while we probe availability, then refine to only-streamable
-                // titles. This keeps the UI responsive.
+                // Show the aggregated raw results immediately so the grid
+                // isn't empty while we probe availability, then refine to
+                // only-streamable titles.
                 _items.value = raw
-                // End-of-catalog check on the first page.
-                if (raw.size < pageSize) {
-                    _canLoadMore.value = false
-                }
+                _canLoadMore.value = false
                 _filtering.value = true
                 val ctx = appContext()
                 if (ctx != null) {
-                    val available = StreamAvailabilityChecker.filterAvailable(ctx, raw)
-                    _items.value = available
-                    // If the first page filtered down to very few streamable
-                    // titles but TMDB still has more pages, auto-load the next
-                    // page so the user always sees a reasonable grid + the
-                    // "Show More" button. This fixes the "no load more button
-                    // at the end" issue where aggressive availability filtering
-                    // left the grid with only 2-3 cards and the user thought
-                    // there was nothing more to load.
-                    if (_canLoadMore.value && available.size < 6) {
-                        autoLoadNextPage()
-                    }
+                    _items.value = StreamAvailabilityChecker.filterAvailable(ctx, raw)
                 }
             } catch (e: Exception) {
                 _error.value = "Couldn't load content. Check your connection."
@@ -98,6 +92,28 @@ class BrowseViewModel : ViewModel() {
                 _filtering.value = false
             }
         }
+    }
+
+    /**
+     * Fetches up to [maxPages] pages of a discover query, dedups by id,
+     * and returns the aggregated list. Stops early when a page returns
+     * fewer than a full page (end of catalog). Lets the grid show all the
+     * titles that fit without a Show More button.
+     */
+    private suspend fun loadAllPagesDiscover(
+        type: String,
+        genreId: String?
+    ): List<TmdbItem> {
+        val all = mutableListOf<TmdbItem>()
+        val seen = mutableSetOf<Int>()
+        for (p in 1..maxPages) {
+            val items = runCatching { repo.discover(type = type, genreId = genreId, page = p) }
+                .getOrDefault(emptyList())
+            if (items.isEmpty()) break
+            for (item in items) if (seen.add(item.id)) all.add(item)
+            if (items.size < pageSize) break
+        }
+        return all
     }
 
     /**

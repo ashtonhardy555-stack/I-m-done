@@ -67,6 +67,10 @@ class SearchViewModel : ViewModel() {
     // search for. Empty when in genre-preset mode.
     private var committedQuery: String = ""
 
+    // Max pages to fetch so the grid shows all results that fit
+    // without a Load More button.
+    private val maxPages = 6
+
     // TMDB returns ~20 results per page. Used to detect end-of-catalog.
     private val pageSize = 20
 
@@ -83,20 +87,24 @@ class SearchViewModel : ViewModel() {
         searchJob = viewModelScope.launch {
             _isLoading.value = true
             try {
-                val raw = if (presetGenre == null) {
-                    // No genre (the "Trending" chip) - show trending content.
-                    repo.discover(type = "movie", genreId = null, page = 1)
+                // Fetch ALL pages so the grid shows every title that fits
+                // without a Load More button. Determine the media type,
+                // then aggregate up to [maxPages] pages.
+                if (presetGenre == null) {
+                    val raw = loadAllPagesDiscover(type = "movie", genreId = null)
+                    page = 1
+                    _canLoadMore.value = false
+                    _results.value = raw
+                    refineResults(raw, replace = true)
                 } else {
-                    // Determine whether it's a movie or TV genre id.
                     val tvGenreIds = setOf("10759", "16", "35")
                     val type = if (tvGenreIds.contains(presetGenre)) "tv" else "movie"
-                    repo.discover(type = type, genreId = presetGenre, page = 1)
+                    val raw = loadAllPagesDiscover(type = type, genreId = presetGenre)
+                    page = 1
+                    _canLoadMore.value = false
+                    _results.value = raw
+                    refineResults(raw, replace = true)
                 }
-                page = 1
-                _canLoadMore.value = raw.size >= pageSize
-                // Show raw results immediately, then refine to only-streamable.
-                _results.value = raw
-                refineResults(raw, replace = true)
             } catch (e: Exception) {
                 _results.value = emptyList()
                 _canLoadMore.value = false
@@ -148,8 +156,10 @@ class SearchViewModel : ViewModel() {
                 val trimmed = newQuery.trim()
                 committedQuery = trimmed
                 page = 1
-                val raw = repo.search(trimmed, page = 1)
-                _canLoadMore.value = raw.size >= pageSize
+                // Fetch ALL pages for the query so the grid shows every
+                // matching title without a Load More button.
+                val raw = loadAllPagesSearch(trimmed)
+                _canLoadMore.value = false
                 // Show raw results immediately, then refine to only-streamable.
                 _results.value = raw
                 refineResults(raw, replace = true)
@@ -215,6 +225,45 @@ class SearchViewModel : ViewModel() {
                 }
             }
         }
+    }
+
+    /**
+     * Fetches up to [maxPages] pages of a discover query, dedups by id,
+     * and returns the aggregated list. Stops early when a page returns
+     * fewer than a full page (end of catalog).
+     */
+    private suspend fun loadAllPagesDiscover(
+        type: String,
+        genreId: String?
+    ): List<TmdbItem> {
+        val all = mutableListOf<TmdbItem>()
+        val seen = mutableSetOf<Int>()
+        for (p in 1..maxPages) {
+            val items = runCatching { repo.discover(type = type, genreId = genreId, page = p) }
+                .getOrDefault(emptyList())
+            if (items.isEmpty()) break
+            for (item in items) if (seen.add(item.id)) all.add(item)
+            if (items.size < pageSize) break
+        }
+        return all
+    }
+
+    /**
+     * Fetches up to [maxPages] pages of a text search query, dedups by
+     * id, and returns the aggregated list. Stops early when a page
+     * returns fewer than a full page (end of catalog).
+     */
+    private suspend fun loadAllPagesSearch(query: String): List<TmdbItem> {
+        val all = mutableListOf<TmdbItem>()
+        val seen = mutableSetOf<Int>()
+        for (p in 1..maxPages) {
+            val items = runCatching { repo.search(query, page = p) }
+                .getOrDefault(emptyList())
+            if (items.isEmpty()) break
+            for (item in items) if (seen.add(item.id)) all.add(item)
+            if (items.size < pageSize) break
+        }
+        return all
     }
 
     /**

@@ -103,31 +103,40 @@ class HomeViewModel : ViewModel() {
 
     init { loadAll() }
 
+    // Max number of TMDB pages to fetch per row on the initial load so each
+    // row shows ALL the movies that fit (not just the first ~20 from page 1).
+    // TMDB returns ~20 results/page, so 6 pages ≈ ~120 titles per row before the
+    // streamable filter — plenty to fill a horizontal row without a Load More
+    // button. The loop stops early if a page returns fewer than a full page
+    // (end of catalog) so we never waste requests on empty pages.
+    private val maxPagesPerRow = 6
+
     private fun loadAll() {
         // Continue watching is local (no network) so it loads instantly and
         // appears at the top of the Home screen before anything else.
         loadContinueWatching()
         viewModelScope.launch {
-            val trending = repo.getTrending()
+            // Fetch multiple pages of trending so the row shows many titles.
+            val trending = loadAllPages { page -> repo.getTrending(page) }
             _heroItems.value = trending.filter { it.backdropPath != null }.take(8)
-            _trending.value = trending.filter { it.isMovie }.take(15)
+            _trending.value = trending.filter { it.isMovie }
             // Refine the trending row to only-streamable titles.
             refineRow(_trending)
         }
         viewModelScope.launch {
-            _nowPlaying.value = repo.getNowPlaying()
+            _nowPlaying.value = loadAllPages { page -> repo.getNowPlaying(page) }
             refineRow(_nowPlaying)
         }
         viewModelScope.launch {
-            _popularTV.value = repo.getPopularTV()
+            _popularTV.value = loadAllPages { page -> repo.getPopularTV(page) }
             refineRow(_popularTV)
         }
         viewModelScope.launch {
-            _topRated.value = repo.getTopRatedMovies()
+            _topRated.value = loadAllPages { page -> repo.getTopRatedMovies(page) }
             refineRow(_topRated)
         }
         viewModelScope.launch {
-            _popularMovies.value = repo.getPopularMovies()
+            _popularMovies.value = loadAllPages { page -> repo.getPopularMovies(page) }
             refineRow(_popularMovies)
         }
         // Recommendations depend on the watch history (local) + a TMDB
@@ -135,6 +144,30 @@ class HomeViewModel : ViewModel() {
         viewModelScope.launch {
             loadRecommended()
         }
+    }
+
+    /**
+     * Fetches up to [maxPagesPerRow] pages from [fetch] (which takes a page
+     * number and returns a page of [TmdbItem]s), dedups by id, and returns
+     * the aggregated list. Stops early when a page returns fewer than a full
+     * page (end of catalog). This lets each content row show all the titles
+     * that fit without a Load More button — the user just scrolls the row.
+     */
+    private suspend fun loadAllPages(
+        fetch: suspend (Int) -> List<TmdbItem>
+    ): List<TmdbItem> {
+        val all = mutableListOf<TmdbItem>()
+        val seen = mutableSetOf<Int>()
+        for (page in 1..maxPagesPerRow) {
+            val items = runCatching { fetch(page) }.getOrDefault(emptyList())
+            if (items.isEmpty()) break
+            for (item in items) {
+                if (seen.add(item.id)) all.add(item)
+            }
+            // Fewer than a full page means end of catalog.
+            if (items.size < pageSize) break
+        }
+        return all
     }
 
     /**

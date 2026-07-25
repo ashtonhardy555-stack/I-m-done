@@ -112,8 +112,9 @@ fun ContentCard(
     // layouts the reporter is null (no side rail) so this is a pure no-op.
     val sideRailReporter = LocalSideRailXReporter.current
     var cardXInWindow by remember { mutableStateOf(0f) }
+    var cardYInWindow by remember { mutableStateOf(0f) }
     LaunchedEffect(isFocused) {
-        if (isFocused) sideRailReporter?.invoke(cardXInWindow)
+        if (isFocused) sideRailReporter?.invoke(cardXInWindow, cardYInWindow)
     }
 
     // Netflix card scale-up on hover/focus, tiny press shrink.
@@ -178,7 +179,10 @@ fun ContentCard(
             // when this card gains focus. Reporting in a coroutine (not
             // during layout) is the safe Compose pattern. positionInWindow.x
             // is the card's left edge in px.
-            .onGloballyPositioned { coords -> cardXInWindow = coords.positionInRoot.x }
+            .onGloballyPositioned { coords ->
+                cardXInWindow = coords.positionInWindow().x
+                cardYInWindow = coords.positionInWindow().y
+            }
             // Shadow is ALWAYS in the chain (structural stability — see the
             // note above). Its elevation animates 0 → 24dp so idle cards pay
             // effectively zero shadow cost (0 elevation = no shadow pass),
