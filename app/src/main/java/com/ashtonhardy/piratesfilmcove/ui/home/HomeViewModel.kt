@@ -279,7 +279,10 @@ class HomeViewModel : ViewModel() {
                 if (i < moreTv.size) merged.add(moreTv[i])
             }
             if (merged.isEmpty()) {
-                _canLoadMoreRecommended.value = false
+                // End of catalog only if BOTH feeds returned less than a full
+                // page (not if the merged/filtered batch was small).
+                _canLoadMoreRecommended.value =
+                    moreMovies.size >= pageSize || moreTv.size >= pageSize
                 _isLoadingMore.value = false
                 return@withLock
             }
@@ -328,10 +331,19 @@ class HomeViewModel : ViewModel() {
             _isLoadingMore.value = true
             trendingPage++
             val existing = _trending.value.map { it.id }.toSet()
-            val more = repo.getTrending(trendingPage).filter { it.isMovie && it.id !in existing }
+            // Capture the RAW page size BEFORE filtering/dedup so the
+            // end-of-catalog decision is based on whether TMDB actually
+            // returned a full page, not on how many survived the filter.
+            // (The filter removes non-movies + already-seen ids, which can
+            // shrink the batch below pageSize even when TMDB returned a full
+            // page — that was the bug that made Load More vanish prematurely.)
+            val rawPage = repo.getTrending(trendingPage)
+            val rawSize = rawPage.size
+            val more = rawPage.filter { it.isMovie && it.id !in existing }
             if (more.isEmpty()) {
-                // Page returned only duplicates / non-movies — end of catalog.
-                _canLoadMoreTrending.value = false
+                // Even if the filtered batch is empty, keep the button alive
+                // if the raw page was full — the next page may have new titles.
+                _canLoadMoreTrending.value = rawSize >= pageSize && more.isNotEmpty()
                 _isLoadingMore.value = false
                 return@withLock
             }
@@ -343,8 +355,8 @@ class HomeViewModel : ViewModel() {
                 val moreIds = more.map { it.id }.toSet()
                 _trending.value = _trending.value.filter { it.id !in moreIds } + availableMore
             }
-            // End of catalog if the raw batch was smaller than a full page.
-            _canLoadMoreTrending.value = more.size >= pageSize
+            // End of catalog only if the RAW page was smaller than a full page.
+            _canLoadMoreTrending.value = rawSize >= pageSize
             _isLoadingMore.value = false
         }
     }
@@ -355,9 +367,13 @@ class HomeViewModel : ViewModel() {
             _isLoadingMore.value = true
             nowPlayingPage++
             val existing = _nowPlaying.value.map { it.id }.toSet()
-            val more = repo.getNowPlaying(nowPlayingPage).filter { it.id !in existing }
+            // Capture the RAW page size BEFORE dedup so the end-of-catalog
+            // decision is based on the raw TMDB response, not the filtered count.
+            val rawPage = repo.getNowPlaying(nowPlayingPage)
+            val rawSize = rawPage.size
+            val more = rawPage.filter { it.id !in existing }
             if (more.isEmpty()) {
-                _canLoadMoreNowPlaying.value = false
+                _canLoadMoreNowPlaying.value = rawSize >= pageSize && more.isNotEmpty()
                 _isLoadingMore.value = false
                 return@withLock
             }
@@ -368,7 +384,7 @@ class HomeViewModel : ViewModel() {
                 val moreIds = more.map { it.id }.toSet()
                 _nowPlaying.value = _nowPlaying.value.filter { it.id !in moreIds } + availableMore
             }
-            _canLoadMoreNowPlaying.value = more.size >= pageSize
+            _canLoadMoreNowPlaying.value = rawSize >= pageSize
             _isLoadingMore.value = false
         }
     }
@@ -379,9 +395,11 @@ class HomeViewModel : ViewModel() {
             _isLoadingMore.value = true
             popularTVPage++
             val existing = _popularTV.value.map { it.id }.toSet()
-            val more = repo.getPopularTV(popularTVPage).filter { it.id !in existing }
+            val rawPage = repo.getPopularTV(popularTVPage)
+            val rawSize = rawPage.size
+            val more = rawPage.filter { it.id !in existing }
             if (more.isEmpty()) {
-                _canLoadMorePopularTV.value = false
+                _canLoadMorePopularTV.value = rawSize >= pageSize && more.isNotEmpty()
                 _isLoadingMore.value = false
                 return@withLock
             }
@@ -392,7 +410,7 @@ class HomeViewModel : ViewModel() {
                 val moreIds = more.map { it.id }.toSet()
                 _popularTV.value = _popularTV.value.filter { it.id !in moreIds } + availableMore
             }
-            _canLoadMorePopularTV.value = more.size >= pageSize
+            _canLoadMorePopularTV.value = rawSize >= pageSize
             _isLoadingMore.value = false
         }
     }
@@ -403,9 +421,11 @@ class HomeViewModel : ViewModel() {
             _isLoadingMore.value = true
             topRatedPage++
             val existing = _topRated.value.map { it.id }.toSet()
-            val more = repo.getTopRatedMovies(topRatedPage).filter { it.id !in existing }
+            val rawPage = repo.getTopRatedMovies(topRatedPage)
+            val rawSize = rawPage.size
+            val more = rawPage.filter { it.id !in existing }
             if (more.isEmpty()) {
-                _canLoadMoreTopRated.value = false
+                _canLoadMoreTopRated.value = rawSize >= pageSize && more.isNotEmpty()
                 _isLoadingMore.value = false
                 return@withLock
             }
@@ -416,7 +436,7 @@ class HomeViewModel : ViewModel() {
                 val moreIds = more.map { it.id }.toSet()
                 _topRated.value = _topRated.value.filter { it.id !in moreIds } + availableMore
             }
-            _canLoadMoreTopRated.value = more.size >= pageSize
+            _canLoadMoreTopRated.value = rawSize >= pageSize
             _isLoadingMore.value = false
         }
     }
@@ -427,9 +447,11 @@ class HomeViewModel : ViewModel() {
             _isLoadingMore.value = true
             popularMoviesPage++
             val existing = _popularMovies.value.map { it.id }.toSet()
-            val more = repo.getPopularMovies(popularMoviesPage).filter { it.id !in existing }
+            val rawPage = repo.getPopularMovies(popularMoviesPage)
+            val rawSize = rawPage.size
+            val more = rawPage.filter { it.id !in existing }
             if (more.isEmpty()) {
-                _canLoadMorePopularMovies.value = false
+                _canLoadMorePopularMovies.value = rawSize >= pageSize && more.isNotEmpty()
                 _isLoadingMore.value = false
                 return@withLock
             }
@@ -440,7 +462,7 @@ class HomeViewModel : ViewModel() {
                 val moreIds = more.map { it.id }.toSet()
                 _popularMovies.value = _popularMovies.value.filter { it.id !in moreIds } + availableMore
             }
-            _canLoadMorePopularMovies.value = more.size >= pageSize
+            _canLoadMorePopularMovies.value = rawSize >= pageSize
             _isLoadingMore.value = false
         }
     }

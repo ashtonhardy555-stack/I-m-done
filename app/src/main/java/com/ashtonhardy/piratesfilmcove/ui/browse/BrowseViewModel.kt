@@ -141,16 +141,24 @@ class BrowseViewModel : ViewModel() {
                 if (_isLoading.value || _loadingMore.value) return@withLock
                 if (!_canLoadMore.value) return@withLock
                 _loadingMore.value = true
-                var more: List<TmdbItem> = emptyList()
+                var rawSize = 0
                 try {
                     val genre = _selectedGenre.value
                     page++
                     val existing = _items.value.map { it.id }.toSet()
-                    more = repo.discover(
+                    // Capture the RAW page size BEFORE dedup so the
+                    // end-of-catalog decision is based on the raw TMDB
+                    // response, not the deduped/filtered count. (Dedup +
+                    // availability filtering can shrink the batch below
+                    // pageSize even when TMDB returned a full page — that
+                    // was the Load More bug.)
+                    val rawPage = repo.discover(
                         type = genre?.type ?: "movie",
                         genreId = genre?.id?.takeIf { it.isNotEmpty() },
                         page = page
-                    ).filter { it.id !in existing }
+                    )
+                    rawSize = rawPage.size
+                    val more = rawPage.filter { it.id !in existing }
                     // Append immediately, then filter the new batch.
                     _items.value = _items.value + more
                     _filtering.value = true
@@ -167,9 +175,10 @@ class BrowseViewModel : ViewModel() {
                 } finally {
                     _loadingMore.value = false
                     _filtering.value = false
-                    // End-of-catalog: TMDB sent fewer than a full page (or
-                    // every item was a duplicate), so there's nothing more.
-                    if (more.size < pageSize) {
+                    // End-of-catalog: TMDB sent fewer than a full page of RAW
+                    // results (not the deduped/filtered count), so there's
+                    // nothing more to load.
+                    if (rawSize < pageSize) {
                         _canLoadMore.value = false
                     }
                 }

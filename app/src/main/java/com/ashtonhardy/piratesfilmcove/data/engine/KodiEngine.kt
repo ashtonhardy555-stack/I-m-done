@@ -3,10 +3,25 @@ package com.ashtonhardy.piratesfilmcove.data.engine
 import android.content.Context
 import android.util.Log
 import com.ashtonhardy.piratesfilmcove.data.server.AnnasCinemaExtractor
+import com.ashtonhardy.piratesfilmcove.data.server.DahmerMoviesExtractor
+import com.ashtonhardy.piratesfilmcove.data.server.KissKhExtractor
 import com.ashtonhardy.piratesfilmcove.data.server.LookMovieHeadlessExtractor
+import com.ashtonhardy.piratesfilmcove.data.server.LordFlixExtractor
+import com.ashtonhardy.piratesfilmcove.data.server.MeowTvExtractor
+import com.ashtonhardy.piratesfilmcove.data.server.NoTorrentExtractor
 import com.ashtonhardy.piratesfilmcove.data.server.NovaStreamExtractor
 import com.ashtonhardy.piratesfilmcove.data.server.NuvioStreamsExtractor
 import com.ashtonhardy.piratesfilmcove.data.server.SmashStreamsExtractor
+import com.ashtonhardy.piratesfilmcove.data.server.SuperEmbedExtractor
+import com.ashtonhardy.piratesfilmcove.data.server.TwoEmbedExtractor
+import com.ashtonhardy.piratesfilmcove.data.server.VidLinkExtractor
+import com.ashtonhardy.piratesfilmcove.data.server.VidSrcNetExtractor
+import com.ashtonhardy.piratesfilmcove.data.server.VidSrcProExtractor
+import com.ashtonhardy.piratesfilmcove.data.server.VidSrcToExtractor
+import com.ashtonhardy.piratesfilmcove.data.server.VidStormExtractor
+import com.ashtonhardy.piratesfilmcove.data.server.VidSyncExtractor
+import com.ashtonhardy.piratesfilmcove.data.server.VideasyExtractor
+import com.ashtonhardy.piratesfilmcove.data.server.VixSrcExtractor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -184,15 +199,227 @@ class KodiEngine private constructor(private val context: Context) {
         }
     }
 
+    // ── New addon: VidSrc.to (RC4-decrypting headless extractor) ──
+    // Ported from cool-dev-guy/vidsrc-api (the Ciarands vidsrc resolver).
+    // Flow: TMDB→IMDb → embed page → AJAX sources API → RC4 decrypt →
+    // VidPlay/FileMoon resolution → direct .m3u8. Contains the VidPlay
+    // (Ciarands keys + futoken/mediainfo) and FileMoon (packed-JS unpacker)
+    // resolvers internally, so no separate extractors needed for those.
+    private val vidSrcToAddon = object : Addon {
+        override val id = "vidsrcto"
+        override suspend fun resolve(req: ResolveRequest): AddonResult {
+            if (req.tmdbId <= 0) return AddonResult.Error("VidSrcTo: no tmdbId")
+            val r = VidSrcToExtractor.extract(req.tmdbId, req.contentType, req.season, req.episode)
+            return when (r) {
+                is VidSrcToExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "VidSrc.to" })
+                is VidSrcToExtractor.Result.Error -> AddonResult.Error(r.message)
+            }
+        }
+    }
+
+    // ── Additional headless extractors wired into the engine ──
+    // These are proven, pure-OkHttp (no-WebView) extractors that were
+    // already in the app but not registered as KodiEngine addons. They all
+    // share the same TMDB-id-based Stremio-style flow as the addons above,
+    // so they drop straight in. Wiring them here means the engine can use
+    // them as additional racers in the parallel resolve lane, covering titles
+    // the other addons miss — more sources = more hits, headless = no cost
+    // to the user until a stream is actually needed.
+
+    private val twoEmbedAddon = object : Addon {
+        override val id = "twoembed"
+        override suspend fun resolve(req: ResolveRequest): AddonResult {
+            if (req.tmdbId <= 0) return AddonResult.Error("TwoEmbed: no tmdbId")
+            val r = TwoEmbedExtractor.extract(req.tmdbId, req.contentType, req.season, req.episode)
+            return when (r) {
+                is TwoEmbedExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "TwoEmbed" })
+                is TwoEmbedExtractor.Result.Error -> AddonResult.Error(r.message)
+            }
+        }
+    }
+
+    private val superEmbedAddon = object : Addon {
+        override val id = "superembed"
+        override suspend fun resolve(req: ResolveRequest): AddonResult {
+            if (req.tmdbId <= 0) return AddonResult.Error("SuperEmbed: no tmdbId")
+            val r = SuperEmbedExtractor.extract(req.tmdbId, req.contentType, req.season, req.episode)
+            return when (r) {
+                is SuperEmbedExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "SuperEmbed" })
+                is SuperEmbedExtractor.Result.Error -> AddonResult.Error(r.message)
+            }
+        }
+    }
+
+    private val vidLinkAddon = object : Addon {
+        override val id = "vidlink"
+        override suspend fun resolve(req: ResolveRequest): AddonResult {
+            if (req.tmdbId <= 0) return AddonResult.Error("VidLink: no tmdbId")
+            val r = VidLinkExtractor.extract(req.tmdbId, req.contentType, req.season, req.episode)
+            return when (r) {
+                is VidLinkExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "VidLink" })
+                is VidLinkExtractor.Result.Error -> AddonResult.Error(r.message)
+            }
+        }
+    }
+
+    private val vixSrcAddon = object : Addon {
+        override val id = "vixsrc"
+        override suspend fun resolve(req: ResolveRequest): AddonResult {
+            if (req.tmdbId <= 0) return AddonResult.Error("VixSrc: no tmdbId")
+            val r = VixSrcExtractor.extract(req.tmdbId, req.contentType, req.season, req.episode)
+            return when (r) {
+                is VixSrcExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "VixSrc" })
+                is VixSrcExtractor.Result.Error -> AddonResult.Error(r.message)
+            }
+        }
+    }
+
+    private val videasyAddon = object : Addon {
+        override val id = "videasy"
+        override suspend fun resolve(req: ResolveRequest): AddonResult {
+            if (req.tmdbId <= 0) return AddonResult.Error("Videasy: no tmdbId")
+            val r = VideasyExtractor.extract(req.tmdbId, req.contentType, req.season, req.episode)
+            return when (r) {
+                is VideasyExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "Videasy" })
+                is VideasyExtractor.Result.Error -> AddonResult.Error(r.message)
+            }
+        }
+    }
+
+    private val noTorrentAddon = object : Addon {
+        override val id = "notorrent"
+        override suspend fun resolve(req: ResolveRequest): AddonResult {
+            if (req.tmdbId <= 0) return AddonResult.Error("NoTorrent: no tmdbId")
+            val r = NoTorrentExtractor.extract(req.tmdbId, req.contentType, req.season, req.episode)
+            return when (r) {
+                is NoTorrentExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "NoTorrent" })
+                is NoTorrentExtractor.Result.Error -> AddonResult.Error(r.message)
+            }
+        }
+    }
+
+    private val lordFlixAddon = object : Addon {
+        override val id = "lordflix"
+        override suspend fun resolve(req: ResolveRequest): AddonResult {
+            if (req.tmdbId <= 0) return AddonResult.Error("LordFlix: no tmdbId")
+            val r = LordFlixExtractor.extract(req.tmdbId, req.contentType, req.season, req.episode)
+            return when (r) {
+                is LordFlixExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "LordFlix" })
+                is LordFlixExtractor.Result.Error -> AddonResult.Error(r.message)
+            }
+        }
+    }
+
+    private val dahmerMoviesAddon = object : Addon {
+        override val id = "dahmermovies"
+        override suspend fun resolve(req: ResolveRequest): AddonResult {
+            if (req.tmdbId <= 0) return AddonResult.Error("DahmerMovies: no tmdbId")
+            val r = DahmerMoviesExtractor.extract(req.tmdbId, req.contentType, req.season, req.episode)
+            return when (r) {
+                is DahmerMoviesExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "DahmerMovies" })
+                is DahmerMoviesExtractor.Result.Error -> AddonResult.Error(r.message)
+            }
+        }
+    }
+
+    private val meowTvAddon = object : Addon {
+        override val id = "meowtv"
+        override suspend fun resolve(req: ResolveRequest): AddonResult {
+            if (req.tmdbId <= 0) return AddonResult.Error("MeowTV: no tmdbId")
+            val r = MeowTvExtractor.extract(req.tmdbId, req.contentType, req.season, req.episode)
+            return when (r) {
+                is MeowTvExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "MeowTV" })
+                is MeowTvExtractor.Result.Error -> AddonResult.Error(r.message)
+            }
+        }
+    }
+
+    private val vidSrcProAddon = object : Addon {
+        override val id = "vidsrcpro"
+        override suspend fun resolve(req: ResolveRequest): AddonResult {
+            if (req.tmdbId <= 0) return AddonResult.Error("VidSrcPro: no tmdbId")
+            val r = VidSrcProExtractor.extract(req.tmdbId, req.contentType, req.season, req.episode)
+            return when (r) {
+                is VidSrcProExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "VidSrcPro" })
+                is VidSrcProExtractor.Result.Error -> AddonResult.Error(r.message)
+            }
+        }
+    }
+
+    private val vidSrcNetAddon = object : Addon {
+        override val id = "vidsrcnet"
+        override suspend fun resolve(req: ResolveRequest): AddonResult {
+            if (req.tmdbId <= 0) return AddonResult.Error("VidSrcNet: no tmdbId")
+            val r = VidSrcNetExtractor.extract(req.tmdbId, req.contentType, req.season, req.episode)
+            return when (r) {
+                is VidSrcNetExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "VidSrcNet" })
+                is VidSrcNetExtractor.Result.Error -> AddonResult.Error(r.message)
+            }
+        }
+    }
+
+    private val vidStormAddon = object : Addon {
+        override val id = "vidstorm"
+        override suspend fun resolve(req: ResolveRequest): AddonResult {
+            if (req.tmdbId <= 0) return AddonResult.Error("VidStorm: no tmdbId")
+            val r = VidStormExtractor.extract(req.tmdbId, req.contentType, req.season, req.episode)
+            return when (r) {
+                is VidStormExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "VidStorm" })
+                is VidStormExtractor.Result.Error -> AddonResult.Error(r.message)
+            }
+        }
+    }
+
+    private val vidSyncAddon = object : Addon {
+        override val id = "vidsync"
+        override suspend fun resolve(req: ResolveRequest): AddonResult {
+            if (req.tmdbId <= 0) return AddonResult.Error("VidSync: no tmdbId")
+            val r = VidSyncExtractor.extract(req.tmdbId, req.contentType, req.season, req.episode)
+            return when (r) {
+                is VidSyncExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "VidSync" })
+                is VidSyncExtractor.Result.Error -> AddonResult.Error(r.message)
+            }
+        }
+    }
+
+    private val kissKhAddon = object : Addon {
+        override val id = "kisskh"
+        override suspend fun resolve(req: ResolveRequest): AddonResult {
+            if (req.tmdbId <= 0) return AddonResult.Error("KissKH: no tmdbId")
+            val r = KissKhExtractor.extract(req.tmdbId, req.contentType, req.season, req.episode)
+            return when (r) {
+                is KissKhExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "KissKH" })
+                is KissKhExtractor.Result.Error -> AddonResult.Error(r.message)
+            }
+        }
+    }
+
     /** Addons consulted, in priority order. LookMovie first (the reference
      *  headless extractor and the engine's primary addon), then the
-     *  Stremio-style addons that need TMDB ids. */
+     *  Stremio-style addons that need TMDB ids, then the additional
+     *  headless extractors wired in for broader coverage. The engine runs
+     *  them in order and the first Stream result wins. */
     private val addons = mutableListOf<Addon>(
         lookmovieAddon,
         smashStreamsAddon,
         nuvioStreamsAddon,
         annasCinemaAddon,
-        novaStreamAddon
+        novaStreamAddon,
+        vidSrcToAddon,
+        twoEmbedAddon,
+        superEmbedAddon,
+        vidLinkAddon,
+        vixSrcAddon,
+        videasyAddon,
+        noTorrentAddon,
+        lordFlixAddon,
+        dahmerMoviesAddon,
+        meowTvAddon,
+        vidSrcProAddon,
+        vidSrcNetAddon,
+        vidStormAddon,
+        vidSyncAddon,
+        kissKhAddon
     )
 
     // \u2500\u2500 scope \u2500\u2500

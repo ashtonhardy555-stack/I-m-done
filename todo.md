@@ -1,42 +1,34 @@
-# Add Headless Kodi-Style Server Extractors
+# Piratesfilm Cove — side rail Left-press fix
 
-## Context
-The app has a "Kodi-like headless engine" (KodiEngine) that runs the LookMovie
-addon flow (search → storage → security API → .m3u8) in pure OkHttp (no WebView,
-no Kodi runtime). The user wants MORE servers added that work the same way —
-headless, pure OkHttp extractors that resolve direct stream URLs through the
-Kodi engine.
+## Goal
+The TV side navigation rail opens on EVERY Left press. It should ONLY open when:
+- the user is on the FIRST card of a row and presses Left (nothing further left), OR
+- the user is on the hero banner and presses Left
 
-## Tasks
+## Root cause investigation
+- [x] Understand the current Left-press handling in MainActivity (outer Box onKeyEvent + inner focusGroup)
+- [x] Understand how ContentRow / LazyRow focusGroup handles Left
+- [x] Understand how the hero banner handles Left
+- [x] Confirm whether focusGroup() consumes Left at the first item or bubbles it up
+      → CONFIRMED: focusGroup() does NOT consume key events; every Left bubbles to the outer onKeyEvent which opens the rail.
 
-### Phase 1: Research & Understand Existing Architecture
-- [x] Merge PR #43 (animateFloat fix) — build was broken
-- [x] Verify the build passes after merge (run #29888416981 SUCCESS)
-- [x] Read LookMovieHeadlessExtractor.kt — the reference implementation
-- [x] Read KodiEngine.kt — the addon orchestration layer (Addon interface)
-- [x] Read PlayerActivity.kt — the parallel race that uses all extractors
-- [x] Read existing extractor patterns (VidStorm, NoTorrent, VidLink, VixSrc, etc.)
-- [x] Research Stremio addon API endpoints (NuvioStreams, etc.)
+## Fix — focused-element X-position tracking
+- [x] Create a CompositionLocal LocalSideRailXReporter + a shared focusedX state at AppRoot
+- [x] Provide the reporter from the TV content Box in MainActivity
+- [x] ContentCard reports its screen X (onGloballyPositioned + LaunchedEffect) when focused
+- [x] HeroButton reports X (≈0) when focused
+- [x] Outer onKeyEvent: only open rail + return true when focusedX <= edge threshold; else return false so default card-to-card move runs
+- [x] Fix the incorrect comment about focusGroup() consuming Left
 
-### Phase 2: Create New Headless Extractors (Kodi-style, pure OkHttp)
-- [x] Create SmashStreamsExtractor.kt — Stremio addon API (JSON streams)
-- [x] Create NuvioStreamsExtractor.kt — Stremio addon with direct stream URLs
-- [x] Create AnnasCinemaExtractor.kt — Stremio addon aggregator
-- [x] Create NovaStreamExtractor.kt — Stremio addon with direct stream URLs
+## Verify the fix against all screens
+- [x] Home: hero (x≈rowPadding → opens rail) + content rows (first card x≈rowPadding, mid-row x≫threshold)
+- [x] Movies / TV: content rows via ContentRow → ContentCard (reports X)
+- [x] Browse: LazyVerticalGrid first column x≈rowPadding (within threshold), cols 2-5 x>threshold
+- [x] Search: overlay shown before the TV layout block — LocalSideRailXReporter is null (no-op)
+- [x] Side rail visible + Left: outer onKeyEvent returns false, TvSideNav handles Right-dismiss
+- [x] threshold = rowPadding + 24dp; first card & hero at x≈rowPadding, 2nd card x≫threshold
+- [x] imports verified for all 3 modified files
+- [x] No state write during layout (report via LaunchedEffect coroutine)
 
-### Phase 3: Wire Into KodiEngine (Addon interface)
-- [x] Add each new extractor as a KodiEngine.Addon adapter
-- [x] Ensure they participate in the engine's pre-resolve / cache flow
-- [x] Extend ResolveRequest to include tmdbId + contentType
-
-### Phase 4: Wire Into PlayerActivity Parallel Race
-- [x] Add try*() helper for each new extractor (SmashStreams, NuvioStreams, AnnasCinema, NovaStream)
-- [x] Add each to the deferreds list in the parallel race
-- [x] Add provider reliability weights for new providers
-- [x] Add new providers to RACE_PROVIDER_BASES set
-- [x] Add new providers to isEnglishStream default-English allowlist
-- [x] Update engine-first ResolveRequest in PlayerActivity to include tmdbId
-
-### Phase 5: Build & Test
-- [x] Create PR with the new extractors (PR #44)
-- [x] Monitor the CI build to ensure it passes (run #29890036015 SUCCESS in 4m19s)
+## Ship it
+- [ ] Commit, push, update PR
