@@ -1,16 +1,34 @@
-# Piratesfilm Cove — app improvements
+# Piratesfilm Cove — side rail Left-press fix
 
-## 1. New Kodi addon sources (no debrid / no trakt)
-- [x] Research NEW Kodi addons online (Free99 + others) for fresh scraper/API URLs NOT already in the app
-- [x] Create VidSrcToExtractor.kt — vidsrc.to RC4 decryption flow (pure OkHttp, contains VidPlay + FileMoon internally)
-- [x] Analyse existing extractors NOT yet wired into the KodiEngine (15 of them, all TMDB-id based)
-- [x] Wire VidSrcTo + 15 existing headless extractors into KodiEngine.kt (adapters + addons list)
+## Goal
+The TV side navigation rail opens on EVERY Left press. It should ONLY open when:
+- the user is on the FIRST card of a row and presses Left (nothing further left), OR
+- the user is on the hero banner and presses Left
 
-## 2. UI bugs
-- [x] Fix "Load More" buttons disappearing prematurely (HomeViewModel, MoviesViewModel, TvViewModel, SearchViewModel, BrowseViewModel — base canLoadMore on RAW TMDB page size)
-- [x] Fix hero banner being clipped on home screen (HeroBanner height / HomeScreen top padding / DeviceInfo TV dims)
-- [x] Fix search results disappearing before Enter (SearchViewModel/SearchScreen IME noise — updateQuery same-value guard + onKeyEvent Enter handler that hides keypad without clearFocus)
-- [x] Show search results in side-to-side layout + active category/genre label (SearchScreen — LazyVerticalGrid with side-to-side genre pill LazyRow + active category/genre label header, mirrors BrowseScreen)
+## Root cause investigation
+- [x] Understand the current Left-press handling in MainActivity (outer Box onKeyEvent + inner focusGroup)
+- [x] Understand how ContentRow / LazyRow focusGroup handles Left
+- [x] Understand how the hero banner handles Left
+- [x] Confirm whether focusGroup() consumes Left at the first item or bubbles it up
+      → CONFIRMED: focusGroup() does NOT consume key events; every Left bubbles to the outer onKeyEvent which opens the rail.
 
-## 3. Ship it
-- [x] Commit, push, create PR to GitHub on feat/more-addons-and-ui-fixes
+## Fix — focused-element X-position tracking
+- [x] Create a CompositionLocal LocalSideRailXReporter + a shared focusedX state at AppRoot
+- [x] Provide the reporter from the TV content Box in MainActivity
+- [x] ContentCard reports its screen X (onGloballyPositioned + LaunchedEffect) when focused
+- [x] HeroButton reports X (≈0) when focused
+- [x] Outer onKeyEvent: only open rail + return true when focusedX <= edge threshold; else return false so default card-to-card move runs
+- [x] Fix the incorrect comment about focusGroup() consuming Left
+
+## Verify the fix against all screens
+- [x] Home: hero (x≈rowPadding → opens rail) + content rows (first card x≈rowPadding, mid-row x≫threshold)
+- [x] Movies / TV: content rows via ContentRow → ContentCard (reports X)
+- [x] Browse: LazyVerticalGrid first column x≈rowPadding (within threshold), cols 2-5 x>threshold
+- [x] Search: overlay shown before the TV layout block — LocalSideRailXReporter is null (no-op)
+- [x] Side rail visible + Left: outer onKeyEvent returns false, TvSideNav handles Right-dismiss
+- [x] threshold = rowPadding + 24dp; first card & hero at x≈rowPadding, 2nd card x≫threshold
+- [x] imports verified for all 3 modified files
+- [x] No state write during layout (report via LaunchedEffect coroutine)
+
+## Ship it
+- [ ] Commit, push, update PR

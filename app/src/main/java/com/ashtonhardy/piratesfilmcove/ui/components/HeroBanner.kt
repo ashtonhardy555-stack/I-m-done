@@ -47,6 +47,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -60,6 +61,7 @@ import com.ashtonhardy.piratesfilmcove.ui.theme.GreyButtonHover
 import com.ashtonhardy.piratesfilmcove.ui.theme.Red
 import com.ashtonhardy.piratesfilmcove.ui.theme.TextMuted
 import com.ashtonhardy.piratesfilmcove.ui.theme.TextPrimary
+import com.ashtonhardy.piratesfilmcove.ui.util.LocalSideRailXReporter
 import com.ashtonhardy.piratesfilmcove.ui.util.responsiveDims
 import kotlinx.coroutines.delay
 
@@ -385,6 +387,19 @@ private fun HeroButton(
         onFocusChanged?.invoke(isFocused)
     }
 
+    // Side-rail "only open at the left edge" support: when a hero button is
+    // focused it reports its X to AppRoot so the Left key handler opens the
+    // side rail (the hero is at the far-left edge). The hero buttons sit at
+    // x ≈ the hero content's horizontal padding, which is within the edge
+    // threshold AppRoot uses, so a Left press on the hero opens the rail —
+    // exactly the desired behaviour. On phone layouts the reporter is null
+    // (no side rail) so this is a no-op.
+    val sideRailReporter = LocalSideRailXReporter.current
+    var btnXInWindow by remember { mutableStateOf(0f) }
+    LaunchedEffect(isFocused) {
+        if (isFocused) sideRailReporter?.invoke(btnXInWindow)
+    }
+
     Button(
         onClick = onClick,
         interactionSource = interactionSource,
@@ -395,6 +410,9 @@ private fun HeroButton(
         shape = RoundedCornerShape(4.dp),
         modifier = Modifier
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+            // Capture the button's on-screen X so the side-rail handler can
+            // see that the hero is at the far-left edge.
+            .onGloballyPositioned { coords -> btnXInWindow = coords.positionInWindow.x }
             .then(
                 if (isFocused && isTv) {
                     Modifier.border(2.dp, Red, RoundedCornerShape(4.dp))
