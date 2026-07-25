@@ -1,0 +1,5 @@
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/model/Genre.kt:3:data class Genre(
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/model/Genre.kt:9:val MOVIE_GENRES = listOf(
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/model/Genre.kt:30:val TV_GENRES = listOf(
+===
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/model/Genre.kt

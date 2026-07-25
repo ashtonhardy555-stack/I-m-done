@@ -1,0 +1,8 @@
+23:import androidx.compose.foundation.layout.padding
+212:                .padding(
+213:                    start = dims.rowPadding,
+214:                    bottom = if (dims.isTv) 40.dp + dims.safeAreaBottom else 36.dp,
+226:                    modifier = Modifier.padding(bottom = 6.dp)
+343:                .padding(bottom = if (dims.isTv) 12.dp + dims.safeAreaBottom else 8.dp)
+353:                    .padding(horizontal = 12.dp, vertical = 4.dp)
+393:    // x ≈ the hero content's horizontal padding, which is within the edge

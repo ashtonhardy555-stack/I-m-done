@@ -1,0 +1,26 @@
+                .filter { it.id != excludeId }
+                .take(18)
+        }.getOrDefault(emptyList())
+
+    suspend fun discover(
+        type: String,
+        genreId: String? = null,
+        sortBy: String = "popularity.desc",
+        page: Int = 1
+    ): List<TmdbItem> =
+        runCatching {
+            val items = filterEnglish(api.discover(type, key, genreId, sortBy = sortBy, page = page).results)
+            filterValidMovies(filterReleased(filterAdult(items)))
+        }.getOrDefault(emptyList())
+
+    suspend fun search(
+        query: String,
+        type: String = "multi",
+        year: String? = null,
+        page: Int = 1
+    ): List<TmdbItem> =
+        runCatching {
+            val items = filterEnglish(api.search(type, key, query, year = year, page = page).results)
+            filterValidMovies(filterReleased(filterAdult(items)))
+        }.getOrDefault(emptyList())
+}

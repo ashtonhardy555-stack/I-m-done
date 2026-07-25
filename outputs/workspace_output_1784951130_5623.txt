@@ -1,0 +1,50 @@
+FIXES_SUMMARY.md
+PLAYBACK_FIXES_FINAL.md
+PLAYBACK_FIX_SUMMARY.md
+RECENT_FIXES.txt
+SERVERS_ADDED.md
+SERVERS_ADDED_v7.md
+VERIFICATION_FIXES.md
+VIDSTORM_FIX.md
+addon
+android-app.zip
+app
+backend
+build.gradle.kts
+docs
+github
+gitignore
+gradle
+gradle.properties
+gradlew
+keystore.properties.example
+outputs
+plugin.video.lookmoviesearch_kodi.zip
+scripts
+servers.json
+settings.gradle.kts
+summarized_conversations
+todo-fixes.md
+todo.md
+working-servers.json
+---
+a12ea94cdd03a51d9a877cfe33380417a4785b54	HEAD
+9789a293272eb3bde74c4872817dc09f84f3c059	refs/heads/Cool
+9d90bc8e67265dc498be0ddb2ceee397eaaeeccd	refs/heads/Rollback
+b78d178ec7953a6301ca3e5196f03d07e5f0cc52	refs/heads/Rollback-1
+ba20d5b8c7cf80cdcad2aa197cc41b344d07f2e1	refs/heads/add-2embed-sub-servers
+cd9f23d5933f161289ea1eecfbe52ae28af653e8	refs/heads/add-filmcave-sources
+b7ea3db7fb9c8889e5849c38fcf24b7e213ad0cf	refs/heads/ashtonhardy555-stack-patch-1
+f5ee7f8daab7b5d5d807afd9ecfdde7864b6cf6e	refs/heads/devin/1781385607-improve-error-handling
+ccf612dca70b0be97e73ff560a6170e74be91e86	refs/heads/devin/1781385609-security-fixes
+d76b5801e2a8f04b669a89021f665b03bc9be9a9	refs/heads/devin/1781385774-android-native-app
+c2d94ddcff27c799856ed734e9afcb2b1009fb42	refs/heads/feat/fast-playback-and-availability-filtering
+a87c3c0ae28a1bd4a6f86b63127e71bdccd8b203	refs/heads/feat/new-servers-direct-api-v9
+4ead5be5bfa379b6a5448db7263bdd8d19a5bdb9	refs/heads/feat/parallel-server-race-more-sources
+18b9d30efcea134e357bc27a62cf2bf68b058a74	refs/heads/feat/settings-loading-tmdb-secret
+712c1a12dba0fc4320af4b611420e8dd29403069	refs/heads/feat/v1.4.1-version-bump
+a246f09c9b0e695666f3ca62fe3991ea0fe03c68	refs/heads/feature/add-filmcave-servers-v7
+f04f7daad769de48a0b940d73440a31a5fcf60ce	refs/heads/feature/add-lordflix-dahmermovies-twoembed-servers
+91bfae1f3c46f65404f853780b4c0b10047b2686	refs/heads/feature/buymeacoffee-link
+cc2d4dfa53e46ff4dfdf9375130576a65231ea16	refs/heads/feature/direct-playback-no-webview-human-verification
+fb02666fbcd4beb65245205fb70f6abe1f1167d8	refs/heads/feature/filter-unreleased-and-ads

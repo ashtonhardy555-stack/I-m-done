@@ -1,0 +1,44 @@
+import okhttp3.OkHttpClient
+import okhttp3.Request
+ *     HTTP round-trip (~150 ms) and is cached per-content.
+ *     - Movie: `GET https://addon-osvh.onrender.com/stream/movie/{imdbId}.json`
+ *     - TV:    `GET https://addon-osvh.onrender.com/stream/series/{imdbId}:{s}:{e}.json`
+    private const val TAG = "NoTorrent"
+    private const val ADDON_BASE = "https://addon-osvh.onrender.com"
+    private const val USER_AGENT =
+        OkHttpClient.Builder()
+        OkHttpClient.Builder()
+=== DahmerMovies ===
+import okhttp3.OkHttpClient
+import okhttp3.Request
+ *     `https://a.111477.xyz/…` URL, then wrap it with the bulk proxy worker:
+ *     `https://p.111477.xyz/bulk?u={directUrl}`. The proxy serves the file
+ *     headers (`Referer: https://a.111477.xyz/`, `Range: bytes=0-`).
+ * streamable, so a bare OkHttp probe that fails does NOT drop the URL.
+    private const val TAG = "DahmerMovies"
+    private const val DAHMER_API = "https://a.111477.xyz"
+    private const val DAHMER_WORKER = "https://p.111477.xyz/bulk?u="
+    private const val USER_AGENT =
+        OkHttpClient.Builder()
+        OkHttpClient.Builder()
+    //  Public API                                                                                           //
+=== LordFlix ===
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+ * Like Videasy, LordFlix is a **title + IMDb-id based** aggregator (not
+ * server that returns a stream wins the race — typically in 2–3 HTTP
+ *     build a URL to `https://hongkong.lordflix.club/?title=…&type={movie|series}
+ *  3. **Sign** — `GET https://enc-dec.app/api/enc-lordflix?url={encodedServerUrl}`
+ *     (Origin/Referer `https://lordflix.org`) returns an encrypted blob.
+ *  5. **Decrypt** — `POST https://enc-dec.app/api/dec-lordflix` with
+ *     Referer/Origin headers (`https://lordflix.org`).
+ * Verification is advisory: a 403/401 OkHttp probe does NOT drop the URL
+    private const val TAG = "LordFlix"
+    private const val LORDFLIX_API = "https://hongkong.lordflix.club"
+    private const val ENC_BRIDGE = "https://enc-dec.app/api/enc-lordflix"
+    private const val DEC_BRIDGE = "https://enc-dec.app/api/dec-lordflix"
+    private const val REFERER = "https://lordflix.org/"
+    private const val ORIGIN = "https://lordflix.org"
+    private const val USER_AGENT =

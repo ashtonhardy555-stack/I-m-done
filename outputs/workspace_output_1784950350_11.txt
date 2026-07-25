@@ -1,0 +1,50 @@
+package com.ashtonhardy.piratesfilmcove.data.server
+
+import android.util.Log
+import com.ashtonhardy.piratesfilmcove.BuildConfig
+import com.ashtonhardy.piratesfilmcove.data.api.ApiClient
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import org.json.JSONObject
+import java.util.Base64
+import java.util.concurrent.TimeUnit
+
+/**
+ * VidSrcToExtractor — a pure-OkHttp, **no-WebView, no-Kodi** headless
+ * extractor for **vidsrc.to**, ported from the `cool-dev-guy/vidsrc-api`
+ * project (which itself is based on the Ciarands vidsrc resolver).
+ *
+ * ## Why this exists
+ *
+ * The app already has a `VidSrcMeResolver` (for vidsrc.me) and a
+ * `VidSrcExtractor`, but the **vidsrc.to** flow is a different beast: it
+ * uses a two-step AJAX API with **RC4 decryption** to reveal the upstream
+ * embed URL (VidPlay or FileMoon), which is then resolved to a direct
+ * `.m3u8` stream. This extractor runs that entire flow headlessly — no
+ * WebView, no JS engine, no Kodi runtime — pure OkHttp, the same approach
+ * as `LookMovieHeadlessExtractor`.
+ *
+ * It is registered as a KodiEngine addon so the engine can use it as
+ * another racer for the parallel resolve lane, covering titles the other
+ * addons miss.
+ *
+ * ## The flow (ported from models/vidsrcto.py)
+ *
+ * 1. **TMDB → IMDb** — resolve the IMDb id (`ttXXXXXXX`) from the TMDB id
+ *    via TMDB's `external_ids` endpoint (same as SmashStreamsExtractor).
+ *
+ * 2. **EMBED PAGE** — `GET https://vidsrc.to/embed/{media}/{imdbId}`
+ *    (TV: `/embed/tv/{imdbId}/{season}/{episode}`). Parse the HTML for the
+ *    first `<a data-id="...">` element to get the `sources_code`.
+ *
+ * 3. **SOURCES** — `GET https://vidsrc.to/ajax/embed/episode/{sources_code}/sources`
+ *    → JSON `{ "result": [{ "id": "...", "title": "VidPlay"|"FileMoon",
+ *    "encryptedUrl": "..." }] }`.
+ *
+ * 4. **DECRYPT** — Each source's `encryptedUrl` is RC4-encrypted with the
+ *    key `WXrUARXb1aDLaZjI` (base64url-encoded). We decrypt it to get the
+ *    upstream VidPlay/FileMoon URL.
+ *
+ * 5. **RESOLVE UPSTREAM** — For VidPlay URLs we run the VidPlay decoder

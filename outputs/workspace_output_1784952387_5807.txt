@@ -1,0 +1,29 @@
+# Piratesfilm Cove — side rail Left-press fix
+
+## Goal
+The TV side navigation rail opens on EVERY Left press. It should ONLY open when:
+- the user is on the FIRST card of a row and presses Left (nothing further left), OR
+- the user is on the hero banner and presses Left
+
+## Root cause investigation
+- [ ] Understand the current Left-press handling in MainActivity (outer Box onKeyEvent + inner focusGroup)
+- [ ] Understand how ContentRow / LazyRow focusGroup handles Left
+- [ ] Understand how the hero banner handles Left
+- [ ] Confirm whether focusGroup() consumes Left at the first item or bubbles it up
+
+## Fix
+- [ ] Make the side rail only open on Left when focus is at the far-left edge (first card / hero), not mid-row
+- [ ] Verify the fix doesn't break card-to-card and row-to-row navigation
+
+## Ship it
+- [ ] Commit, push, update PR
+===GIT===
+ M todo.md
+?? outputs/
+?? summarized_conversations/
+feat/more-addons-and-ui-fixes
+8e43cb40 feat: more Kodi-engine addon sources + Load More, hero, search UI fixes
+a12ea94c chore(servers): daily health-check update [skip ci]
+cdfb24da chore(servers): daily health-check update [skip ci]
+5ba6443a Merge pull request #52 from ashtonhardy555-stack/fix/rename-to-piratesfilmcove
+01d7e996 fix: rename package com.freeflix.app -> com.ashtonhardy.piratesfilmcove (app name: Piratesfilm Cove)

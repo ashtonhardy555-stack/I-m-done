@@ -1,0 +1,5 @@
+---DahmerMovies/NooTorrent/lookmovieheadless bases---
+    private const val ADDON_BASE = "https://addon-osvh.onrender.com"
+    private const val ADDON_BASE = "https://annas-cinema.by4ssh.com"
+    private const val ADDON_BASE = "https://novastream.fetchtv.stream"
+    private const val ADDON_BASE = "https://nuviostreams.hayd.uk"

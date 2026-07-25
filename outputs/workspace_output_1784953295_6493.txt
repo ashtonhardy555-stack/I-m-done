@@ -1,0 +1,31 @@
+=== ContentCard: reporter block ===
+
+    val active = isFocused || isHovered
+
+    // ── Side-rail "only open at the left edge" support ──────────────────
+    // The TV side navigation rail must NOT open on every Left press — only
+    // when focus is already at the far-left edge of the screen (the first
+    // card of a row / first column of a grid). To let AppRoot's Left key
+    // handler distinguish "at the left edge" from "mid-row", every focused
+    // card reports its on-screen X (px) to the shared reporter provided by
+    // AppRoot. onGloballyPositioned keeps cardXInWindow current; the
+    // LaunchedEffect fires the report in a coroutine (the safe Compose
+    // pattern — no state write during layout) only when this card actually
+    // gains focus, so idle cards never touch the shared state. On phone
+=== ContentCard: onGloballyPositioned ===
+            .data(item.posterUrl)
+            .crossfade(200)
+            .build()
+    }
+
+    Column(
+        modifier = modifier
+            .then(if (fillMaxWidth) Modifier.fillMaxWidth() else Modifier.width(dims.cardWidth))
+            .clip(RoundedCornerShape(6.dp))
+            .scale(scale)
+            // Capture this card's on-screen X (in window coordinates) so the
+            // side-rail Left handler can tell "at the left edge" (first card
+            // / first grid column) from "mid-row". Stored in cardXInWindow
+            // (always kept current by onGloballyPositioned) and reported to
+            // AppRoot via LocalSideRailXReporter in the LaunchedEffect below
+            // when this card gains focus. Reporting in a coroutine (not

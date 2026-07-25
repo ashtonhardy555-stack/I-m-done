@@ -1,0 +1,81 @@
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────── //
+//  TV side navigation rail (Android TV)                               //
+//  Vertical icon+label rail with the red focus highlight.             //
+// ──────────────────────────────────────────────────────────────────── //
+@Composable
+private fun TvSideNav(
+    currentTab: Tab,
+    onTabSelected: (Tab) -> Unit,
+    onSearchClick: () -> Unit,
+    onDismiss: () -> Unit = {},
+    showHint: Boolean = false,
+    focusRequester: FocusRequester? = null
+) {
+    Surface(
+        color = Bg2,
+        shadowElevation = 0.dp,
+        modifier = Modifier
+            .fillMaxHeight()
+            .width(120.dp)
+            // Pressing Right while focused inside the rail slides it back
+            // away (D-pad dismiss without having to pick an item). Back is
+            // handled by the BackHandler in AppRoot.
+            .onKeyEvent { event ->
+                if (event.type == KeyEventType.KeyUp && event.key == Key.DirectionRight) {
+                    onDismiss()
+                    true
+                } else false
+            }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxHeight()
+                .padding(vertical = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            // One-time discoverability hint: a small chip at the top of the
+            // rail that tells first-time users they can reopen this menu with
+            // a Left press at any time. Only shown during the startup
+            // auto-reveal; returning users never see it.
+            if (showHint) {
+                SideNavHintChip()
+            }
+            // The first item (Search) receives the shared focus requester so
+            // the rail grabs D-pad focus as soon as it slides in.
+            TvNavItem(
+                icon = Icons.Default.Search,
+                label = "Search",
+                isSelected = false,
+                onClick = onSearchClick,
+                focusRequester = focusRequester
+            )
+            Tab.entries.forEach { tab ->
+                TvNavItem(
+                    icon = tab.icon,
+                    label = tab.label,
+                    isSelected = tab == currentTab,
+                    onClick = { onTabSelected(tab) }
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Small "press ← anytime" hint shown at the top of the side rail during the
+ * one-time startup reveal. Non-focusable (it's purely informational) so it
+ * never steals D-pad focus from the first real nav item below it.
+ */
+@Composable
+private fun SideNavHintChip() {
+    Column(
+        modifier = Modifier
+            .width(100.dp)
+            .padding(bottom = 4.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(Red.copy(alpha = 0.18f))
+            .padding(vertical = 6.dp, horizontal = 4.dp),

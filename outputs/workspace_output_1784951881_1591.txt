@@ -1,0 +1,7 @@
+{
+  "state": "open",
+  "title": "feat: more Kodi-engine addon sources + Load More, hero, search UI fixes",
+  "head": "feat/more-addons-and-ui-fixes",
+  "base": "main",
+  "url": "https://github.com/ashtonhardy555-stack/I-m-done/pull/53"
+}

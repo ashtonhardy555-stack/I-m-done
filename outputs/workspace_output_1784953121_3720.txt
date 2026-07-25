@@ -1,0 +1,32 @@
+@Composable
+fun ContentCard(
+    item: TmdbItem,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    dims: ResponsiveDims,
+    focusRequester: FocusRequester? = null,
+    fillMaxWidth: Boolean = false
+) {
+    val context = LocalContext.current
+    val interactionSource = remember { MutableInteractionSource() }
+    val isFocused by interactionSource.collectIsFocusedAsState()
+    val isHovered by interactionSource.collectIsHoveredAsState()
+    val isPressed by interactionSource.collectIsPressedAsState()
+
+    val active = isFocused || isHovered
+
+    // ── Side-rail "only open at the left edge" support ──────────────────
+    // The TV side navigation rail must NOT open on every Left press — only
+    // when focus is already at the far-left edge of the screen (the first
+    // card of a row / first column of a grid). To let AppRoot's Left key
+    // handler distinguish "at the left edge" from "mid-row", every focused
+    // card reports its on-screen X (px) to the shared reporter provided by
+    // AppRoot. `onGloballyPositioned` keeps the latest X in a cheap state;
+    // `LaunchedEffect(isFocused)` fires the report only when focus actually
+    // lands on this card (not on every layout pass). On phone layouts the
+    // reporter is null (no side rail) so this is a pure no-op.
+    val sideRailReporter = LocalSideRailXReporter.current
+    var cardXInWindow by remember { mutableStateOf(0f) }
+    LaunchedEffect(isFocused) {
+        if (isFocused) sideRailReporter?.invoke(cardXInWindow)
+    }

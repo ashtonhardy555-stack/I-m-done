@@ -1,0 +1,40 @@
+api.videasy.net/1movies/sources-with-title
+api.videasy.net/cdn/sources-with-title
+api.videasy.net/hdmovie/sources-with-title
+api.videasy.net/m4uhd/sources-with-title
+api.videasy.net/moviebox/sources-with-title
+api.videasy.net/myflixerzupcloud/sources-with-title
+api.videasy.net/onionplay/sources-with-title
+api.videasy.net/primesrcme/sources-with-title
+api.videasy.net/primewire/sources-with-title
+api.videasy.net/superflix/sources-with-title
+api.videasy.net/{server}/sources-with-title?title=…&mediaType=…&year=…&tmdbId=…&imdbId=…[&seasonId=…&episodeId=…]`
+enc-dec.app/api/dec-videasy
+enc-dec.app/api/dec-videasy`
+enc-dec.app/api/enc-vidlink?text={tmdbId}`
+player.videasy.net
+player.videasy.net/
+player.videasy.net/`).
+player.videasy.to
+player.videasy.to/
+streamsrcs.2embed.cc
+vidlink.pro
+vidlink.pro/api/b/movie/{encodedId}?multiLang=0`
+vidlink.pro/api/b/tv/{encodedId}/{season}/{episode}?multiLang=0`
+vidlink.pro/movie/123)
+vidplay.online/futoken
+vidplay.online/futoken` → extract `k` variable.
+vidplay.online/mediainfo/$data
+vidplay.online/mediainfo/{data}?{query}&autostart=true`
+vidsrc.to
+vidsrc.to/ajax/embed/episode/{sources_code}/sources`
+vidsrc.to/embed/{media}/{imdbId}`
+vixsrc.to
+vixsrc.to/api/movie/{tmdbId}`
+vixsrc.to/api/tv/{tmdbId}/{season}/{episode}`
+vixsrc.to{src}`. The HTML
+www.2embed.cc
+www.2embed.skin
+www.2embed.to
+www.2embed.to/ajax/embed/play?id={sourceId}` returns
+www.2embed.to/embed/tmdb/{type}?id={tmdbId}[&s={season}&e={episode}]`

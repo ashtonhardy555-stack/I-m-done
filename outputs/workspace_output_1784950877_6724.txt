@@ -1,0 +1,54 @@
+    fun loadMore() {
+        // Nothing to page if there's no committed query and no preset genre.
+        if (committedQuery.isBlank() && presetGenre == null) return
+        viewModelScope.launch {
+            loadMutex.withLock {
+                if (_loadingMore.value || !_canLoadMore.value) return@withLock
+                _loadingMore.value = true
+                try {
+                    val nextPage = page + 1
+                    val raw = if (committedQuery.isNotBlank()) {
+                        repo.search(committedQuery, page = nextPage)
+                    } else {
+                        val tvGenreIds = setOf("10759", "16", "35")
+                        val type = if (tvGenreIds.contains(presetGenre)) "tv" else "movie"
+                        repo.discover(type = type, genreId = presetGenre, page = nextPage)
+                    }
+                    // Detect end of catalog based on the RAW page size, not
+                    // the deduped/filtered count (dedup can shrink the batch
+                    // below pageSize even when TMDB returned a full page).
+                    val rawSize = raw.size
+                    // Dedupe against already-loaded items.
+                    val existing = _results.value.map { it.id }.toSet()
+                    val fresh = raw.filter { it.id !in existing }
+                    if (fresh.isEmpty()) {
+                        // Page returned only duplicates, but keep the Load More
+                        // button alive if the raw page was full — the next page
+                        // may have new titles.
+                        _canLoadMore.value = rawSize >= pageSize
+                        return@withLock
+                    }
+                    // Append immediately so the grid grows, then refine the
+                    // new batch down to only-streamable titles.
+                    _results.value = _results.value + fresh
+                    page = nextPage
+                    refineResults(fresh, replace = false)
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    _canLoadMore.value = false
+                } finally {
+                    _loadingMore.value = false
+                }
+            }
+        }
+    }
+
+    /**
+     * Refines results down to only-streamable titles.
+     *
+     * @param replace When true (initial load / new query), the entire result
+     *                list is replaced with the filtered subset. When false
+     *                (loadMore), only the newly-loaded [raw] batch is filtered
+     *                and appended; existing items are kept as-is.
+     */
+    private suspend fun refineResults(raw: List<TmdbItem>, replace: Boolean) {

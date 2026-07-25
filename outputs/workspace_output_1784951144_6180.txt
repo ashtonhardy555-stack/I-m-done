@@ -1,0 +1,10 @@
+total 24
+drwxr-xr-x  3 root root 4096 Jul 25 02:51 .
+drwxr-xr-x 13 user user 4096 Jul 25 03:06 ..
+-rw-r--r--  1 root root 5590 Jul 25 02:51 build.gradle.kts
+-rw-r--r--  1 root root  281 Jul 25 02:51 proguard-rules.pro
+drwxr-xr-x  3 root root 4096 Jul 25 02:51 src
+===
+/workspace
+===
+/workspace

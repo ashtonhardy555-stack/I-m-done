@@ -1,0 +1,5 @@
+ .../ashtonhardy/piratesfilmcove/ui/MainActivity.kt | 132 ++++++++++++++-------
+ .../piratesfilmcove/ui/components/ContentCard.kt   |  31 +++++
+ .../piratesfilmcove/ui/components/HeroBanner.kt    |  18 +++
+ todo.md                                            |  35 ++++--
+ 4 files changed, 159 insertions(+), 57 deletions(-)

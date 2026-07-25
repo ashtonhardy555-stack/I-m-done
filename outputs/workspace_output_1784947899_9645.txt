@@ -1,0 +1,10 @@
+a12ea94c chore(servers): daily health-check update [skip ci]
+cdfb24da chore(servers): daily health-check update [skip ci]
+5ba6443a Merge pull request #52 from ashtonhardy555-stack/fix/rename-to-piratesfilmcove
+01d7e996 fix: rename package com.freeflix.app -> com.ashtonhardy.piratesfilmcove (app name: Piratesfilm Cove)
+4a2be989 Merge pull request #51 from ashtonhardy555-stack/fix/re-enable-autobuild
+8e726306 ci: re-enable auto-build on push to main
+229535cf Merge pull request #50 from ashtonhardy555-stack/fix/rename-package-to-freeflix
+777be7b4 fix: rename package com.mariocart.app -> com.freeflix.app for APKPure
+93013538 Merge pull request #49 from ashtonhardy555-stack/fix/pause-auto-release-build
+9aeab1b4 fix(ci): pause auto-release on push so build 63 stays the latest release

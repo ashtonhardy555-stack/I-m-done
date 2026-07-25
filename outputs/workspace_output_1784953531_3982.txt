@@ -1,0 +1,10 @@
+f611e18f fix(tv): side rail only opens on Left at the first card / hero, not mid-row
+8e43cb40 feat: more Kodi-engine addon sources + Load More, hero, search UI fixes
+a12ea94c chore(servers): daily health-check update [skip ci]
+---
+ .../ashtonhardy/piratesfilmcove/ui/MainActivity.kt | 132 ++++++++++++++-------
+ .../piratesfilmcove/ui/components/ContentCard.kt   |  31 +++++
+ .../piratesfilmcove/ui/components/HeroBanner.kt    |  18 +++
+ .../piratesfilmcove/ui/util/SideRailFocus.kt       |  45 +++++++
+ todo.md                                            |  44 +++++--
+ 5 files changed, 213 insertions(+), 57 deletions(-)

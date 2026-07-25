@@ -1,0 +1,35 @@
+=== VidSrcToExtractor.kt ===
+475 app/src/main/java/com/ashtonhardy/piratesfilmcove/data/server/VidSrcToExtractor.kt
+=== Existing extractors ===
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/server/AnnasCinemaExtractor.kt
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/server/DahmerMoviesExtractor.kt
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/server/EmbedExtractor.kt
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/server/KissKhExtractor.kt
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/server/LookMovieHeadlessExtractor.kt
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/server/LookMovieWebExtractor.kt
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/server/LordFlixExtractor.kt
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/server/MeowTvExtractor.kt
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/server/NoTorrentExtractor.kt
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/server/NovaStreamExtractor.kt
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/server/NuvioStreamsExtractor.kt
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/server/RemoteServerListFetcher.kt
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/server/ServerConfig.kt
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/server/ServerManager.kt
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/server/SmashStreamsExtractor.kt
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/server/StreamAvailabilityChecker.kt
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/server/StreamExtractor.kt
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/server/StreamProviders.kt
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/server/SuperEmbedExtractor.kt
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/server/TwoEmbedExtractor.kt
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/server/VidLinkExtractor.kt
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/server/VidSrcExtractor.kt
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/server/VidSrcMeResolver.kt
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/server/VidSrcNetExtractor.kt
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/server/VidSrcProExtractor.kt
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/server/VidSrcToExtractor.kt
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/server/VidStormExtractor.kt
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/server/VidSyncExtractor.kt
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/server/VideasyExtractor.kt
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/server/VixSrcExtractor.kt
+=== KodiEngine ===
+393 app/src/main/java/com/ashtonhardy/piratesfilmcove/data/engine/KodiEngine.kt

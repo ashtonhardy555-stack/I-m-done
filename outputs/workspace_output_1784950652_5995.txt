@@ -1,0 +1,7 @@
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/Search/SearchViewModel.kt
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/browse/BrowseViewModel.kt
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/detail/DetailViewModel.kt
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/movies/MoviesViewModel.kt
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/tv/SeasonEpisodeViewModel.kt
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/tv/TvViewModel.kt

@@ -1,0 +1,19 @@
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(dims.gridColumns),
+        modifier = Modifier
+            .fillMaxSize()
+            .focusGroup()
+            .padding(top = dims.topContentPadding),
+        contentPadding = PaddingValues(
+            start = dims.rowPadding,
+            end = dims.rowPadding,
+            bottom = 24.dp
+        ),
+        horizontalArrangement = Arrangement.spacedBy(dims.cardSpacing),
+        verticalArrangement = Arrangement.spacedBy(dims.cardSpacing)
+    ) {
+        // ── Title (full width) ──────────────────────────────────────────
+        item(span = { GridItemSpan(dims.gridColumns) }) {
+            Text(
+                text = "\uD83D\uDDC2\uFE0F Browse by Genre",
+                color = TextPrimary,

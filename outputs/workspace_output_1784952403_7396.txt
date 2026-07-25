@@ -1,0 +1,41 @@
+            }
+        }
+    }
+}
+
+@Composable
+private fun AppRoot() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val dims = responsiveDims()
+    var currentTab by remember { mutableStateOf(Tab.Home) }
+    var showSearch by remember { mutableStateOf(false) }
+    var selectedMovie by remember { mutableStateOf<TmdbItem?>(null) }
+    var selectedTv by remember { mutableStateOf<TmdbItem?>(null) }
+    var searchGenre by remember { mutableStateOf<String?>(null) }
+
+    // TV-only: the side rail is HIDDEN by default and only slides in when the
+    // user presses Left while already on the first card of a row. Selecting a
+    // nav item slides it back away so it never covers content while browsing.
+    var sideNavVisible by remember { mutableStateOf(false) }
+    val sideNavFocusRequester = remember { FocusRequester() }
+    // True only during the one-time startup reveal of the rail. While true the
+    // rail auto-retracts after a few seconds (if the user hasn't picked an
+    // item or pressed Right to dismiss it) so it never lingers over content.
+    var sideNavAutoShown by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        com.ashtonhardy.piratesfilmcove.ui.AutoUpdater.checkAndPrompt(context)
+    }
+
+    // ── One-time "Buy Me a Coffee" prompt (phone only) ────────────────── //
+    // Shows a small support dialog the first time the app is opened on a
+    // phone/tablet. Never shown on Android TV (lean-back UI, no good place
+    // for a tap-through CTA). A SharedPreferences flag ("bmc_prompt_seen")
+    // guarantees it only ever appears once per install; the persistent link
+    // in Updates remains for anyone who dismisses it.
+    val bmcPrefs = remember {
+        context.getSharedPreferences("support_prefs", android.content.Context.MODE_PRIVATE)
+    }
+    // isTvDevice() is @Composable, so it must be called in the composable body
+    // (not inside a remember {} lambda, where composable calls are forbidden).
+    val isTv = isTvDevice()

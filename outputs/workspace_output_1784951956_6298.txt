@@ -1,0 +1,76 @@
+            // the focusGroup could consume it for card-to-card navigation —
+            // making the sidebar open on every single Left press.
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .onKeyEvent { event ->
+                        // Reveal the side rail when the user presses Left and
+                        // it is currently hidden — i.e. "at the beginning of a
+                        // line". This only fires when the inner focusGroup()
+                        // did NOT consume the Left event (focus was already at
+                        // the far-left edge). A manual reveal is NOT
+                        // auto-shown, so it stays until dismissed.
+                        if (!sideNavVisible &&
+                            event.type == KeyEventType.KeyUp &&
+                            event.key == Key.DirectionLeft
+                        ) {
+                            sideNavAutoShown = false
+                            sideNavVisible = true
+                            true
+                        } else {
+                            false
+                        }
+                    }
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .focusGroup()
+                ) {
+                    NetflixScreenSwitch(
+                        currentTab = currentTab,
+                        onItemClick = onItemClick,
+                        onSearchWithGenre = onSearchWithGenre,
+                        onResume = onResume
+                    )
+                }
+            }
+
+            // Sliding side rail — overlays the content's left edge.
+            AnimatedVisibility(
+                visible = sideNavVisible,
+                enter = slideInHorizontally(animationSpec = tween(220)) { fullWidth -> -fullWidth },
+                exit = slideOutHorizontally(animationSpec = tween(220)) { fullWidth -> -fullWidth },
+                modifier = Modifier.align(Alignment.CenterStart)
+            ) {
+                TvSideNav(
+                    currentTab = currentTab,
+                    onTabSelected = {
+                        currentTab = it
+                        sideNavVisible = false
+                        sideNavAutoShown = false
+                    },
+                    onSearchClick = {
+                        showSearch = true
+                        sideNavVisible = false
+                        sideNavAutoShown = false
+                    },
+                    onDismiss = {
+                        sideNavVisible = false
+                        sideNavAutoShown = false
+                    },
+                    // Show the "press Left anytime" hint only during the
+                    // startup auto-reveal, so first-time users learn the
+                    // gesture but returning users aren't nagged.
+                    showHint = sideNavAutoShown,
+                    focusRequester = sideNavFocusRequester
+                )
+            }
+        }
+    } else {
+        // Phone: transparent Netflix top bar that fades to solid on tab change.
+        Box(modifier = Modifier.fillMaxSize().background(Bg)) {
+            NetflixScreenSwitch(
+                currentTab = currentTab,
+                onItemClick = onItemClick,
+                onSearchWithGenre = onSearchWithGenre,

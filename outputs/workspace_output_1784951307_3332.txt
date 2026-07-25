@@ -1,0 +1,30 @@
+31:    fun isTv(context: Context): Boolean {
+33:        val uiModeManager = context.getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager
+58: * wrap the result in remember(): DeviceInfo.isTv() is a cheap, pure
+65:fun isTvDevice(): Boolean {
+66:    val context = LocalContext.current
+67:    return DeviceInfo.isTv(context)
+77:    val context = LocalContext.current
+78:    return DeviceInfo.isTv(context) || !DeviceInfo.hasTouchscreen(context)
+92:data class ResponsiveDims(
+93:    val isTv: Boolean,
+97:    val cardSpacing: Dp,
+98:    val rowPadding: Dp,
+103:    val gridColumns: Int,
+110:    val topContentPadding: Dp,
+115:    val navRailWidth: Dp,
+122:    val safeAreaHorizontal: Dp,
+123:    val safeAreaTop: Dp,
+124:    val safeAreaBottom: Dp,
+127:        val Phone = ResponsiveDims(
+128:            isTv = false,
+132:            cardSpacing = 10.dp,
+133:            rowPadding = 16.dp,
+138:            gridColumns = 3,
+141:            topContentPadding = 72.dp,
+142:            navRailWidth = 0.dp,
+143:            safeAreaHorizontal = 0.dp,
+144:            safeAreaTop = 0.dp,
+145:            safeAreaBottom = 0.dp,
+148:        val TV = ResponsiveDims(
+149:            isTv = true,

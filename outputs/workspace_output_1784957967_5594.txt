@@ -1,0 +1,10 @@
+completed	failure	Merge pull request #53 from ashtonhardy555-stack/feat/more-addons-and…	Build & Release APK	main	push	30144441389	1m9s	2026-07-25T04:40:42Z
+completed	success	Daily Server Health Check	Daily Server Health Check	main	schedule	30077464119	30s	2026-07-24T08:01:40Z
+completed	success	Daily Server Health Check	Daily Server Health Check	main	schedule	29990121423	17m13s	2026-07-23T08:04:41Z
+completed	success	Merge pull request #52 from ashtonhardy555-stack/fix/rename-to-pirate…	Build & Release APK	main	push	29966486763	5m15s	2026-07-22T23:33:19Z
+completed	success	Merge pull request #51 from ashtonhardy555-stack/fix/re-enable-autobuild	Build & Release APK	main	push	29965180724	5m40s	2026-07-22T23:08:11Z
+completed	success	Merge pull request #48 from ashtonhardy555-stack/rollback/build63-revert	Build & Release APK	main	push	29964194473	3m3s	2026-07-22T22:49:59Z
+completed	success	Merge pull request #47 from ashtonhardy555-stack/feat/settings-loadin…	Build & Release APK	main	push	29953890753	5m15s	2026-07-22T20:08:28Z
+completed	success	Merge pull request #46 from ashtonhardy555-stack/fix/tv-topbar-hero-l…	Build & Release APK	main	push	29952101090	3m45s	2026-07-22T19:42:39Z
+completed	success	Daily Server Health Check	Daily Server Health Check	main	schedule	29902449932	30s	2026-07-22T08:02:38Z
+completed	success	Merge pull request #45 from ashtonhardy555-stack/fix/load-more-sideba…	Build & Release APK	main	push	29892762274	3m42s	2026-07-22T05:04:48Z

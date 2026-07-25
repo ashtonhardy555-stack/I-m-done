@@ -1,0 +1,4 @@
+7:import androidx.compose.foundation.focusGroup
+117:    // focusGroup(): keeps D-pad focus clamped inside the screen's content.
+120:    // no-pointer TV remote. focusGroup() makes the focusable children a single
+130:            .focusGroup()

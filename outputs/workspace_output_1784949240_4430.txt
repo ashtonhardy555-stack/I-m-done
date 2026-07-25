@@ -1,0 +1,30 @@
+# Piratesfilm Cove — app improvements
+
+## 1. New Kodi addon sources (no debrid / no trakt)
+- [ ] Research & identify public no-debrid Stremio addon endpoints (free99 + others)
+- [ ] Create new extractor files following the SmashStreamsExtractor pattern
+- [ ] Register new addons in KodiEngine.kt (adapters + addons list)
+
+## 2. UI bugs
+- [ ] Fix "Load More" buttons disappearing prematurely (HomeViewModel canLoadMore flag)
+- [ ] Fix hero banner being clipped on home screen (HeroBanner height / HomeScreen top padding)
+- [ ] Fix search results disappearing before Enter (SearchViewModel/SearchScreen IME noise)
+- [ ] Show search results in side-to-side layout + active category/genre label (SearchScreen)
+
+## 3. Ship it
+- [ ] Create feature branch, commit, push, create PR to GitHub
+---GIT STATUS---
+On branch feat/more-addons-and-ui-fixes
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+	modified:   todo.md
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	outputs/
+	summarized_conversations/
+
+no changes added to commit (use "git add" and/or "git commit -a")
+---BRANCH---
+feat/more-addons-and-ui-fixes

@@ -1,0 +1,12 @@
+total 300
+drwxr-xr-x  3 root root   4096 Jul 25 03:22 .
+drwxrwxrwt 11 root root   4096 Jul 25 03:22 ..
+drwxr-xr-x  8 root root   4096 Jul 25 03:22 .git
+-rw-r--r--  1 root root   1799 Jul 25 03:22 .gitignore
+-rw-r--r--  1 root root  35149 Jul 25 03:22 LICENSE
+-rw-r--r--  1 root root    219 Jul 25 03:22 README.md
+-rw-r--r--  1 root root 242641 Jul 25 03:22 addons.xml
+-rw-r--r--  1 root root     32 Jul 25 03:22 addons.xml.md5
+---DIRS---
+.
+./.git

@@ -1,0 +1,2 @@
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/MainActivity.kt:484:private fun NetflixScreenSwitch(
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeScreen.kt:80:fun HomeScreen(

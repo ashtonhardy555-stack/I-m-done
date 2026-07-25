@@ -1,0 +1,39 @@
+total 256
+drwxr-xr-x 12 user user  4096 Jul 25 02:51 .
+drwxr-xr-x 20 root root  4096 Jun 22 03:39 ..
+drwxr-xr-x  8 root root  4096 Jul 25 02:51 .git
+drwxr-xr-x  3 root root  4096 Jul 25 02:51 .github
+-rw-r--r--  1 root root   153 Jul 25 02:51 .gitignore
+-rw-r--r--  1 root root  1883 Jul 25 02:51 FIXES_SUMMARY.md
+-rw-r--r--  1 root root  7812 Jul 25 02:51 PLAYBACK_FIXES_FINAL.md
+-rw-r--r--  1 root root  4043 Jul 25 02:51 PLAYBACK_FIX_SUMMARY.md
+-rw-r--r--  1 root root    49 Jul 25 02:51 RECENT_FIXES.txt
+-rw-r--r--  1 root root  5431 Jul 25 02:51 SERVERS_ADDED.md
+-rw-r--r--  1 root root  5713 Jul 25 02:51 SERVERS_ADDED_v7.md
+-rw-r--r--  1 root root  5639 Jul 25 02:51 VERIFICATION_FIXES.md
+-rw-r--r--  1 root root  5661 Jul 25 02:51 VIDSTORM_FIX.md
+drwxr-xr-x  3 root root  4096 Jul 25 02:51 addon
+-rw-r--r--  1 root root 92217 Jul 25 02:51 android-app.zip
+drwxr-xr-x  3 root root  4096 Jul 25 02:51 app
+drwxr-xr-x  3 root root  4096 Jul 25 02:51 backend
+-rw-r--r--  1 root root   142 Jul 25 02:51 build.gradle.kts
+drwxr-xr-x  3 root root  4096 Jul 25 02:51 docs
+drwxr-xr-x  3 root root  4096 Jul 25 02:51 github
+-rw-r--r--  1 root root    63 Jul 25 02:51 gitignore
+drwxr-xr-x  3 root root  4096 Jul 25 02:51 gradle
+-rw-r--r--  1 root root   136 Jul 25 02:51 gradle.properties
+-rwxr-xr-x  1 root root   996 Jul 25 02:51 gradlew
+-rw-r--r--  1 root root   620 Jul 25 02:51 keystore.properties.example
+drwxr-xr-x  2 root root  4096 Jul 25 02:51 outputs
+-rw-r--r--  1 root root  1073 Jul 25 02:51 plugin.video.lookmoviesearch_kodi.zip
+drwxr-xr-x  2 root root  4096 Jul 25 02:51 scripts
+-rw-r--r--  1 root root   658 Jul 25 02:51 servers.json
+-rw-r--r--  1 root root   335 Jul 25 02:51 settings.gradle.kts
+-rw-r--r--  1 root root  3421 Jul 25 02:51 todo-fixes.md
+-rw-r--r--  1 root root  2200 Jul 25 02:51 todo.md
+-rw-r--r--  1 root root 17108 Jul 25 02:51 working-servers.json
+---
+fatal: detected dubious ownership in repository at '/workspace'
+To add an exception for this directory, call:
+
+	git config --global --add safe.directory /workspace

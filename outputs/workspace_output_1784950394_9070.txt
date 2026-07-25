@@ -1,0 +1,51 @@
+=== Extractor BASE/API URLs ===
+"+host+"/generate.php")`).
+"+host+"/generate.php", …)` call which
+$cookieHost") ?: ""
+$host"
+$host")
+$host/generate.php"
+$host/generate.php", referer = "$baseDom/").trim()
+...", "hash": "..." }`
+.../playlist.m3u8" }`
+.../playlist.m3u8", "quality": "1080" } ] }`
+...m3u8" }] } }`
+...m3u8", ...},
+HOST/generate.php") and $.ajax("...").
+HOST/generate.php", function(token){
+HOST/generate.php", …)`
+OTHER_HOST/generate.php", function(token){
+a.111477.xyz"
+a.111477.xyz/`, `Range: bytes=0-`).
+a.111477.xyz/…`
+a.111477.xyz/…` URL, then wrap it with the bulk proxy worker:
+addon-osvh.onrender.com"
+addon-osvh.onrender.com",
+addon-osvh.onrender.com/stream/movie/{imdbId}.json`
+addon-osvh.onrender.com/stream/series/{imdbId}:{s}:{e}.json`
+annas-cinema.by4ssh.com"
+annas-cinema.by4ssh.com/stream/movie/{imdbId}.json`
+annas-cinema.by4ssh.com/stream/series/{imdbId}:{s}:{e}.json`
+api.meowtv.ru/streams"
+api.meowtv.ru/streams/movie/{tmdbId}?s={server}`
+api.meowtv.ru/streams/tv/{tmdbId}/{season}/{episode}?s={server}`
+api.themoviedb.org/3/$type/$tmdbId" +
+api.themoviedb.org/3/{movie|tv}/{id}?api_key=…&append_to_response=external_ids`.
+api.videasy.net/1movies/sources-with-title"),
+api.videasy.net/cdn/sources-with-title", moviesOnly = true)
+api.videasy.net/hdmovie/sources-with-title"),
+api.videasy.net/m4uhd/sources-with-title"),
+api.videasy.net/moviebox/sources-with-title"),
+api.videasy.net/myflixerzupcloud/sources-with-title"),
+api.videasy.net/onionplay/sources-with-title"),
+api.videasy.net/primesrcme/sources-with-title"),
+api.videasy.net/primewire/sources-with-title"),
+api.videasy.net/superflix/sources-with-title"),
+api.videasy.net/{server}/sources-with-title?title=…&mediaType=…&year=…&tmdbId=…&imdbId=…[&seasonId=…&episodeId=…]`
+api.wingsdatabase.com"
+api.wingsdatabase.com/seed?mediaId={tmdbId}`
+api.wingsdatabase.com/{server}/sources-with-title`
+autoembed.pro/api"
+bcdnxw.hakunaymatata.com&sign=…&t=…`
+cdn.jsdelivr.net/gh/ashtonhardy555-stack/I-m-done@main/working-servers.json"
+cloudorchestranova.com/rcp/{hash}">`

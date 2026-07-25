@@ -1,0 +1,13 @@
+15:import androidx.compose.foundation.layout.Box
+16:import androidx.compose.foundation.layout.Column
+17:import androidx.compose.foundation.layout.Spacer
+18:import androidx.compose.foundation.layout.fillMaxWidth
+19:import androidx.compose.foundation.layout.height
+20:import androidx.compose.foundation.layout.padding
+21:import androidx.compose.foundation.layout.size
+22:import androidx.compose.foundation.layout.width
+28:import androidx.compose.runtime.Composable
+29:import androidx.compose.runtime.getValue
+30:import androidx.compose.runtime.remember
+38:import androidx.compose.ui.layout.ContentScale
+39:import androidx.compose.ui.platform.LocalContext

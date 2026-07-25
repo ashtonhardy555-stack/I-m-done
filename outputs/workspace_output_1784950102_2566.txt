@@ -1,0 +1,15 @@
+30: *     resolve the IMDb id via TMDB's `external_ids` append. This is one extra
+34: *     - Movie: `GET https://embed.smashystream/tmdbSTREAM/stream/movie/{imdbId}.json`
+35: *     - TV:    `GET https://embed.smashystream/tmdbSTREAM/stream/series/{imdbId}:{s}:{e}.json`
+115:        val imdbId = try {
+116:            resolveImdbId(tmdbId, isTv)
+121:        if (imdbId.isNullOrBlank()) {
+125:        Log.d(TAG, "🔍 TMDB $tmdbId → IMDb $imdbId")
+129:            "$ADDON_BASE/stream/series/$imdbId:$season:$episode.json"
+131:            "$ADDON_BASE/stream/movie/$imdbId.json"
+145:            Log.w(TAG, "addon returned 0 playable streams for $imdbId")
+148:        Log.d(TAG, "🎲 ${candidates.size} candidate stream(s) for $imdbId")
+195:    private suspend fun resolveImdbId(tmdbId: Int, isTv: Boolean): String? {
+198:            ApiClient.tmdbApi.getTvExternalIds(tmdbId, key)
+200:            ApiClient.tmdbApi.getMovieExternalIds(tmdbId, key)
+202:        return resp.imdbId

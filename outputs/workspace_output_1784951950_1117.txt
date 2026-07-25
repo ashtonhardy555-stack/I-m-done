@@ -1,0 +1,33 @@
+138:    var sideNavVisible by remember { mutableStateOf(false) }
+139:    val sideNavFocusRequester = remember { FocusRequester() }
+143:    var sideNavAutoShown by remember { mutableStateOf(false) }
+291:    BackHandler(enabled = sideNavVisible) {
+292:        sideNavVisible = false
+293:        sideNavAutoShown = false
+353:            sideNavVisible = true
+354:            sideNavAutoShown = true
+357:        // only fires for the auto-shown reveal (sideNavAutoShown == true);
+358:        // a user-invoked Left-press reveal (sideNavAutoShown == false) stays
+360:        LaunchedEffect(sideNavVisible, sideNavAutoShown) {
+361:            if (sideNavVisible && sideNavAutoShown) {
+363:                sideNavVisible = false
+364:                sideNavAutoShown = false
+371:            LaunchedEffect(sideNavVisible) {
+372:                if (sideNavVisible) {
+374:                    runCatching { sideNavFocusRequester.requestFocus() }
+407:                        if (!sideNavVisible &&
+411:                            sideNavAutoShown = false
+412:                            sideNavVisible = true
+435:                visible = sideNavVisible,
+440:                TvSideNav(
+444:                        sideNavVisible = false
+445:                        sideNavAutoShown = false
+449:                        sideNavVisible = false
+450:                        sideNavAutoShown = false
+453:                        sideNavVisible = false
+454:                        sideNavAutoShown = false
+459:                    showHint = sideNavAutoShown,
+460:                    focusRequester = sideNavFocusRequester
+608:private fun TvSideNav(
+644:                SideNavHintChip()
+673:private fun SideNavHintChip() {

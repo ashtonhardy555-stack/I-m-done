@@ -1,0 +1,15 @@
+        items(
+            items = items,
+            key = { "${it.id}_${it.contentType}" }
+        ) { item ->
+            ContentCard(
+                item = item,
+                onClick = { onItemClick(item) },
+                fillMaxWidth = true
+            )
+        }
+
+        // "Show More" footer - shown only when there are cards AND there's
+        // more to load (canLoadMore). When the genre catalog is exhausted
+        // canLoadMore flips to false and the button disappears. While a
+        // loadMore() is in flight the button shows a spinner and is disabled.

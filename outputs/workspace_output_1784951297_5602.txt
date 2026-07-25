@@ -1,0 +1,19 @@
+61:private data class GenreChip(val emoji: String, val label: String, val genreId: String)
+64:    GenreChip("\uD83D\uDD25", "Trending", ""),
+65:    GenreChip("\uD83C\uDFAC", "Action", "28"),
+66:    GenreChip("\uD83D\uDE02", "Comedy", "35"),
+67:    GenreChip("\uD83D\uDC7B", "Horror", "27"),
+68:    GenreChip("\uD83D\uDE80", "Sci-Fi", "878"),
+69:    GenreChip("\uD83C\uDFAD", "Drama", "18"),
+70:    GenreChip("\uD83D\uDD2A", "Thriller", "53"),
+71:    GenreChip("\uD83C\uDF00", "Animation", "16"),
+72:    GenreChip("\uD83D\uDC95", "Romance", "10749"),
+73:    GenreChip("\uD83D\uDD75", "Crime", "80"),
+74:    GenreChip("\uD83C\uDF0D", "Adventure", "12"),
+75:    GenreChip("\uD83D\uDCFA", "TV Action", "10759"),
+76:    GenreChip("\uD83D\uDCD6", "Documentary", "99"),
+82:    onSearchWithGenre: (String) -> Unit = {},
+157:            GenreSuggestionsBar(onGenreClick = onSearchWithGenre)
+218:            text = "Browse by Category",
+233:                GenreChipItem(chip = chip, onClick = { onGenreClick(chip.genreId) })
+240:private fun GenreChipItem(chip: GenreChip, onClick: () -> Unit) {

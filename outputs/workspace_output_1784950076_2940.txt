@@ -1,0 +1,120 @@
+package com.ashtonhardy.piratesfilmcove.data.server
+
+import android.util.Log
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import org.json.JSONObject
+import java.net.URLEncoder
+import java.util.concurrent.TimeUnit
+
+/**
+ * LookMovieHeadlessExtractor — a pure-OkHttp, **no-WebView, no-Kodi** port of
+ * the `plugin.video.lookmovietomb` Kodi addon's extraction flow.
+ *
+ * ## Why this exists (the user's "Kodi-like headless engine" request)
+ *
+ * The user asked for "a Kodi-like app that can run the LookMovie tomb addon in
+ * the background to pull from" — i.e. get LookMovie working **without a
+ * WebView**. LookMovie's nginx 403s plain OkHttp from many client networks, so
+ * the old `LookMovieWebExtractor` (WebView) and `StreamExtractor` (OkHttp that
+ * 403'd) were both removed from the pipeline in the no-WebView cleanup.
+ *
+ * This extractor re-implements the addon's *extraction logic* directly in
+ * Kotlin/OkHttp (the "headless engine" — no Kodi runtime, no Python, no
+ * WebView). It reproduces the addon's exact request sequence, headers, and
+ * regex parsing, so it benefits from whatever request shape the addon relies
+ * on to reach the server.
+ *
+ * ## The flow (a 1:1 port of main.py)
+ *
+ * 1. **SEARCH** — `GET /movies/search/page/1?q=<title>` (TV: `/shows/search/...`).
+ *    Parse HTML for the first `<a href="/movies/view/{id-slug}">` (TV:
+ *    `/shows/view/{id-slug}`). We pick the result whose slug best matches the
+ *    requested title (and year, when available) to avoid grabbing the wrong
+ *    entry on ambiguous searches.
+ *
+ * 2. **STORAGE** — `GET /movies/play/{id-slug}` (TV: `/shows/play/{id-slug}`).
+ *    Regex out the `movie_storage` / `show_storage` JS object to get:
+ *      Movie → `hash`, `id_movie`, `expires`
+ *      TV    → `hash`, `expires`, and the `seasons` array; we then scan the
+ *              seasons array for the episode matching (season, episode) and
+ *              read its `id_episode`.
+ *
+ * 3. **SECURITY API** — `GET /api/v1/security/movie-access?id_movie=&hash=&expires=`
+ *    (TV: `/api/v1/security/episode-access?id_episode=&hash=&expires=`) with
+ *    `Referer: <play page>` and `X-Requested-With: XMLHttpRequest`.
+ *    Returns JSON `{ "streams": {"1080p": "https://...m3u8", ...},
+ *                     "subtitles": [...] }`. We take the first stream value
+ *    (highest quality, same as the addon's `[x for x in streams.values() if x][0]`).
+ *
+ * 4. **PLAY** — The addon runs a LOCAL HTTP proxy (`serverHTTP.py`) that injects
+ *    the `t_hash={hash}` cookie on every `.m3u8`/segment request. We DON'T need
+ *    a proxy: ExoPlayer's `DefaultHttpDataSource.Factory` sends our `headers`
+ *    map on **every** segment/playlist fetch, so we attach
+ *    `Cookie: t_hash={hash}` to the returned headers and ExoPlayer carries it
+ *    automatically — a true headless play with zero extra server process.
+ *
+ * ## Notes / known limitations
+ *
+ *  - LookMovie intermittently shows a reCAPTCHA v2 interstitial (the addon's
+ *    v0.8 changed the marker from ">Thread Defence" to "g-recaptcha"). Solving
+ *    reCAPTCHA headlessly on-device is out of scope here; if the play page
+ *    returns the reCAPTCHA interstitial we return `Result.Error` and let the
+ *    rest of the parallel race cover the title (the other direct providers).
+ *  - If the request 403s outright, same outcome: `Result.Error` and the race
+ *    continues. This extractor is a *best-effort* racer — when it works it
+ *    delivers very clean direct HLS; when LookMovie blocks it, the other
+ *    extractors still cover the title.
+ */
+object LookMovieHeadlessExtractor {
+
+    private const val TAG = "LookMovieHeadless"
+    private const val BASE = "https://www.lookmovie2.to"
+
+    // The addon's exact User-Agent (Firefox 115 on Win64). Reusing it maximises
+    // the chance the request shape matches what the server expects.
+    private const val UA =
+        "Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0"
+
+    private val client: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(8, TimeUnit.SECONDS)
+            .readTimeout(10, TimeUnit.SECONDS)
+            .followRedirects(true)
+            .build()
+    }
+
+    sealed class Result {
+        /** A resolved direct HLS stream. [headers] MUST be sent on every request. */
+        data class Stream(
+            val url: String,
+            val headers: Map<String, String>,
+            val providerName: String
+        ) : Result()
+
+        data class Error(val message: String) : Result()
+    }
+
+    /**
+     * Resolve a direct playable stream for the given title.
+     *
+     * @param title     the movie/show title to search for
+     * @param year      release year (used to disambiguate search results; may be null)
+     * @param isMovie   true for movies, false for TV
+     * @param season    1-indexed season (TV only)
+     * @param episode   1-indexed episode (TV only)
+     */
+    suspend fun extract(
+        title: String,
+        year: String?,
+        isMovie: Boolean,
+        season: Int,
+        episode: Int
+    ): Result = withContext(Dispatchers.IO) {
+        if (title.isBlank()) return@withContext Result.Error("LookMovie: no title")
+
+        val root = if (isMovie) "movies" else "shows"
+        try {
+            // ── 1. SEARCH ──

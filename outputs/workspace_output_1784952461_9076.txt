@@ -1,0 +1,83 @@
+    val canLoadMoreTopRated by viewModel.canLoadMoreTopRated.collectAsState()
+    val dims = responsiveDims()
+
+    // On a no-pointer TV box, land D-pad focus on the first Popular card the
+    // moment the screen appears so the user always has a known starting point.
+    val firstCardFocusRequester = rememberInitialFocusRequester()
+
+    // focusGroup(): keeps D-pad focus clamped inside the screen's content.
+    // Without it, pressing Up from the first row can move focus above the
+    // LazyColumn into empty space — nothing focused, user stranded on a
+    // no-pointer TV remote. focusGroup() makes the focusable children a single
+    // unit so Up stops at the top element and Down stops at the bottom.
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .focusGroup()
+            .padding(top = dims.topContentPadding)
+    ) {
+        item {
+            Text(
+                text = "Movies",
+                color = TextPrimary,
+                fontSize = 28.sp,
+                fontWeight = FontWeight.Black,
+                modifier = Modifier.padding(start = 16.dp, bottom = 4.dp)
+            )
+        }
+        item {
+            ContentRow(
+                title = "Popular Movies", emoji = "\uD83C\uDFAC",
+                items = popular, onItemClick = onItemClick,
+                onLoadMore = { viewModel.loadMore() },
+                canLoadMore = canLoadMorePopular,
+                firstCardFocusRequester = firstCardFocusRequester
+            )
+        }
+        item {
+            ContentRow(
+                title = "Top Rated", emoji = "\uD83C\uDFC6",
+                items = topRated, onItemClick = onItemClick,
+                onLoadMore = { viewModel.loadMoreTopRated() },
+===TV===
+    val canLoadMoreTopRated by viewModel.canLoadMoreTopRated.collectAsState()
+    val dims = responsiveDims()
+
+    // On a no-pointer TV box, land D-pad focus on the first card of the first
+    // row so the user has a known starting point when they open TV Shows.
+    val firstCardFocusRequester = rememberInitialFocusRequester()
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            // focusGroup(): the row cards are the only focusables here.
+            // Without it, D-pad Up from the top row can move focus ABOVE the
+            // LazyColumn into empty space — nothing is focused, Enter does
+            // nothing, and the user is stranded on a no-pointer remote.
+            // focusGroup() makes the focusable children a single focus unit so
+            // Up clamps on the first row and Down clamps on the last.
+            .focusGroup()
+            .padding(top = dims.topContentPadding)
+    ) {
+        item {
+            Text(
+                text = "TV Shows",
+                color = TextPrimary,
+                fontSize = 28.sp,
+                fontWeight = FontWeight.Black,
+                modifier = Modifier.padding(start = 16.dp, bottom = 4.dp)
+            )
+        }
+        item {
+            ContentRow(
+                title = "Popular Shows", emoji = "\uD83D\uDCFA",
+                items = popular, onItemClick = onItemClick,
+                onLoadMore = { viewModel.loadMore() },
+                canLoadMore = canLoadMorePopular,
+                firstCardFocusRequester = firstCardFocusRequester
+            )
+        }
+        item {
+            ContentRow(
+                title = "Top Rated Shows", emoji = "\uD83C\uDFC6",
+                items = topRated, onItemClick = onItemClick,

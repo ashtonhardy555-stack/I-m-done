@@ -1,0 +1,22 @@
+=== ContentRow usages (which pass onLoadMore?) ===
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/movies/MoviesScreen.kt:58:            ContentRow(
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/movies/MoviesScreen.kt:67:            ContentRow(
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeScreen.kt:148:                ContentRow(
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeScreen.kt:160:            ContentRow(
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeScreen.kt:168:            ContentRow(
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeScreen.kt:176:            ContentRow(
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeScreen.kt:184:            ContentRow(
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/tv/TvScreen.kt:59:            ContentRow(
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/tv/TvScreen.kt:68:            ContentRow(
+
+=== Browse screen rows that DON'T have load more ===
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/Search/SearchScreen.kt:208:            LazyVerticalGrid(
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/browse/BrowseScreen.kt:109:            LazyRow(
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/browse/BrowseScreen.kt:74:    // A single LazyVerticalGrid hosts the title, the genre selector, the
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/browse/BrowseScreen.kt:82:    LazyVerticalGrid(
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/components/ContentRow.kt:103:        LazyRow(
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/components/ContentRow.kt:92:        // row (as the last item in the LazyRow), not next to the title.
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/detail/DetailScreen.kt:403:    LazyRow(
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeScreen.kt:308:        LazyRow(
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/tv/SeasonEpisodePicker.kt:217:                LazyRow(
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/tv/SeasonEpisodePicker.kt:442:    LazyRow(

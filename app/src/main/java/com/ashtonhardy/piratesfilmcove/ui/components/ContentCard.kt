@@ -178,7 +178,7 @@ fun ContentCard(
             // when this card gains focus. Reporting in a coroutine (not
             // during layout) is the safe Compose pattern. positionInWindow.x
             // is the card's left edge in px.
-            .onGloballyPositioned { coords -> cardXInWindow = coords.positionInWindow.x }
+            .onGloballyPositioned { coords -> cardXInWindow = coords.positionInRoot.x }
             // Shadow is ALWAYS in the chain (structural stability — see the
             // note above). Its elevation animates 0 → 24dp so idle cards pay
             // effectively zero shadow cost (0 elevation = no shadow pass),

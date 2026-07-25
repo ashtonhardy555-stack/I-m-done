@@ -1,0 +1,31 @@
+            // press — the bug this X-threshold approach fixes.
+            //
+            // The threshold is rowPadding + a tolerance (24dp) so that the
+            // first card (x ≈ rowPadding) and hero buttons (x ≈ rowPadding)
+            // are both within it, while any second-or-later card (x ≈
+            // rowPadding + cardWidth + ...) is well beyond it.
+            val edgeThresholdPx = with(LocalDensity.current) {
+                (dims.rowPadding + 24.dp).toPx()
+            }
+            CompositionLocalProvider(
+                LocalSideRailXReporter provides { x -> focusedCardX = x }
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .onKeyEvent { event ->
+                            // Only react to Left KeyUp when the rail is
+                            // hidden AND the focused card is at the far-left
+                            // edge. A manual reveal is NOT auto-shown, so it
+                            // stays until dismissed.
+                            if (!sideNavVisible &&
+                                event.type == KeyEventType.KeyUp &&
+                                event.key == Key.DirectionLeft &&
+                                focusedCardX <= edgeThresholdPx
+                            ) {
+                                sideNavAutoShown = false
+                                sideNavVisible = true
+                                true
+                            } else {
+                                // Returning false lets the event continue. For
+                                // a mid-row Left this means the focus system

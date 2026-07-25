@@ -1,0 +1,24 @@
+    private val addons = mutableListOf<Addon>(
+        lookmovieAddon,
+        smashStreamsAddon,
+        nuvioStreamsAddon,
+        annasCinemaAddon,
+        novaStreamAddon,
+        vidSrcToAddon,
+        twoEmbedAddon,
+        superEmbedAddon,
+        vidLinkAddon,
+        vixSrcAddon,
+        videasyAddon,
+        noTorrentAddon,
+        lordFlixAddon,
+        dahmerMoviesAddon,
+        meowTvAddon,
+        vidSrcProAddon,
+        vidSrcNetAddon,
+        vidStormAddon,
+        vidSyncAddon,
+        kissKhAddon
+    )
+
+    // \u2500\u2500 scope \u2500\u2500

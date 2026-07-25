@@ -1,0 +1,53 @@
+    private val vidSrcToAddon = object : Addon {
+        override val id = "vidsrcto"
+        override suspend fun resolve(req: ResolveRequest): AddonResult {
+            if (req.tmdbId <= 0) return AddonResult.Error("VidSrcTo: no tmdbId")
+            val r = VidSrcToExtractor.extract(req.tmdbId, req.contentType, req.season, req.episode)
+            return when (r) {
+                is VidSrcToExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "VidSrc.to" })
+                is VidSrcToExtractor.Result.Error -> AddonResult.Error(r.message)
+            }
+        }
+    }
+
+    // ── Additional headless extractors wired into the engine ──
+    // These are proven, pure-OkHttp (no-WebView) extractors that were
+    // already in the app but not registered as KodiEngine addons. They all
+    // share the same TMDB-id-based Stremio-style flow as the addons above,
+    // so they drop straight in. Wiring them here means the engine can use
+    // them as additional racers in the parallel resolve lane, covering titles
+    // the other addons miss — more sources = more hits, headless = no cost
+    // to the user until a stream is actually needed.
+
+    private val twoEmbedAddon = object : Addon {
+        override val id = "twoembed"
+        override suspend fun resolve(req: ResolveRequest): AddonResult {
+            if (req.tmdbId <= 0) return AddonResult.Error("TwoEmbed: no tmdbId")
+            val r = TwoEmbedExtractor.extract(req.tmdbId, req.contentType, req.season, req.episode)
+            return when (r) {
+                is TwoEmbedExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "TwoEmbed" })
+                is TwoEmbedExtractor.Result.Error -> AddonResult.Error(r.message)
+            }
+        }
+    }
+
+    private val superEmbedAddon = object : Addon {
+        override val id = "superembed"
+        override suspend fun resolve(req: ResolveRequest): AddonResult {
+            if (req.tmdbId <= 0) return AddonResult.Error("SuperEmbed: no tmdbId")
+            val r = SuperEmbedExtractor.extract(req.tmdbId, req.contentType, req.season, req.episode)
+            return when (r) {
+                is SuperEmbedExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "SuperEmbed" })
+                is SuperEmbedExtractor.Result.Error -> AddonResult.Error(r.message)
+            }
+        }
+    }
+
+    private val vidLinkAddon = object : Addon {
+        override val id = "vidlink"
+        override suspend fun resolve(req: ResolveRequest): AddonResult {
+            if (req.tmdbId <= 0) return AddonResult.Error("VidLink: no tmdbId")
+            val r = VidLinkExtractor.extract(req.tmdbId, req.contentType, req.season, req.episode)
+            return when (r) {
+                is VidLinkExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "VidLink" })
+                is VidLinkExtractor.Result.Error -> AddonResult.Error(r.message)

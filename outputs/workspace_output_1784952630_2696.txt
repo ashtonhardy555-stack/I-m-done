@@ -1,0 +1,7 @@
+    Column($
+        modifier = modifier$
+            .then(if (fillMaxWidth) Modifier.fillMaxWidth() else Modifier.width(dims.cardWidth))$
+            .clip(RoundedCornerShape(6.dp))$
+            .scale(scale)$
+            // Shadow is ALWAYS in the chain (structural stability M-bM-^@M-^T see the$
+            // note above). Its elevation animates 0 M-bM-^FM-^R 24dp so idle cards pay$

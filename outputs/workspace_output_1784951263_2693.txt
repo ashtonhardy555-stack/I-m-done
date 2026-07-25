@@ -1,0 +1,6 @@
+133:    var searchGenre by remember { mutableStateOf<String?>(null) }
+257:            searchGenre = null
+274:            searchGenre = genreId
+287:        searchGenre = null
+307:                searchGenre = null
+309:            initialGenre = searchGenre

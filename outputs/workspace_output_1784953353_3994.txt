@@ -1,0 +1,9 @@
+                        .onKeyEvent { event ->
+                            // Only react to Left KeyUp when the rail is
+                            // hidden AND the focused card is at the far-left
+                            // edge. A manual reveal is NOT auto-shown, so it
+                            // stays until dismissed.
+                            if (!sideNavVisible &&
+                                event.type == KeyEventType.KeyUp &&
+                                event.key == Key.DirectionLeft &&
+                                focusedCardX <= edgeThresholdPx

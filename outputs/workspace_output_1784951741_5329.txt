@@ -1,0 +1,2 @@
+134:            heroHeight = 420.dp,
+158:            heroHeight = 540.dp,

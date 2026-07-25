@@ -1,0 +1,6 @@
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/server/RemoteServerListFetcher.kt
+---CHECK EXISTING---
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/server/VidSrcMeResolver.kt:14: * ## How it works (based on the Ciarands/vidsrc-me-resolver approach)
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/server/RemoteServerListFetcher.kt:244:                ServerConfig("vidsrc_to", "VidSrc.to", "https://vidsrc.to",
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/api/StreamingBackendClient.kt:63:     * @param serverId Server ID (e.g., "vidsrc_to", "lookmovie")
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/repository/ContentRepository.kt:37:        StreamingServer("VidSrc.to",        "https://vidsrc.to"),

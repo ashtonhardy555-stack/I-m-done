@@ -1,0 +1,13 @@
+Color: 8
+Bg: 2
+Bg3: 3
+Red: 10
+TextMuted: 9
+TextPrimary: 3
+LazyRow: 3
+items: 7
+MutableInteractionSource: 4
+collectIsFocusedAsState: 4
+RoundedCornerShape: 6
+GridItemSpan: 11
+GridCells: 2

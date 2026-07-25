@@ -1,0 +1,100 @@
+package com.ashtonhardy.piratesfilmcove.data.server
+
+import android.util.Log
+import com.ashtonhardy.piratesfilmcove.BuildConfig
+import com.ashtonhardy.piratesfilmcove.data.api.ApiClient
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import org.json.JSONObject
+import java.util.concurrent.TimeUnit
+
+/**
+ * SmashStreamsExtractor — resolves a **direct playable** stream URL from the
+ * SmashyStream Stremio addon, which aggregates direct HLS/MP4 links from
+ * multiple upstream CDN hosts (FileMoon, MixDrop, etc.) and exposes them
+ * through the standard Stremio addon stream API.
+ *
+ * ## Why this extractor exists
+ *
+ * This is a **headless, pure-OkHttp** extractor — the same approach as the
+ * LookMovieHeadlessExtractor and NoTorrentExtractor. It runs entirely on
+ * background coroutines with no WebView, no Kodi runtime, and no JS execution.
+ * It complements the existing extractors by covering titles the others miss,
+ * acting as another racer in the parallel extraction lane.
+ *
+ * ## How it works
+ *
+ *  1. **TMDB → IMDb** — the addon keys off IMDb ids (`ttXXXXXXX`), so we first
+ *     resolve the IMDb id via TMDB's `external_ids` append. This is one extra
+ *     HTTP round-trip (~150 ms) and is cached per-content.
+ *
+ *  2. **Addon query**:
+ *     - Movie: `GET https://embed.smashystream/tmdbSTREAM/stream/movie/{imdbId}.json`
+ *     - TV:    `GET https://embed.smashystream/tmdbSTREAM/stream/series/{imdbId}:{s}:{e}.json`
+ *     → `{ "streams": [{ "url": "...", "name": "...", "behaviorHints": { ... } }] }`
+ *
+ *  3. **Filter & verify** — we drop streams with no `url` or with
+ *     `externalUrl` (those are web links, not playable). For each remaining
+ *     candidate we keep the first one that starts with `http`, preferring
+ *     HLS (`.m3u8`) over MP4. A lightweight verification probe is advisory
+ *     only — many CDNs 403 a bare OkHttp GET but still serve ExoPlayer
+ *     once it sends Referer/User-Agent/Range.
+ *
+ * This extractor runs in the parallel race alongside the other direct
+ * extractors so a playable SmashyStream source can win immediately for titles
+ * the other extractors miss.
+ */
+object SmashStreamsExtractor {
+
+    private const val TAG = "SmashStreams"
+
+    // SmashyStream Stremio addon endpoint (aggregates multiple CDN hosts).
+    private const val ADDON_BASE = "https://embed.smashystream.xyz"
+
+    private const val USER_AGENT =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+            "(KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36"
+
+    /** Short-timeout client for the addon API call. */
+    private val client by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(15, TimeUnit.SECONDS)
+            .followRedirects(true)
+            .build()
+    }
+
+    /** Even shorter-timeout client for stream-URL verification. */
+    private val verifier by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(7, TimeUnit.SECONDS)
+            .readTimeout(9, TimeUnit.SECONDS)
+            .followRedirects(true)
+            .build()
+    }
+
+    // ─────────────────────────────────────────────────────────────────────//
+    //  Result type                                                          //
+    // ─────────────────────────────────────────────────────────────────────//
+
+    sealed class Result {
+        /** A direct playable URL + headers ExoPlayer should send. */
+        data class Stream(
+            val url: String,
+            val headers: Map<String, String>,
+            val providerName: String = "SmashStreams"
+        ) : Result()
+
+        /** Extraction found nothing usable. */
+        data class Error(val message: String) : Result()
+    }
+
+    // ─────────────────────────────────────────────────────────────────────//
+    //  Public API                                                           //
+    // ─────────────────────────────────────────────────────────────────────//
+
+    /**
+     * Resolve a direct playable stream for the given TMDB content.
+     *
