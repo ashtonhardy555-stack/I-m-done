@@ -11,8 +11,8 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -147,12 +147,18 @@ private fun AppRoot() {
 
     // The on-screen X (px) of the currently-focused card / hero button. Each
     // focused card reports its window-X here via LocalSideRailXReporter (see
-    // ContentCard / HeroButton). The Left key handler below uses this to
-    // decide whether a Left press is "at the far-left edge" (open the rail)
-    // or "mid-row" (let the default card-to-card move happen). 0f means "no
-    // card has reported yet" — treated as the left edge so the very first
-    // Left press (e.g. on the hero) still opens the rail as expected.
+    // ContentCard / HeroButton). Kept for reference but the top bar is now
+    // opened by a UP press at the very top of the screen (see focusedCardY).
     var focusedCardX by remember { mutableStateOf(0f) }
+
+    // The on-screen Y (px) of the currently-focused card / hero button. Each
+    // focused card reports its window-Y here via LocalSideRailXReporter (see
+    // ContentCard / HeroButton). The Up key handler below uses this to decide
+    // whether an Up press is "at the very top of the screen" (open the top
+    // bar) or "mid-screen" (let the default row-to-row up move happen). 0f
+    // means "no card has reported yet" — treated as the top edge so the very
+    // first Up press (e.g. on the hero) still opens the top bar as expected.
+    var focusedCardY by remember { mutableStateOf(0f) }
 
     LaunchedEffect(Unit) {
         com.ashtonhardy.piratesfilmcove.ui.AutoUpdater.checkAndPrompt(context)
@@ -387,74 +393,76 @@ private fun AppRoot() {
                 }
             }
 
-            // Content fills the full width; the rail overlays it when visible.
+            // Content fills the full width; the top bar overlays it when
+            // visible (it slides down from the very top of the screen).
             //
-            // D-PAD LEFT / SIDE RAIL — "only open at the beginning of a line":
-            // The side rail must open when the user presses Left ONLY if focus
-            // is already at the far-LEFT edge of the screen — i.e. on the
-            // FIRST card of a row, the FIRST column of a grid, or the hero
-            // banner. A Left press mid-row must instead move focus to the
-            // previous card (the Compose focus system's default directional
-            // move), NOT open the rail.
+            // D-PAD UP / TOP BAR — "only open at the very top of the screen":
+            // The top bar must open when the user presses Up ONLY if focus is
+            // already at the very TOP of the screen — i.e. on the topmost row
+            // (the first content row) or on the hero banner (which sits at the
+            // top). An Up press mid-screen (a lower row) must instead move
+            // focus to the row above (the Compose focus system's default
+            // directional move), NOT open the top bar. A Left press must
+            // NEVER open the top bar — it always performs the default
+            // card-to-card move so the user can navigate left/right freely.
             //
             // How it works: every focused card / hero button reports its
-            // on-screen X (px) to `focusedCardX` via LocalSideRailXReporter
+            // on-screen Y (px) to `focusedCardY` via LocalSideRailXReporter
             // (see ContentCard / HeroButton). The outer onKeyEvent below
-            // checks that X against a left-edge threshold:
-            //   • focusedCardX <= threshold → at the left edge → open the
-            //     rail AND return true (consume the event so the focus
+            // checks that Y against a top-edge threshold:
+            //   • focusedCardY <= threshold  → at the top of the screen → open
+            //     the top bar AND return true (consume the event so the focus
             //     system does NOT also perform a directional move).
-            //   • focusedCardX >  threshold → mid-row / mid-grid → return
+            //   • focusedCardY >  threshold  → mid-screen (a lower row) → return
             //     false so the event is NOT consumed and the focus system
-            //     performs the default card-to-card Left move.
+            //     performs the default row-to-row Up move.
             //
-            // The first card of a row sits at x ≈ dims.rowPadding (the
-            // LazyRow's contentPadding). The hero buttons sit at the hero
-            // content's start padding, also ≈ dims.rowPadding. A mid-row
-            // card sits at x ≈ rowPadding + cardWidth + cardSpacing, which
-            // is far above the threshold. So the threshold cleanly separates
-            // "at the left edge" from "mid-row" for rows, grids, and the
-            // hero — uniformly, with no per-card "isFirstInRow" plumbing.
+            // The topmost content row sits at y ≈ dims.rowPadding (the hero
+            // banner / first LazyRow's top). Any second-or-lower row sits far
+            // below the threshold (rowPadding + a full hero/row height). So
+            // the threshold cleanly separates "at the very top" from
+            // "mid-screen" — uniformly, with no per-row "isFirstRow" plumbing.
             //
-            // NOTE on the previous (broken) design: the old code assumed the
-            // inner focusGroup() would consume mid-row Left events before they
-            // reached this outer onKeyEvent. That is WRONG — focusGroup()
-            // does NOT consume key events; it only groups focusable children
-            // for enter/exit. So every Left reached the outer onKeyEvent,
-            // which returned true and opened the rail on every single Left
-            // press — the bug this X-threshold approach fixes.
-            //
-            // The threshold is rowPadding + a tolerance (24dp) so that the
-            // first card (x ≈ rowPadding) and hero buttons (x ≈ rowPadding)
-            // are both within it, while any second-or-later card (x ≈
-            // rowPadding + cardWidth + ...) is well beyond it.
-            val edgeThresholdPx = with(LocalDensity.current) {
-                (dims.rowPadding + 24.dp).toPx()
+            // The threshold is a small tolerance (16dp). The hero banner
+            // reports Y = 0 (it is the topmost focusable element), so it is
+            // always within the threshold. The first content row reports its
+            // real Y (well below the hero, so > 16dp) and does NOT trigger.
+            // This makes the top bar open ONLY when the user is on the very
+            // top banner (the hero) and presses Up — never from a content row.
+            val topThresholdPx = with(LocalDensity.current) {
+                (16.dp).toPx()
             }
             CompositionLocalProvider(
-                LocalSideRailXReporter provides { x -> focusedCardX = x }
+                LocalSideRailXReporter provides { x, y ->
+                    focusedCardX = x
+                    focusedCardY = y
+                }
             ) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .onKeyEvent { event ->
-                            // Only react to Left KeyUp when the rail is
-                            // hidden AND the focused card is at the far-left
-                            // edge. A manual reveal is NOT auto-shown, so it
-                            // stays until dismissed.
+                            // Only react to Up KeyUp when the top bar is
+                            // hidden AND the focused card is at the very top
+                            // of the screen. A manual reveal is NOT
+                            // auto-shown, so it stays until dismissed. A Left
+                            // press is NEVER intercepted here — it always
+                            // falls through to the focus system so the user
+                            // can navigate left/right freely at any row.
                             if (!sideNavVisible &&
                                 event.type == KeyEventType.KeyUp &&
-                                event.key == Key.DirectionLeft &&
-                                focusedCardX <= edgeThresholdPx
+                                event.key == Key.DirectionUp &&
+                                focusedCardY <= topThresholdPx
                             ) {
                                 sideNavAutoShown = false
                                 sideNavVisible = true
                                 true
                             } else {
                                 // Returning false lets the event continue. For
-                                // a mid-row Left this means the focus system
-                                // performs the default card-to-card move; for
-                                // other keys it means the default action runs.
+                                // a mid-screen Up this means the focus system
+                                // performs the default row-to-row move; for a
+                                // Left this means the default card-to-card move;
+                                // for other keys it means the default action runs.
                                 false
                             }
                         }
@@ -474,12 +482,14 @@ private fun AppRoot() {
                 }
             }
 
-            // Sliding side rail — overlays the content's left edge.
+            // Sliding top bar — overlays the content's top edge, slides
+            // down from the very top of the screen (an overlay on top of
+            // the content, not a rail on the side).
             AnimatedVisibility(
                 visible = sideNavVisible,
-                enter = slideInHorizontally(animationSpec = tween(220)) { fullWidth -> -fullWidth },
-                exit = slideOutHorizontally(animationSpec = tween(220)) { fullWidth -> -fullWidth },
-                modifier = Modifier.align(Alignment.CenterStart)
+                enter = slideInVertically(animationSpec = tween(220)) { fullHeight -> -fullHeight },
+                exit = slideOutVertically(animationSpec = tween(220)) { fullHeight -> -fullHeight },
+                modifier = Modifier.align(Alignment.TopStart)
             ) {
                 TvSideNav(
                     currentTab = currentTab,
@@ -645,8 +655,8 @@ private fun TopNavTab(tab: Tab, isSelected: Boolean, onClick: () -> Unit) {
 }
 
 // ──────────────────────────────────────────────────────────────────── //
-//  TV side navigation rail (Android TV)                               //
-//  Vertical icon+label rail with the red focus highlight.             //
+//  TV top navigation bar (Android TV)                                 //
+//  Horizontal icon+label bar that slides down from the very top.    //
 // ──────────────────────────────────────────────────────────────────── //
 @Composable
 private fun TvSideNav(
@@ -661,29 +671,28 @@ private fun TvSideNav(
         color = Bg2,
         shadowElevation = 0.dp,
         modifier = Modifier
-            .fillMaxHeight()
-            .width(120.dp)
-            // Pressing Right while focused inside the rail slides it back
-            // away (D-pad dismiss without having to pick an item). Back is
-            // handled by the BackHandler in AppRoot.
+            .fillMaxWidth()
+            // Pressing Down while focused inside the top bar slides it
+            // back up (D-pad dismiss without having to pick an item).
+            // Back is handled by the BackHandler in AppRoot.
             .onKeyEvent { event ->
-                if (event.type == KeyEventType.KeyUp && event.key == Key.DirectionRight) {
+                if (event.type == KeyEventType.KeyUp && event.key == Key.DirectionDown) {
                     onDismiss()
                     true
                 } else false
             }
     ) {
-        Column(
+        Row(
             modifier = Modifier
-                .fillMaxHeight()
-                .padding(vertical = 16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // One-time discoverability hint: a small chip at the top of the
-            // rail that tells first-time users they can reopen this menu with
-            // a Left press at any time. Only shown during the startup
-            // auto-reveal; returning users never see it.
+            // One-time discoverability hint: a small chip at the start of
+            // the top bar that tells first-time users they can reopen this
+            // menu with an Up press at the very top. Only shown during the
+            // startup auto-reveal; returning users never see it.
             if (showHint) {
                 SideNavHintChip()
             }
@@ -709,34 +718,31 @@ private fun TvSideNav(
 }
 
 /**
- * Small "press ← anytime" hint shown at the top of the side rail during the
- * one-time startup reveal. Non-focusable (it's purely informational) so it
- * never steals D-pad focus from the first real nav item below it.
+ * Small "press Up at the top" hint shown at the start of the top bar during
+ * the one-time startup reveal. Non-focusable (it's purely informational) so it
+ * never steals D-pad focus from the first real nav item next to it.
  */
 @Composable
 private fun SideNavHintChip() {
-    Column(
+    Row(
         modifier = Modifier
-            .width(100.dp)
-            .padding(bottom = 4.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(Red.copy(alpha = 0.18f))
-            .padding(vertical = 6.dp, horizontal = 4.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         Text(
-            text = "◀ Menu",
+            text = "↑ Menu",
             color = Red,
             fontSize = 11.sp,
             fontWeight = FontWeight.Bold
         )
         Text(
-            text = "press Left\nto reopen",
+            text = "press Up at the very top to reopen",
             color = TextMuted,
             fontSize = 9.sp,
-            fontWeight = FontWeight.Normal,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-            lineHeight = 11.sp
+            fontWeight = FontWeight.Normal
         )
     }
 }

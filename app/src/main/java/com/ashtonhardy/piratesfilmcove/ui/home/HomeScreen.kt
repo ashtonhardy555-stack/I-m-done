@@ -148,8 +148,6 @@ fun HomeScreen(
                 ContentRow(
                     title = "Recommended for You", emoji = "\u2B50",
                     items = recommended, onItemClick = onItemClick,
-                    onLoadMore = { viewModel.loadMoreRecommended() },
-                    canLoadMore = canLoadMoreRecommended
                 )
             }
         }
@@ -160,32 +158,24 @@ fun HomeScreen(
             ContentRow(
                 title = "Trending Now", emoji = "\uD83D\uDD25",
                 items = trending, onItemClick = onItemClick,
-                onLoadMore = { viewModel.loadMoreTrending() },
-                canLoadMore = canLoadMoreTrending
             )
         }
         item {
             ContentRow(
                 title = "New in Theatres", emoji = "\uD83C\uDFAC",
                 items = nowPlaying, onItemClick = onItemClick,
-                onLoadMore = { viewModel.loadMoreNowPlaying() },
-                canLoadMore = canLoadMoreNowPlaying
             )
         }
         item {
             ContentRow(
                 title = "Popular TV Shows", emoji = "\uD83D\uDCFA",
                 items = popularTV, onItemClick = onItemClick,
-                onLoadMore = { viewModel.loadMorePopularTV() },
-                canLoadMore = canLoadMorePopularTV
             )
         }
         item {
             ContentRow(
                 title = "Top Rated Movies", emoji = "\u2B50",
                 items = topRated, onItemClick = onItemClick,
-                onLoadMore = { viewModel.loadMoreTopRated() },
-                canLoadMore = canLoadMoreTopRated
             )
         }
         // NOTE: a second "Popular Movies" row used to live here but was

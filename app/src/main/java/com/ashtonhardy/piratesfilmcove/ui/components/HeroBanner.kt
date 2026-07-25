@@ -395,9 +395,14 @@ private fun HeroButton(
     // exactly the desired behaviour. On phone layouts the reporter is null
     // (no side rail) so this is a no-op.
     val sideRailReporter = LocalSideRailXReporter.current
+    // The hero banner IS the topmost focusable element on the screen, so it
+    // reports Y = 0 (the very top) regardless of the button's actual pixel
+    // Y (the buttons sit at the bottom of the hero). This lets AppRoot's Up
+    // key handler cleanly open the top bar ONLY when focus is on the hero
+    // (the very top), and never when focus is on a content row below it.
     var btnXInWindow by remember { mutableStateOf(0f) }
     LaunchedEffect(isFocused) {
-        if (isFocused) sideRailReporter?.invoke(btnXInWindow)
+        if (isFocused) sideRailReporter?.invoke(btnXInWindow, 0f)
     }
 
     Button(
@@ -412,7 +417,9 @@ private fun HeroButton(
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             // Capture the button's on-screen X so the side-rail handler can
             // see that the hero is at the far-left edge.
-            .onGloballyPositioned { coords -> btnXInWindow = coords.positionInRoot.x }
+            .onGloballyPositioned { coords ->
+                btnXInWindow = coords.positionInWindow().x
+            }
             .then(
                 if (isFocused && isTv) {
                     Modifier.border(2.dp, Red, RoundedCornerShape(4.dp))

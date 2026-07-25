@@ -47,15 +47,40 @@ class TvViewModel : ViewModel() {
 
     init { load() }
 
+    // Max pages to fetch per row so the row shows all the TV shows that fit
+    // without a Load More button. ~6 pages ≈ ~120 titles before the
+    // streamable filter.
+    private val maxPagesPerRow = 6
+
     private fun load() {
         viewModelScope.launch {
-            _popular.value = repo.getPopularTV()
+            _popular.value = loadAllPagesTv { page -> repo.getPopularTV(page) }
             refineRow(_popular, _canLoadMorePopular)
         }
         viewModelScope.launch {
-            _topRated.value = repo.getTopRatedTV()
+            _topRated.value = loadAllPagesTv { page -> repo.getTopRatedTV(page) }
             refineRow(_topRated, _canLoadMoreTopRated)
         }
+    }
+
+    /**
+     * Fetches up to [maxPagesPerRow] pages from [fetch], dedups by id, and
+     * returns the aggregated list. Stops early when a page returns fewer than
+     * a full page (end of catalog). Lets each row show all the titles that fit
+     * without a Load More button.
+     */
+    private suspend fun loadAllPagesTv(
+        fetch: suspend (Int) -> List<TmdbItem>
+    ): List<TmdbItem> {
+        val all = mutableListOf<TmdbItem>()
+        val seen = mutableSetOf<Int>()
+        for (page in 1..maxPagesPerRow) {
+            val items = runCatching { fetch(page) }.getOrDefault(emptyList())
+            if (items.isEmpty()) break
+            for (item in items) if (seen.add(item.id)) all.add(item)
+            if (items.size < pageSize) break
+        }
+        return all
     }
 
     /**

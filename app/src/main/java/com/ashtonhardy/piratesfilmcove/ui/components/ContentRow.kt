@@ -133,20 +133,6 @@ fun ContentRow(
                 )
             }
 
-            // "Load More" tile — last item in the row. Matches a card's
-            // footprint so the row scrolls naturally to reveal it, and is
-            // fully D-pad focusable with the same red highlight as cards.
-            // Only rendered when the ViewModel reports more pages are
-            // available ([canLoadMore]); once the catalog is exhausted the
-            // button is gone so there's no dead "Load More" at the end.
-            if (onLoadMore != null && canLoadMore) {
-                item(key = "load_more") {
-                    LoadMoreButton(
-                        onClick = onLoadMore,
-                        dims = dims
-                    )
-                }
-            }
         }
     }
 }

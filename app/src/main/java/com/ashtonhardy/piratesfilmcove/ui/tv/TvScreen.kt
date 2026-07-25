@@ -59,8 +59,6 @@ fun TvScreen(
             ContentRow(
                 title = "Popular Shows", emoji = "\uD83D\uDCFA",
                 items = popular, onItemClick = onItemClick,
-                onLoadMore = { viewModel.loadMore() },
-                canLoadMore = canLoadMorePopular,
                 firstCardFocusRequester = firstCardFocusRequester
             )
         }
@@ -68,8 +66,6 @@ fun TvScreen(
             ContentRow(
                 title = "Top Rated Shows", emoji = "\uD83C\uDFC6",
                 items = topRated, onItemClick = onItemClick,
-                onLoadMore = { viewModel.loadMoreTopRated() },
-                canLoadMore = canLoadMoreTopRated
             )
         }
     }
