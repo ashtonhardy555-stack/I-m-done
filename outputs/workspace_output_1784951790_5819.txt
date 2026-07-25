@@ -1,0 +1,11 @@
+===
+ .../piratesfilmcove/data/engine/KodiEngine.kt      | 231 +++++++++++-
+ .../piratesfilmcove/ui/Search/SearchScreen.kt      | 417 +++++++++++++++------
+ .../piratesfilmcove/ui/Search/SearchViewModel.kt   |  48 ++-
+ .../piratesfilmcove/ui/browse/BrowseViewModel.kt   |  21 +-
+ .../piratesfilmcove/ui/home/HomeViewModel.kt       |  58 ++-
+ .../piratesfilmcove/ui/movies/MoviesViewModel.kt   |  26 +-
+ .../piratesfilmcove/ui/tv/TvViewModel.kt           |  22 +-
+ .../piratesfilmcove/ui/util/DeviceInfo.kt          |   2 +-
+ todo.md                                            |  52 +--
+ 9 files changed, 670 insertions(+), 207 deletions(-)

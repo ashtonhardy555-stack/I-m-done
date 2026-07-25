@@ -1,0 +1,10 @@
+===Movies===
+3:import androidx.compose.foundation.focusGroup
+37:    // focusGroup(): keeps D-pad focus clamped inside the screen's content.
+40:    // no-pointer TV remote. focusGroup() makes the focusable children a single
+45:            .focusGroup()
+===TV===
+11:import androidx.compose.foundation.focusGroup
+40:            // focusGroup(): the row cards are the only focusables here.
+44:            // focusGroup() makes the focusable children a single focus unit so
+46:            .focusGroup()

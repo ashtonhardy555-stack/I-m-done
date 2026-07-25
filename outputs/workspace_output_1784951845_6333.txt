@@ -1,0 +1,16 @@
+origin	https://github.com/ashtonhardy555-stack/I-m-done.git (fetch)
+origin	https://github.com/ashtonhardy555-stack/I-m-done.git (push)
+===
+GITHUB_TOKEN=ghs_sY9YAXYEScHQ9tIdrfj3mEceOvMTt416hGVh
+===
+-rw-r--r-- 1 root root 85 Jul 25 03:07 /root/.gitconfig
+[safe]
+	directory = /workspace
+	directory = *
+	directory = /workspace
+	directory = *
+===
+total 12
+drwxr-xr-x  3 root root 4096 Jul 25 02:51 .
+drwxr-xr-x 13 user user 4096 Jul 25 03:06 ..
+drwxr-xr-x  2 root root 4096 Jul 25 02:51 workflows

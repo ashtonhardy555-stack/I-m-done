@@ -1,0 +1,4 @@
+===MainActivity imports===
+56:import androidx.compose.runtime.CompositionLocalProvider
+75:import androidx.compose.ui.platform.LocalDensity
+96:import com.ashtonhardy.piratesfilmcove.ui.util.LocalSideRailXReporter

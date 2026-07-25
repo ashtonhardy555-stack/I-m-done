@@ -1,0 +1,6 @@
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/MainActivity.kt:309:            initialGenre = searchGenre
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/Search/SearchScreen.kt:76:    initialGenre: String? = null,
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/Search/SearchScreen.kt:114:    LaunchedEffect(initialGenre) {
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/Search/SearchScreen.kt:115:        if (initialGenre != null) {
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/Search/SearchScreen.kt:116:            viewModel.setInitialGenre(initialGenre)
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/Search/SearchViewModel.kt:67:    fun setInitialGenre(genreId: String?) {

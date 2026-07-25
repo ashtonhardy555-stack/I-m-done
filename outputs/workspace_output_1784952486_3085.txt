@@ -1,0 +1,111 @@
+    // no-pointer TV remote. focusGroup() makes the focusable children a single
+    // unit so Up stops at the top element and Down stops at the bottom.
+    // On TV we add the top safe-area inset (overscan margin) so the hero
+    // banner's top edge is never clipped by the TV bezel — this fixes the
+    // "can't see the full top banner" issue where the top of the hero was
+    // cut off on Android TV displays.
+    val dims = responsiveDims()
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .focusGroup()
+            .padding(top = dims.safeAreaTop)
+    ) {
+        item {
+            HeroBanner(
+                items = heroItems,
+                onPlayClick = onItemClick,
+                onMoreInfo = onItemClick,
+                playFocusRequester = playFocusRequester
+            )
+        }
+        // -- Recommended for You -----------------------------------------
+        // Genre-based recommendations from the user's watch history. Only
+        // rendered once there's a watch history to base recommendations on.
+        // Now has its own Load More button so the user can page through
+        // every recommended title without leaving Home.
+        if (recommended.isNotEmpty()) {
+            item {
+                ContentRow(
+                    title = "Recommended for You", emoji = "\u2B50",
+                    items = recommended, onItemClick = onItemClick,
+                    onLoadMore = { viewModel.loadMoreRecommended() },
+                    canLoadMore = canLoadMoreRecommended
+                )
+            }
+        }
+        item {
+            GenreSuggestionsBar(onGenreClick = onSearchWithGenre)
+        }
+        item {
+            ContentRow(
+                title = "Trending Now", emoji = "\uD83D\uDD25",
+                items = trending, onItemClick = onItemClick,
+                onLoadMore = { viewModel.loadMoreTrending() },
+                canLoadMore = canLoadMoreTrending
+            )
+        }
+        item {
+            ContentRow(
+                title = "New in Theatres", emoji = "\uD83C\uDFAC",
+                items = nowPlaying, onItemClick = onItemClick,
+                onLoadMore = { viewModel.loadMoreNowPlaying() },
+                canLoadMore = canLoadMoreNowPlaying
+            )
+        }
+        item {
+            ContentRow(
+                title = "Popular TV Shows", emoji = "\uD83D\uDCFA",
+                items = popularTV, onItemClick = onItemClick,
+                onLoadMore = { viewModel.loadMorePopularTV() },
+                canLoadMore = canLoadMorePopularTV
+            )
+        }
+        item {
+            ContentRow(
+                title = "Top Rated Movies", emoji = "\u2B50",
+                items = topRated, onItemClick = onItemClick,
+                onLoadMore = { viewModel.loadMoreTopRated() },
+                canLoadMore = canLoadMoreTopRated
+            )
+        }
+        // NOTE: a second "Popular Movies" row used to live here but was
+        // removed -- it was near-identical to "Top Rated Movies" (both are
+        // movie rows ranked by a popularity/rating signal) and the user
+        // flagged the duplication. Trending Now + New in Theatres already
+        // cover the "popular" angle, so the home page no longer repeats it.
+        // -- Continue Watching ------------------------------------------
+        // MOVED to the bottom of the Home feed (was 2nd, right under the
+        // hero). Placing it last means the fresh content rows get the
+        // prime "above the fold" real estate and the continue-watching
+        // cards act as a natural "pick up where you left off" footer.
+        if (continueWatching.isNotEmpty()) {
+            item {
+                ContinueWatchingRow(
+                    items = continueWatching,
+                    progressMap = progressMap,
+                    onItemClick = onItemClick,
+                    onResume = onResume
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun GenreSuggestionsBar(onGenreClick: (String) -> Unit) {
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
+        Text(
+            text = "Browse by Category",
+            color = TextPrimary,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(start = 16.dp, bottom = 8.dp)
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically

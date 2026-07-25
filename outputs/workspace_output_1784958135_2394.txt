@@ -1,0 +1,25 @@
+Saved working directory and index state WIP on feat/more-addons-and-ui-fixes: f611e18f fix(tv): side rail only opens on Left at the first card / hero, not mid-row
+Switched to branch 'main'
+Your branch is behind 'origin/main' by 3 commits, and can be fast-forwarded.
+  (use "git pull" to update your local branch)
+From https://github.com/ashtonhardy555-stack/I-m-done
+ * branch              main       -> FETCH_HEAD
+Updating a12ea94c..998c1cfc
+Fast-forward
+ .../piratesfilmcove/data/engine/KodiEngine.kt      | 231 +++++++++-
+ .../data/server/VidSrcToExtractor.kt               | 475 +++++++++++++++++++++
+ .../ashtonhardy/piratesfilmcove/ui/MainActivity.kt | 132 ++++--
+ .../piratesfilmcove/ui/Search/SearchScreen.kt      | 417 +++++++++++++-----
+ .../piratesfilmcove/ui/Search/SearchViewModel.kt   |  48 ++-
+ .../piratesfilmcove/ui/browse/BrowseViewModel.kt   |  21 +-
+ .../piratesfilmcove/ui/components/ContentCard.kt   |  31 ++
+ .../piratesfilmcove/ui/components/HeroBanner.kt    |  18 +
+ .../piratesfilmcove/ui/home/HomeViewModel.kt       |  58 ++-
+ .../piratesfilmcove/ui/movies/MoviesViewModel.kt   |  26 +-
+ .../piratesfilmcove/ui/tv/TvViewModel.kt           |  22 +-
+ .../piratesfilmcove/ui/util/DeviceInfo.kt          |   2 +-
+ .../piratesfilmcove/ui/util/SideRailFocus.kt       |  45 ++
+ todo.md                                            |  66 ++-
+ 14 files changed, 1343 insertions(+), 249 deletions(-)
+ create mode 100644 app/src/main/java/com/ashtonhardy/piratesfilmcove/data/server/VidSrcToExtractor.kt
+ create mode 100644 app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/util/SideRailFocus.kt

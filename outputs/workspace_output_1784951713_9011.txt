@@ -1,0 +1,120 @@
+=== VidSrcToExtractor ===
+    suspend fun extract(
+        tmdbId: Int,
+        contentType: String,
+        season: Int = 1,
+        episode: Int = 1
+    ): Result = withContext(Dispatchers.IO) {
+        if (tmdbId <= 0) return@withContext Result.Error("VidSrc.to: no tmdbId")
+=== TwoEmbedExtractor ===
+    suspend fun extract(
+        tmdbId: Int,
+        contentType: String,
+        season: Int = 1,
+        episode: Int = 1
+    ): Result = withContext(Dispatchers.IO) {
+        val isTv = contentType == "tv"
+=== SuperEmbedExtractor ===
+    suspend fun extract(
+        tmdbId: Int,
+        contentType: String,
+        season: Int = 1,
+        episode: Int = 1
+    ): Result = withContext(Dispatchers.IO) {
+        val apiUrl = if (contentType == "tv") {
+=== VidLinkExtractor ===
+    suspend fun extract(
+        tmdbId: Int,
+        contentType: String,
+        season: Int = 1,
+        episode: Int = 1
+    ): Result = withContext(Dispatchers.IO) {
+        val type = if (contentType == "tv") "tv" else "movie"
+=== VixSrcExtractor ===
+    suspend fun extract(
+        tmdbId: Int,
+        contentType: String,
+        season: Int = 1,
+        episode: Int = 1
+    ): Result = withContext(Dispatchers.IO) {
+        val type = if (contentType == "tv") "tv" else "movie"
+=== VideasyExtractor ===
+    suspend fun extract(
+        tmdbId: Int,
+        contentType: String,
+        season: Int = 1,
+        episode: Int = 1
+    ): Result = withContext(Dispatchers.IO) {
+        val isTv = contentType == "tv"
+=== NoTorrentExtractor ===
+    suspend fun extract(
+        tmdbId: Int,
+        contentType: String,
+        season: Int = 1,
+        episode: Int = 1
+    ): Result = withContext(Dispatchers.IO) {
+        val isTv = contentType == "tv"
+=== LordFlixExtractor ===
+    suspend fun extract(
+        tmdbId: Int,
+        contentType: String,
+        season: Int = 1,
+        episode: Int = 1
+    ): Result = withContext(Dispatchers.IO) {
+        val isTv = contentType == "tv"
+=== DahmerMoviesExtractor ===
+    suspend fun extract(
+        tmdbId: Int,
+        contentType: String,
+        season: Int = 1,
+        episode: Int = 1
+    ): Result = withContext(Dispatchers.IO) {
+        val isTv = contentType == "tv"
+=== MeowTvExtractor ===
+    suspend fun extract(
+        tmdbId: Int,
+        contentType: String,
+        season: Int = 1,
+        episode: Int = 1
+    ): Result = withContext(Dispatchers.IO) {
+        val isTv = contentType == "tv"
+=== VidSrcProExtractor ===
+    suspend fun extract(
+        tmdbId: Int,
+        contentType: String,
+        season: Int = 1,
+        episode: Int = 1
+    ): Result = withContext(Dispatchers.IO) {
+        val type = if (contentType == "tv") "tv" else "movie"
+=== VidSrcNetExtractor ===
+    suspend fun extract(
+        tmdbId: Int,
+        contentType: String,
+        season: Int = 1,
+        episode: Int = 1
+    ): Result = withContext(Dispatchers.IO) {
+        val isTv = contentType == "tv"
+=== VidStormExtractor ===
+    suspend fun extract(
+        tmdbId: Int,
+        contentType: String,
+        season: Int = 1,
+        episode: Int = 1
+    ): Result = withContext(Dispatchers.IO) {
+        val kind = if (contentType == "tv") "tv" else "movie"
+=== VidSyncExtractor ===
+    suspend fun extract(
+        tmdbId: Int,
+        contentType: String,
+        season: Int = 1,
+        episode: Int = 1
+    ): Result = withContext(Dispatchers.IO) {
+        val isTv = contentType == "tv"
+=== KissKhExtractor ===
+    suspend fun extract(
+        tmdbId: Int,
+        contentType: String,
+        season: Int = 1,
+        episode: Int = 1
+    ): Result = withContext(Dispatchers.IO) {
+        val isTv = contentType == "tv"

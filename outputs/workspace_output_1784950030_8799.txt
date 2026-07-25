@@ -1,0 +1,148 @@
+import httpx,base64
+from fastapi import HTTPException
+from urllib.parse import unquote
+
+BASE = 'http://localhost:8000'
+
+async def default():
+    return ''
+
+async def error(err:str):
+    # TODO
+    #    return {
+    #        "status":500,
+    #        "info":err,
+    #        "sources":[]
+    #    }
+    print(err) # for understanding whats gone wrong in the deployment.viewable in vercel logs.
+    return {}
+async def decode_url(encrypted_source_url:str,VIDSRC_KEY:str):
+    standardized_input = encrypted_source_url.replace('_', '/').replace('-', '+')
+    binary_data = base64.b64decode(standardized_input)
+    encoded = bytearray(binary_data)
+    key_bytes = bytes(VIDSRC_KEY, 'utf-8')
+    j = 0
+    s = bytearray(range(256))
+
+    for i in range(256):
+      j = (j + s[i] + key_bytes[i % len(key_bytes)]) & 0xff
+      s[i], s[j] = s[j], s[i]
+
+    decoded = bytearray(len(encoded))
+    i = 0
+    k = 0
+    for index in range(len(encoded)):
+      i = (i + 1) & 0xff
+      k = (k + s[i]) & 0xff
+      s[i], s[k] = s[k], s[i]
+      t = (s[i] + s[k]) & 0xff
+      decoded[index] = encoded[index] ^ s[t]
+    decoded_text = decoded.decode('utf-8')
+    return unquote(decoded_text)
+
+async def fetch(url:str,headers:dict={},method:str="GET",data=None,redirects:bool=True):
+    async with httpx.AsyncClient(follow_redirects=redirects) as client:
+        if method=="GET":
+            response = await client.get(url,headers=headers)
+            return response
+        if method=="POST":
+            response = await client.post(url,headers=headers,data=data)
+            return response
+        else:
+            return "ERROR"
+        
+===DECODERS INIT===
+# THE DECODERS
+# file made by @cool-dev-guy
+===PACKED===
+import re
+async def unpack(p, a, c, k, e=None, d=None) -> str:
+    for i in range(c - 1, -1, -1):
+        if k[i]: p = re.sub("\\b" + await int_2_base(i, a) + "\\b", k[i], p)
+    return p
+async def int_2_base(x: int, base: int) -> str:
+    charset = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ+/"
+
+    if x < 0:
+        sign = -1
+    elif x == 0:
+        return 0
+    else:
+        sign = 1
+
+    x *= sign
+    digits = []
+
+    while x:
+        digits.append(charset[int(x % base)])
+        x = int(x / base)
+        
+    if sign < 0:
+        digits.append('-')
+    digits.reverse()
+
+    return ''.join(digits)
+
+async def process_packed_args(context):
+    matches = re.search(r'return p}\((.+)\)', context)
+    processed_matches = []
+    split_matches = matches.group(1).split(",")
+    corrected_split_matches = [",".join(split_matches[:-3])] + split_matches[-3:]
+    for val in corrected_split_matches:
+      val = val.strip()
+      val = val.replace(".split('|'))", "")
+      if val.isdigit() or (val[0] == "-" and val[1:].isdigit()):
+        processed_matches.append(int(val))
+      elif val[0] == "'" and val[-1] == "'":
+        processed_matches.append(val[1:-1])
+
+    processed_matches[-1] = processed_matches[-1].split("|")
+    return processed_matches
+===HUNTER===
+import re
+async def hunter_def(d, e, f) -> int:
+    charset = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ+/"
+    source_base = charset[0:e]
+    target_base = charset[0:f]
+
+    reversed_input = list(d)[::-1]
+    result = 0
+
+    for power, digit in enumerate(reversed_input):
+        if digit in source_base:
+            result += source_base.index(digit) * e**power
+
+    converted_result = ""
+    while result > 0:
+        converted_result = target_base[result % f] + converted_result
+        result = (result - (result % f)) // f
+
+    return int(converted_result) or 0
+async def hunter( h, u, n, t, e, r) -> str:
+        i = 0
+        result_str = ""
+        while i < len(h):
+            j = 0
+            s = ""
+            while h[i] != n[e]:
+                s += h[i]
+                i += 1
+
+            while j < len(n):
+                s = s.replace(n[j], str(j))
+                j += 1
+
+            result_str += chr(await hunter_def(s, e, 10) - t)
+            i += 1
+
+        return result_str
+async def process_hunter_args(hunter_args: str) -> list:
+    hunter_args = re.search(r"^\"(.*?)\",(.*?),\"(.*?)\",(.*?),(.*?),(.*?)$", hunter_args)
+    processed_matches = list(hunter_args.groups())
+    processed_matches[0] = str(processed_matches[0])
+    processed_matches[1] = int(processed_matches[1])
+    processed_matches[2] = str(processed_matches[2])
+    processed_matches[3] = int(processed_matches[3])
+    processed_matches[4] = int(processed_matches[4])
+    processed_matches[5] = int(processed_matches[5])
+    return processed_matches

@@ -1,0 +1,120 @@
+package com.ashtonhardy.piratesfilmcove.ui.home
+
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.ashtonhardy.piratesfilmcove.data.model.TmdbItem
+import com.ashtonhardy.piratesfilmcove.data.model.WatchProgress
+import com.ashtonhardy.piratesfilmcove.ui.components.ContentCard
+import com.ashtonhardy.piratesfilmcove.ui.components.ContentRow
+import com.ashtonhardy.piratesfilmcove.ui.components.HeroBanner
+import com.ashtonhardy.piratesfilmcove.ui.theme.Bg3
+import com.ashtonhardy.piratesfilmcove.ui.theme.Red
+import com.ashtonhardy.piratesfilmcove.ui.theme.TextPrimary
+import com.ashtonhardy.piratesfilmcove.ui.util.ResponsiveDims
+import com.ashtonhardy.piratesfilmcove.ui.util.rememberInitialFocusRequester
+import com.ashtonhardy.piratesfilmcove.ui.util.responsiveDims
+import coil.compose.AsyncImage
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import coil.request.ImageRequest
+import com.ashtonhardy.piratesfilmcove.ui.theme.PureBlack
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.Icon
+
+private data class GenreChip(val emoji: String, val label: String, val genreId: String)
+
+private val GENRE_CHIPS = listOf(
+    GenreChip("\uD83D\uDD25", "Trending", ""),
+    GenreChip("\uD83C\uDFAC", "Action", "28"),
+    GenreChip("\uD83D\uDE02", "Comedy", "35"),
+    GenreChip("\uD83D\uDC7B", "Horror", "27"),
+    GenreChip("\uD83D\uDE80", "Sci-Fi", "878"),
+    GenreChip("\uD83C\uDFAD", "Drama", "18"),
+    GenreChip("\uD83D\uDD2A", "Thriller", "53"),
+    GenreChip("\uD83C\uDF00", "Animation", "16"),
+    GenreChip("\uD83D\uDC95", "Romance", "10749"),
+    GenreChip("\uD83D\uDD75", "Crime", "80"),
+    GenreChip("\uD83C\uDF0D", "Adventure", "12"),
+    GenreChip("\uD83D\uDCFA", "TV Action", "10759"),
+    GenreChip("\uD83D\uDCD6", "Documentary", "99"),
+)
+
+@Composable
+fun HomeScreen(
+    onItemClick: (TmdbItem) -> Unit,
+    onSearchWithGenre: (String) -> Unit = {},
+    onResume: (TmdbItem, Long) -> Unit = { _, _ -> },
+    viewModel: HomeViewModel = viewModel()
+) {
+    val heroItems by viewModel.heroItems.collectAsState()
+    val trending by viewModel.trending.collectAsState()
+    val nowPlaying by viewModel.nowPlaying.collectAsState()
+    val popularTV by viewModel.popularTV.collectAsState()
+    val topRated by viewModel.topRated.collectAsState()
+    val popularMovies by viewModel.popularMovies.collectAsState()
+    val continueWatching by viewModel.continueWatching.collectAsState()
+    val recommended by viewModel.recommended.collectAsState()
+    val progressMap by viewModel.progressMap.collectAsState()
+
+    // canLoadMore flags — each is true while there are more pages available
+    // for that row. Passed into ContentRow so the "Load More" button hides
+    // once the catalog is exhausted (no dead button at the end of a row).
+    val canLoadMoreTrending by viewModel.canLoadMoreTrending.collectAsState()
+    val canLoadMoreNowPlaying by viewModel.canLoadMoreNowPlaying.collectAsState()
+    val canLoadMorePopularTV by viewModel.canLoadMorePopularTV.collectAsState()
+    val canLoadMoreTopRated by viewModel.canLoadMoreTopRated.collectAsState()
+    val canLoadMorePopularMovies by viewModel.canLoadMorePopularMovies.collectAsState()
+    val canLoadMoreRecommended by viewModel.canLoadMoreRecommended.collectAsState()
+
+    // Refresh Continue Watching whenever the Home screen is (re)composed to
+    // the foreground — the user may have just finished / partially watched a
+    // title in the player, so the row should reflect that immediately.
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        viewModel.refreshContinueWatching()
+    }
+
+    // On a no-pointer TV box, land D-pad focus on the hero Play button the
+    // moment Home appears so the user always knows where they are.
+    val playFocusRequester = rememberInitialFocusRequester()
+
+    // focusGroup(): keeps D-pad focus clamped inside the screen's content.
+    // Without it, pressing Up from the hero / first row can move focus above
+    // the LazyColumn into empty space — nothing focused, user stranded on a
+    // no-pointer TV remote. focusGroup() makes the focusable children a single

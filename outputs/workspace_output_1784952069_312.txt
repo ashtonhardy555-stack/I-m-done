@@ -1,0 +1,86 @@
+            onBack = { selectedTv = null },
+            onItemOpen = onItemClick
+        )
+        return
+    }
+
+    // ── Layout: TV uses a side navigation rail; phones use the Netflix top bar ──
+    if (dims.isTv) {
+        // The side rail is hidden by default. It slides in (overlapping the
+        // left edge of the content) only when the user presses Left while on
+        // the first card of a row — i.e. "at the beginning of a line". It
+        // slides back out as soon as a nav item is chosen, so it never gets
+        // in the way while scrolling through movies/shows.
+        //
+        // ONE-TIME STARTUP REVEAL: the first time the TV layout appears we
+        // slide the rail in and land focus on it so the user immediately
+        // discovers that a side menu exists (otherwise a no-pointer TV remote
+        // user could browse for a long time without ever realising it's
+        // there). After a few seconds — if they haven't picked an item or
+        // pressed Right to dismiss — it auto-retracts so it doesn't linger
+        // over the content. They can always bring it back with a Left press.
+        LaunchedEffect(Unit) {
+            kotlinx.coroutines.delay(400)
+            sideNavVisible = true
+            sideNavAutoShown = true
+        }
+        // Auto-retract the startup-revealed rail after a grace period. This
+        // only fires for the auto-shown reveal (sideNavAutoShown == true);
+        // a user-invoked Left-press reveal (sideNavAutoShown == false) stays
+        // until they explicitly dismiss it.
+        LaunchedEffect(sideNavVisible, sideNavAutoShown) {
+            if (sideNavVisible && sideNavAutoShown) {
+                kotlinx.coroutines.delay(4500)
+                sideNavVisible = false
+                sideNavAutoShown = false
+            }
+        }
+
+        Box(modifier = Modifier.fillMaxSize().background(Bg)) {
+            // When the side rail becomes visible, land D-pad focus on it so
+            // the user can immediately navigate the nav items.
+            LaunchedEffect(sideNavVisible) {
+                if (sideNavVisible) {
+                    kotlinx.coroutines.delay(120)
+                    runCatching { sideNavFocusRequester.requestFocus() }
+                }
+            }
+
+            // Content fills the full width; the rail overlays it when visible.
+            //
+            // D-PAD LEFT / SIDEBAR FIX:
+            // The onKeyEvent that opens the side rail is on the OUTER Box,
+            // and the focusGroup() is on the INNER Box. This ordering is
+            // critical: the inner focusGroup() gets FIRST crack at every
+            // key event. When the user presses Left and there IS a card to
+            // the left of the current focus, the focusGroup consumes the event
+            // (moves focus left) and it never reaches the outer onKeyEvent.
+            // Only when the focus is already at the FAR-LEFT edge of a row
+            // (nothing further left to move to) does the focusGroup let the
+            // event bubble up to the outer onKeyEvent, which then reveals the
+            // side rail. This is the correct "only open the sidebar at the
+            // beginning of a line" behaviour.
+            //
+            // The previous bug was that onKeyEvent and focusGroup() were on
+            // the SAME Box, so onKeyEvent intercepted every Left press BEFORE
+            // the focusGroup could consume it for card-to-card navigation —
+            // making the sidebar open on every single Left press.
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .onKeyEvent { event ->
+                        // Reveal the side rail when the user presses Left and
+                        // it is currently hidden — i.e. "at the beginning of a
+                        // line". This only fires when the inner focusGroup()
+                        // did NOT consume the Left event (focus was already at
+                        // the far-left edge). A manual reveal is NOT
+                        // auto-shown, so it stays until dismissed.
+                        if (!sideNavVisible &&
+                            event.type == KeyEventType.KeyUp &&
+                            event.key == Key.DirectionLeft
+                        ) {
+                            sideNavAutoShown = false
+                            sideNavVisible = true
+                            true
+                        } else {
+                            false

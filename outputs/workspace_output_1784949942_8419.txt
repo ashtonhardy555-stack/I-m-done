@@ -1,0 +1,30 @@
+ *  1. `GET https://vidsrc.me/embed/{movie|tv}?tmdb={id}[&season={s}&episode={e}]`
+ *     → HTML page containing an `<iframe src="https://cloudorchestranova.com/rcp/{hash}">`
+ *     iframe origin as `BASEDOM` and every server hash.
+ *  2. For each server hash: `GET {BASEDOM}/rcp/{hash}` → a small JS blob
+ *  3. `GET {BASEDOM}/prorcp/{hash2}` → the player HTML. Its inline `<script>`
+ *     calls `$.get("https://{host}/generate.php", token => …)` and does
+ *     directly with a `Referer` of the BASEDOM origin (the CDN requires it).
+    private const val EMBED_BASE = "https://vidsrc.me/embed"
+            "$EMBED_BASE/tv?tmdb=$tmdbId&season=$season&episode=$episode"
+            "$EMBED_BASE/movie?tmdb=$tmdbId"
+            fetch(embedUrl, referer = "https://vidsrc.me/")
+        // Step 2: find BASEDOM from the iframe src.
+        Log.d(TAG, "VidSrc BASEDOM: $baseDom")
+            fetch(rcpUrl, referer = "https://vidsrcme.ru/")
+     *   $.get("https://HOST/generate.php", function(token){
+     *   $.get("https://OTHER_HOST/generate.php", function(token){
+                // variable (e.g. `$.get("https://"+host+"/generate.php")`).
+        // `https://noosphere-nectar.site/pl/.../master.m3u8?token=__TOKEN__`
+        // always also serves `https://noosphere-nectar.site/generate.php`,
+        // JS's third `$.get("https://"+host+"/generate.php", …)` call which
+        // runs AFTER the explicit `$.get("https://HOST/generate.php", …)`
+                fetch("https://$host/generate.php", referer = "$baseDom/").trim()
+                val tokenUrl = "https://$host/generate.php"
+            Log.d(TAG, "VidSrc findIframeOrigin: detected RCP host via /rcp/ URL: https://$host")
+            return "https://$host"
+                Log.d(TAG, "VidSrc findIframeOrigin: iframe + /rcp/ regex missed, using keyword host https://$host")
+                return "https://$host"
+    // Matches both $.get("https://HOST/generate.php") and $.ajax("...").
+ *  - Movie:  `GET https://seapi.link/?type=tmdb&id={tmdbId}&max_results=5`
+ *  - TV:     `GET https://seapi.link/?type=tmdb&id={tmdbId}&season={s}&episode={e}&max_results=5`

@@ -1,0 +1,40 @@
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:340:            val rawPage = repo.getTrending(trendingPage)
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:341:            val rawSize = rawPage.size
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:342:            val more = rawPage.filter { it.isMovie && it.id !in existing }
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:346:                _canLoadMoreTrending.value = rawSize >= pageSize && more.isNotEmpty()
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:359:            _canLoadMoreTrending.value = rawSize >= pageSize
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:372:            val rawPage = repo.getNowPlaying(nowPlayingPage)
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:373:            val rawSize = rawPage.size
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:374:            val more = rawPage.filter { it.id !in existing }
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:376:                _canLoadMoreNowPlaying.value = rawSize >= pageSize && more.isNotEmpty()
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:387:            _canLoadMoreNowPlaying.value = rawSize >= pageSize
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:398:            val rawPage = repo.getPopularTV(popularTVPage)
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:399:            val rawSize = rawPage.size
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:400:            val more = rawPage.filter { it.id !in existing }
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:402:                _canLoadMorePopularTV.value = rawSize >= pageSize && more.isNotEmpty()
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:413:            _canLoadMorePopularTV.value = rawSize >= pageSize
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:424:            val rawPage = repo.getTopRatedMovies(topRatedPage)
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:425:            val rawSize = rawPage.size
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:426:            val more = rawPage.filter { it.id !in existing }
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:428:                _canLoadMoreTopRated.value = rawSize >= pageSize && more.isNotEmpty()
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:439:            _canLoadMoreTopRated.value = rawSize >= pageSize
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:450:            val rawPage = repo.getPopularMovies(popularMoviesPage)
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:451:            val rawSize = rawPage.size
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:452:            val more = rawPage.filter { it.id !in existing }
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:454:                _canLoadMorePopularMovies.value = rawSize >= pageSize && more.isNotEmpty()
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:465:            _canLoadMorePopularMovies.value = rawSize >= pageSize
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/movies/MoviesViewModel.kt:114:            if (raw.size < pageSize) {
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/movies/MoviesViewModel.kt:142:            val rawPage = repo.getPopularMovies(popularPage)
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/movies/MoviesViewModel.kt:143:            val rawSize = rawPage.size
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/movies/MoviesViewModel.kt:144:            val more = rawPage.filter { it.id !in existing }
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/movies/MoviesViewModel.kt:157:            if (rawSize < pageSize) {
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/movies/MoviesViewModel.kt:177:            val rawPage = repo.getTopRatedMovies(topRatedPage)
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/movies/MoviesViewModel.kt:178:            val rawSize = rawPage.size
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/movies/MoviesViewModel.kt:179:            val more = rawPage.filter { it.id !in existing }
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/movies/MoviesViewModel.kt:189:            if (rawSize < pageSize) {
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/tv/TvViewModel.kt:112:            if (raw.size < pageSize) {
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/tv/TvViewModel.kt:138:            val rawPage = repo.getPopularTV(popularPage)
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/tv/TvViewModel.kt:139:            val rawSize = rawPage.size
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/tv/TvViewModel.kt:140:            val more = rawPage.filter { it.id !in existing }
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/tv/TvViewModel.kt:151:            if (rawSize < pageSize) {
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/tv/TvViewModel.kt:171:            val rawPage = repo.getTopRatedTV(topRatedPage)

@@ -1,0 +1,13 @@
+76: *  - On TV, both buttons are D-pad focusable with the red focus ring, and the
+81:fun HeroBanner(
+83:    onPlayClick: (TmdbItem) -> Unit,
+84:    onMoreInfo: ((TmdbItem) -> Unit)? = null,
+86:    playFocusRequester: FocusRequester? = null
+286:                HeroButton(
+292:                    onClick = { onPlayClick(currentItem) },
+293:                    focusRequester = playFocusRequester,
+297:                HeroButton(
+303:                    onClick = { onMoreInfo?.invoke(currentItem) ?: onPlayClick(currentItem) },
+366:/** A Netflix-style hero button: rounded, bold, focusable for D-pad on TV. */
+368:private fun HeroButton(
+388:    Button(

@@ -253,7 +253,7 @@ object VidSrcToExtractor {
             if (sourcesArr == null || sourcesArr.length() == 0) {
                 return Result.Error("VidPlay: no sources in mediainfo")
             }
-            val streamUrl = sourcesArr.optJSONObject(0)?.optString("file", "")
+            val streamUrl = sourcesArr.optJSONObject(0)?.optString("file", "") ?: ""
             if (streamUrl.isBlank()) return Result.Error("VidPlay: empty stream file")
 
             Log.d(TAG, "🎬 VidPlay → $streamUrl")

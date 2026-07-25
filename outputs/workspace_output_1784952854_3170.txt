@@ -1,0 +1,9 @@
+    // nav item slides it back away so it never covers content while browsing.
+    var sideNavVisible by remember { mutableStateOf(false) }
+    val sideNavFocusRequester = remember { FocusRequester() }
+    // True only during the one-time startup reveal of the rail. While true the
+    // rail auto-retracts after a few seconds (if the user hasn't picked an
+    // item or pressed Right to dismiss it) so it never lingers over content.
+    var sideNavAutoShown by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {

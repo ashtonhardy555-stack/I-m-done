@@ -1,0 +1,8 @@
+22:import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+48:import androidx.compose.foundation.focusGroup
+64:import com.ashtonhardy.piratesfilmcove.ui.components.ContentCard
+161:    // A single LazyVerticalGrid hosts the search field, the side-to-side genre
+169:    // focusGroup(): clamps D-pad focus inside the search screen so Up from the
+172:    LazyVerticalGrid(
+177:            .focusGroup()
+337:                ContentCard(

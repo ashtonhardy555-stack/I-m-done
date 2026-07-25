@@ -1,0 +1,90 @@
+=== VidSrcToExtractor ===
+        data class Stream(
+            val url: String,
+            val headers: Map<String, String>,
+            val providerName: String = "VidSrc.to"
+        ) : Result()
+=== TwoEmbedExtractor ===
+        data class Stream(
+            val url: String,
+            val headers: Map<String, String>,
+            val providerName: String = "TwoEmbed"
+        ) : Result()
+=== KissKhExtractor ===
+        data class Stream(
+            val url: String,
+            val headers: Map<String, String>,
+            val providerName: String = "KissKH"
+        ) : Result()
+=== VixSrcExtractor ===
+        data class Stream(
+            val url: String,
+            val headers: Map<String, String>,
+            val providerName: String = "VixSrc"
+        ) : Result()
+=== VideasyExtractor ===
+        data class Stream(
+            val url: String,
+            val headers: Map<String, String>,
+            val providerName: String = "Videasy"
+        ) : Result()
+=== NoTorrentExtractor ===
+        data class Stream(
+            val url: String,
+            val headers: Map<String, String>,
+            val providerName: String = "NoTorrent"
+        ) : Result()
+=== LordFlixExtractor ===
+        data class Stream(
+            val url: String,
+            val headers: Map<String, String>,
+            val providerName: String = "LordFlix"
+        ) : Result()
+=== DahmerMoviesExtractor ===
+        data class Stream(
+            val url: String,
+            val headers: Map<String, String>,
+            val providerName: String = "DahmerMovies"
+        ) : Result()
+=== MeowTvExtractor ===
+        data class Stream(
+            val url: String,
+            val headers: Map<String, String>,
+            val providerName: String = "MeowTV"
+        ) : Result()
+=== VidSrcProExtractor ===
+        data class Stream(
+            val url: String,
+            val headers: Map<String, String>,
+            val providerName: String = "VidSrcPro"
+        ) : Result()
+=== VidSrcNetExtractor ===
+        data class Stream(
+            val url: String,
+            val headers: Map<String, String>,
+            val providerName: String = "VidSrcNet"
+        ) : Result()
+=== VidStormExtractor ===
+        data class Stream(
+            val url: String,
+            val headers: Map<String, String>,
+            val providerName: String = "VidStorm"
+        ) : Result()
+=== VidSyncExtractor ===
+        data class Stream(
+            val url: String,
+            val headers: Map<String, String>,
+            val providerName: String = "VidSync"
+        ) : Result()
+=== SuperEmbedExtractor ===
+        data class Stream(
+            val url: String,
+            val headers: Map<String, String>,
+            val providerName: String = "SuperEmbed"
+        ) : Result()
+=== VidLinkExtractor ===
+        data class Stream(
+            val url: String,
+            val headers: Map<String, String>,
+            val providerName: String = "VidLink"
+        ) : Result()

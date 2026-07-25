@@ -1,0 +1,36 @@
+    dims: ResponsiveDims,
+    focusRequester: FocusRequester? = null,
+    fillMaxWidth: Boolean = false
+) {
+    val context = LocalContext.current
+    val interactionSource = remember { MutableInteractionSource() }
+    val isFocused by interactionSource.collectIsFocusedAsState()
+    val isHovered by interactionSource.collectIsHoveredAsState()
+    val isPressed by interactionSource.collectIsPressedAsState()
+
+    val active = isFocused || isHovered
+
+    // Netflix card scale-up on hover/focus, tiny press shrink.
+    // Only animate when the card is actually interacted with — when idle the
+    // target is a constant 1.0f so animateFloatAsState is a no-op and adds
+    // zero overhead to scroll. This is the key scroll-smoothness win.
+    val scale by animateFloatAsState(
+        targetValue = when {
+            isPressed -> 1.02f
+            active -> 1.08f
+            else -> 1.0f
+        },
+        animationSpec = netflixCardScaleSpec(),
+        label = "cardScale"
+    )
+
+    // ── Stable modifier chain (focus-ring flutter fix) ─────────────────
+    // The #1 cause of the red focus ring disappearing a fraction of a second
+    // after landing on a card was that the modifier CHAIN itself mutated on
+    // focus: a conditional `.border(...)` / `.shadow(...)` node was inserted
+    // and removed every time `active` flipped. Inserting/removing a modifier
+    // node re-creates the clickable's focusable node, which transiently
+    // drops focus → isFocused flips false → the ring vanishes → recompose →
+    // focus returns → the ring comes back, forever oscillating.
+    //
+    // Fix: keep the chain structurally IDENTICAL at all times and only vary

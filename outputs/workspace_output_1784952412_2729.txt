@@ -1,0 +1,51 @@
+                    focusRequester = sideNavFocusRequester
+                )
+            }
+        }
+    } else {
+        // Phone: transparent Netflix top bar that fades to solid on tab change.
+        Box(modifier = Modifier.fillMaxSize().background(Bg)) {
+            NetflixScreenSwitch(
+                currentTab = currentTab,
+                onItemClick = onItemClick,
+                onSearchWithGenre = onSearchWithGenre,
+                onResume = onResume
+            )
+            NetflixTopBar(
+                currentTab = currentTab,
+                onTabSelected = { currentTab = it },
+                onSearchClick = { showSearch = true }
+            )
+        }
+    }
+}
+
+/** Crossfade between the main screens (Netflix-style soft transitions). */
+@Composable
+private fun NetflixScreenSwitch(
+    currentTab: Tab,
+    onItemClick: (TmdbItem) -> Unit,
+    onSearchWithGenre: (String) -> Unit,
+    onResume: (TmdbItem, Long) -> Unit
+) {
+    AnimatedContent(
+        targetState = currentTab,
+        transitionSpec = {
+            fadeIn(tween(280)) togetherWith fadeOut(tween(180))
+        },
+        label = "screenSwitch"
+    ) { tab ->
+        when (tab) {
+            Tab.Home -> HomeScreen(
+                onItemClick = onItemClick,
+                onSearchWithGenre = onSearchWithGenre,
+                onResume = onResume
+            )
+            Tab.Movies -> MoviesScreen(onItemClick = onItemClick)
+            Tab.TV -> TvScreen(onItemClick = onItemClick)
+            Tab.Browse -> BrowseScreen(onItemClick = onItemClick)
+            Tab.Updates -> UpdatesScreen()
+        }
+    }
+}
+

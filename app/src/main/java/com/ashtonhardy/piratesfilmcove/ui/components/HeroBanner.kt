@@ -412,7 +412,7 @@ private fun HeroButton(
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             // Capture the button's on-screen X so the side-rail handler can
             // see that the hero is at the far-left edge.
-            .onGloballyPositioned { coords -> btnXInWindow = coords.positionInWindow.x }
+            .onGloballyPositioned { coords -> btnXInWindow = coords.positionInRoot.x }
             .then(
                 if (isFocused && isTv) {
                     Modifier.border(2.dp, Red, RoundedCornerShape(4.dp))

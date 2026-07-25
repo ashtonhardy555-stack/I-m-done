@@ -1,0 +1,36 @@
+        sideNavAutoShown = false
+    }
+
+    // ── One-time Buy Me a Coffee dialog (phone, first launch only) ────── //
+    if (showBmcDialog) {
+        BuyMeCoffeeDialog(onOpen = onBmcOpen, onDismiss = onBmcDismiss)
+    }
+
+    // ── Search overlay ──
+    if (showSearch) {
+        SearchScreen(
+            onItemClick = onItemClick,
+            onClose = {
+                showSearch = false
+                searchGenre = null
+            },
+            initialGenre = searchGenre
+        )
+        return
+    }
+
+    // ── Movie detail overlay (Netflix-style DetailScreen) ──
+    selectedMovie?.let { movie ->
+        DetailScreen(
+            item = movie,
+            onPlayMovie = { launchMovie(it) },
+            onBack = { selectedMovie = null },
+            onItemOpen = onItemClick
+        )
+        return
+    }
+
+    // ── Season / episode picker overlay (TV detail hero + episodes) ──
+    selectedTv?.let { tv ->
+        SeasonEpisodePicker(
+            item = tv,

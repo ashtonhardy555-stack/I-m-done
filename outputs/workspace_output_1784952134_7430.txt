@@ -1,0 +1,9 @@
+64:import androidx.compose.ui.focus.FocusRequester
+65:import androidx.compose.ui.focus.focusRequester
+139:    val sideNavFocusRequester = remember { FocusRequester() }
+374:                    runCatching { sideNavFocusRequester.requestFocus() }
+460:                    focusRequester = sideNavFocusRequester
+614:    focusRequester: FocusRequester? = null
+653:                focusRequester = focusRequester
+706:    focusRequester: FocusRequester? = null
+716:            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)

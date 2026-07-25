@@ -1,0 +1,19 @@
+On branch feat/more-addons-and-ui-fixes
+Changes to be committed:
+  (use "git restore --staged <file>..." to unstage)
+	modified:   app/src/main/java/com/ashtonhardy/piratesfilmcove/data/engine/KodiEngine.kt
+	new file:   app/src/main/java/com/ashtonhardy/piratesfilmcove/data/server/VidSrcToExtractor.kt
+	modified:   app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/Search/SearchScreen.kt
+	modified:   app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/Search/SearchViewModel.kt
+	modified:   app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/browse/BrowseViewModel.kt
+	modified:   app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt
+	modified:   app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/movies/MoviesViewModel.kt
+	modified:   app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/tv/TvViewModel.kt
+	modified:   app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/util/DeviceInfo.kt
+	modified:   todo.md
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	outputs/
+	summarized_conversations/
+

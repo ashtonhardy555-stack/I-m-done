@@ -1,0 +1,9 @@
+    Column(
+        modifier = modifier
+            .then(if (fillMaxWidth) Modifier.fillMaxWidth() else Modifier.width(dims.cardWidth))
+            .clip(RoundedCornerShape(6.dp))
+            .scale(scale)
+            // Shadow is ALWAYS in the chain (structural stability — see the
+            // note above). Its elevation animates 0 → 24dp so idle cards pay
+            // effectively zero shadow cost (0 elevation = no shadow pass),
+            // while focused cards get the Netflix red glow. Keeping the node

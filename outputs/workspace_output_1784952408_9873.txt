@@ -1,0 +1,27 @@
+94:import com.ashtonhardy.piratesfilmcove.ui.util.isTvDevice
+95:import com.ashtonhardy.piratesfilmcove.ui.util.responsiveDims
+126:private fun AppRoot() {
+128:    val dims = responsiveDims()
+158:    // isTvDevice() is @Composable, so it must be called in the composable body
+160:    val isTv = isTvDevice()
+254:    val onItemClick: (TmdbItem) -> Unit = remember {
+266:    val onResume: (TmdbItem, Long) -> Unit = remember {
+304:            onItemClick = onItemClick,
+320:            onItemOpen = onItemClick
+331:            onItemOpen = onItemClick
+424:                    NetflixScreenSwitch(
+426:                        onItemClick = onItemClick,
+428:                        onResume = onResume
+440:                TvSideNav(
+467:            NetflixScreenSwitch(
+469:                onItemClick = onItemClick,
+471:                onResume = onResume
+484:private fun NetflixScreenSwitch(
+486:    onItemClick: (TmdbItem) -> Unit,
+488:    onResume: (TmdbItem, Long) -> Unit
+499:                onItemClick = onItemClick,
+501:                onResume = onResume
+503:            Tab.Movies -> MoviesScreen(onItemClick = onItemClick)
+504:            Tab.TV -> TvScreen(onItemClick = onItemClick)
+505:            Tab.Browse -> BrowseScreen(onItemClick = onItemClick)
+608:private fun TvSideNav(

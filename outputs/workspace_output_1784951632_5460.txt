@@ -1,0 +1,9 @@
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/server/VidSrcToExtractor.kt:80:    sealed class Result {
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/server/VidSrcToExtractor.kt:81:        data class Stream(
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/server/VidSrcToExtractor.kt:86:        data class Error(val message: String) : Result()
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/server/TwoEmbedExtractor.kt:80:    sealed class Result {
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/server/TwoEmbedExtractor.kt:82:        data class Stream(
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/server/TwoEmbedExtractor.kt:89:        data class Error(val message: String) : Result()
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/server/KissKhExtractor.kt:84:    sealed class Result {
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/server/KissKhExtractor.kt:85:        data class Stream(
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/server/KissKhExtractor.kt:91:        data class Error(val message: String) : Result()

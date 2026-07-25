@@ -1,0 +1,84 @@
+=== VidSrcToExtractor ===
+    suspend fun extract(
+        tmdbId: Int,
+        contentType: String,
+        season: Int = 1,
+        episode: Int = 1
+    ): Result = withContext(Dispatchers.IO) {
+=== TwoEmbedExtractor ===
+    suspend fun extract(
+        tmdbId: Int,
+        contentType: String,
+        season: Int = 1,
+        episode: Int = 1
+    ): Result = withContext(Dispatchers.IO) {
+=== SuperEmbedExtractor ===
+    suspend fun extract(
+        tmdbId: Int,
+        contentType: String,
+        season: Int = 1,
+        episode: Int = 1
+    ): Result = withContext(Dispatchers.IO) {
+=== VidLinkExtractor ===
+    suspend fun extract(
+        tmdbId: Int,
+        contentType: String,
+        season: Int = 1,
+        episode: Int = 1
+    ): Result = withContext(Dispatchers.IO) {
+=== VixSrcExtractor ===
+    suspend fun extract(
+        tmdbId: Int,
+        contentType: String,
+        season: Int = 1,
+        episode: Int = 1
+    ): Result = withContext(Dispatchers.IO) {
+=== VideasyExtractor ===
+    suspend fun extract(
+        tmdbId: Int,
+        contentType: String,
+        season: Int = 1,
+        episode: Int = 1
+    ): Result = withContext(Dispatchers.IO) {
+=== NoTorrentExtractor ===
+    suspend fun extract(
+        tmdbId: Int,
+        contentType: String,
+        season: Int = 1,
+        episode: Int = 1
+    ): Result = withContext(Dispatchers.IO) {
+=== LordFlixExtractor ===
+    suspend fun extract(
+        tmdbId: Int,
+        contentType: String,
+        season: Int = 1,
+        episode: Int = 1
+    ): Result = withContext(Dispatchers.IO) {
+=== DahmerMoviesExtractor ===
+    suspend fun extract(
+        tmdbId: Int,
+        contentType: String,
+        season: Int = 1,
+        episode: Int = 1
+    ): Result = withContext(Dispatchers.IO) {
+=== MeowTvExtractor ===
+    suspend fun extract(
+        tmdbId: Int,
+        contentType: String,
+        season: Int = 1,
+        episode: Int = 1
+    ): Result = withContext(Dispatchers.IO) {
+=== VidSrcProExtractor ===
+    suspend fun extract(
+        tmdbId: Int,
+        contentType: String,
+        season: Int = 1,
+        episode: Int = 1
+    ): Result = withContext(Dispatchers.IO) {
+=== VidSrcNetExtractor ===
+    suspend fun extract(
+        tmdbId: Int,
+        contentType: String,
+        season: Int = 1,
+        episode: Int = 1
+    ): Result = withContext(Dispatchers.IO) {

@@ -1,0 +1,47 @@
+package com.ashtonhardy.piratesfilmcove.ui.util
+
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.staticCompositionLocalOf
+
+/**
+ * The TV side-navigation rail should only open when the user presses Left
+ * while focus is already at the far-LEFT edge of the screen — i.e. on the
+ * first card of a row, on the first column of a grid, or on the hero banner.
+ * A Left press mid-row / mid-grid must instead move focus to the previous
+ * card (the Compose focus system's default directional move), NOT open the
+ * rail.
+ *
+ * The mechanism: every focusable card / hero button reports its on-screen
+ * X position (in pixels) to a shared holder when it gains focus. The
+ * AppRoot's outer key handler then checks that reported X against a
+ * left-edge threshold:
+ *   • focusedX <= threshold  → we're at the left edge → open the rail
+ *   • focusedX >  threshold  → we're mid-row          → let the default
+ *                               card-to-card Left move happen (return
+ *                               false from onKeyEvent so the event is NOT
+ *                               consumed and the focus system performs the
+ *                               directional move).
+ *
+ * This is uniform across horizontal content rows, vertical grids (Browse /
+ * Search) and the hero banner, and avoids brittle per-card "isFirstInRow"
+ * plumbing. A CompositionLocal is used so the reporter can be read from any
+ * depth in the composition tree without prop threading.
+ */
+
+/**
+ * A sink that a focused card / button calls with its on-screen X (px)
+ * the moment it gains focus. The AppRoot owns the underlying state and
+ * reads it in its Left key handler.
+ *
+ * Pass `null` (the default, via [LocalSideRailXReporter]) to disable
+ * reporting — e.g. on phone layouts where the side rail doesn't exist.
+ */
+typealias SideRailXReporter = (Float) -> Unit
+
+/**
+ * CompositionLocal for the X-position reporter. Defaults to a no-op so
+ * non-TV (phone) layouts and any component rendered outside a provider
+ * simply don't report — they never hit the side-rail key handler anyway.
+ */
+val LocalSideRailXReporter = staticCompositionLocalOf<SideRailXReporter?> { null }

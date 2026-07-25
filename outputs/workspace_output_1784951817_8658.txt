@@ -1,0 +1,3 @@
+[feat/more-addons-and-ui-fixes 8e43cb40] feat: more Kodi-engine addon sources + Load More, hero, search UI fixes
+ 10 files changed, 1145 insertions(+), 207 deletions(-)
+ create mode 100644 app/src/main/java/com/ashtonhardy/piratesfilmcove/data/server/VidSrcToExtractor.kt

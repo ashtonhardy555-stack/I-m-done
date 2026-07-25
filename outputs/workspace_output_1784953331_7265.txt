@@ -1,0 +1,36 @@
+                                // a mid-row Left this means the focus system
+                                // performs the default card-to-card move; for
+                                // other keys it means the default action runs.
+                                false
+                            }
+                        }
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .focusGroup()
+                    ) {
+                        NetflixScreenSwitch(
+                            currentTab = currentTab,
+                            onItemClick = onItemClick,
+                            onSearchWithGenre = onSearchWithGenre,
+                            onResume = onResume
+                        )
+                    }
+                }
+            }
+
+            // Sliding side rail — overlays the content's left edge.
+            AnimatedVisibility(
+                visible = sideNavVisible,
+                enter = slideInHorizontally(animationSpec = tween(220)) { fullWidth -> -fullWidth },
+                exit = slideOutHorizontally(animationSpec = tween(220)) { fullWidth -> -fullWidth },
+                modifier = Modifier.align(Alignment.CenterStart)
+            ) {
+                TvSideNav(
+                    currentTab = currentTab,
+                    onTabSelected = {
+                        currentTab = it
+                        sideNavVisible = false
+                        sideNavAutoShown = false
+                    },

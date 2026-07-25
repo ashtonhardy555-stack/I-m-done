@@ -1,0 +1,186 @@
+=== All canLoadMore usages across the app ===
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/Search/SearchScreen.kt:228:                // "Load More" footer - a full-width, D-pad-focusable button
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/Search/SearchScreen.kt:230:                // loadMore() is in flight it shows a spinner and is disabled.
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/Search/SearchScreen.kt:233:                if (canLoadMore) {
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/Search/SearchScreen.kt:238:                            onClick = { viewModel.loadMore() }
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/Search/SearchScreen.kt:262: * Full-width "Load More" affordance for the search results grid. Mirrors the
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/Search/SearchScreen.kt:265: * true (a loadMore() is in flight) it shows a spinner and won't fire another
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/Search/SearchScreen.kt:312:                        text = "Load More",
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/Search/SearchScreen.kt:320:                        contentDescription = "Load More",
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/Search/SearchScreen.kt:82:    val canLoadMore by viewModel.canLoadMore.collectAsState()
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/Search/SearchViewModel.kt:114:            _canLoadMore.value = false
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/Search/SearchViewModel.kt:126:                _canLoadMore.value = raw.size >= pageSize
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/Search/SearchViewModel.kt:133:                _canLoadMore.value = false
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/Search/SearchViewModel.kt:145:    fun loadMore() {
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/Search/SearchViewModel.kt:150:                if (_loadingMore.value || !_canLoadMore.value) return@withLock
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/Search/SearchViewModel.kt:162:                    _canLoadMore.value = raw.size >= pageSize
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/Search/SearchViewModel.kt:168:                        _canLoadMore.value = false
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/Search/SearchViewModel.kt:178:                    _canLoadMore.value = false
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/Search/SearchViewModel.kt:191:     *                (loadMore), only the newly-loaded [raw] batch is filtered
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/Search/SearchViewModel.kt:205:                // loadMore: drop the just-appended raw batch and append only
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/Search/SearchViewModel.kt:36:     * True when there are more pages available to load via [loadMore]. Set
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/Search/SearchViewModel.kt:38:     * the "Load More" button hides once we've exhausted the catalog.
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/Search/SearchViewModel.kt:40:    private val _canLoadMore = MutableStateFlow(false)
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/Search/SearchViewModel.kt:41:    val canLoadMore: StateFlow<Boolean> = _canLoadMore
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/Search/SearchViewModel.kt:43:    /** True while a [loadMore] request is in flight (distinct from initial load). */
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/Search/SearchViewModel.kt:56:    // The last committed query string (trimmed) so loadMore() knows what to
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/Search/SearchViewModel.kt:85:                _canLoadMore.value = raw.size >= pageSize
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/Search/SearchViewModel.kt:91:                _canLoadMore.value = false
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/browse/BrowseScreen.kt:132:        // loadMore() on the "Show More" button, so pressing it never wipes the grid.
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/browse/BrowseScreen.kt:147:        // isLoading, so a loadMore() in progress doesn't blank out what's shown.
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/browse/BrowseScreen.kt:160:        // more to load (canLoadMore). When the genre catalog is exhausted
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/browse/BrowseScreen.kt:161:        // canLoadMore flips to false and the button disappears. While a
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/browse/BrowseScreen.kt:162:        // loadMore() is in flight the button shows a spinner and is disabled.
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/browse/BrowseScreen.kt:163:        if (items.isNotEmpty() && canLoadMore) {
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/browse/BrowseScreen.kt:167:                    onClick = { viewModel.loadMore() }
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/browse/BrowseScreen.kt:177: * spans the grid width. While [isLoading] is true (a loadMore() is in flight)
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/browse/BrowseScreen.kt:65:    val canLoadMore by viewModel.canLoadMore.collectAsState()
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/browse/BrowseViewModel.kt:120:                _canLoadMore.value = false
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/browse/BrowseViewModel.kt:125:                _canLoadMore.value = false
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/browse/BrowseViewModel.kt:134:            _canLoadMore.value = false
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/browse/BrowseViewModel.kt:138:    fun loadMore() {
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/browse/BrowseViewModel.kt:142:                if (!_canLoadMore.value) return@withLock
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/browse/BrowseViewModel.kt:173:                        _canLoadMore.value = false
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/browse/BrowseViewModel.kt:36:    // -- canLoadMore flag ------------------------------------------------
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/browse/BrowseViewModel.kt:42:    private val _canLoadMore = MutableStateFlow(true)
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/browse/BrowseViewModel.kt:43:    val canLoadMore: StateFlow<Boolean> = _canLoadMore
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/browse/BrowseViewModel.kt:45:    /** True while a loadMore() is in flight (distinct from initial load). */
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/browse/BrowseViewModel.kt:59:        _canLoadMore.value = true
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/browse/BrowseViewModel.kt:74:                    _canLoadMore.value = false
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/browse/BrowseViewModel.kt:88:                    if (_canLoadMore.value && available.size < 6) {
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/browse/BrowseViewModel.kt:95:                _canLoadMore.value = false
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/components/ContentRow.kt:136:            // "Load More" tile — last item in the row. Matches a card's
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/components/ContentRow.kt:140:            // available ([canLoadMore]); once the catalog is exhausted the
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/components/ContentRow.kt:141:            // button is gone so there's no dead "Load More" at the end.
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/components/ContentRow.kt:142:            if (onLoadMore != null && canLoadMore) {
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/components/ContentRow.kt:145:                        onClick = onLoadMore,
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/components/ContentRow.kt:155: * The "Load More ›" affordance rendered as the trailing item of a content
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/components/ContentRow.kt:189:                text = "Load More",
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/components/ContentRow.kt:197:                contentDescription = "Load More",
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/components/ContentRow.kt:52: * When [onLoadMore] is supplied AND [canLoadMore] is true, a "Load More ›"
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/components/ContentRow.kt:58: * ([canLoadMore] == false) the button disappears so the user never sees a
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/components/ContentRow.kt:59: * dead "Load More" with nothing behind it.
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/components/ContentRow.kt:67:    onLoadMore: (() -> Unit)? = null,
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/components/ContentRow.kt:70:     * Whether there are more items available to load. The "Load More" button
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/components/ContentRow.kt:71:     * is only rendered when this is true (and [onLoadMore] is non-null).
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/components/ContentRow.kt:74:     * callers that pass [onLoadMore] without a flag keep their button until
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/components/ContentRow.kt:77:    canLoadMore: Boolean = true,
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/components/ContentRow.kt:91:        // Title only — the "Load More" affordance now lives at the END of the
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeScreen.kt:100:    val canLoadMoreNowPlaying by viewModel.canLoadMoreNowPlaying.collectAsState()
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeScreen.kt:101:    val canLoadMorePopularTV by viewModel.canLoadMorePopularTV.collectAsState()
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeScreen.kt:102:    val canLoadMoreTopRated by viewModel.canLoadMoreTopRated.collectAsState()
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeScreen.kt:103:    val canLoadMorePopularMovies by viewModel.canLoadMorePopularMovies.collectAsState()
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeScreen.kt:104:    val canLoadMoreRecommended by viewModel.canLoadMoreRecommended.collectAsState()
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeScreen.kt:144:        // Now has its own Load More button so the user can page through
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeScreen.kt:151:                    onLoadMore = { viewModel.loadMoreRecommended() },
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeScreen.kt:152:                    canLoadMore = canLoadMoreRecommended
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeScreen.kt:163:                onLoadMore = { viewModel.loadMoreTrending() },
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeScreen.kt:164:                canLoadMore = canLoadMoreTrending
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeScreen.kt:171:                onLoadMore = { viewModel.loadMoreNowPlaying() },
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeScreen.kt:172:                canLoadMore = canLoadMoreNowPlaying
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeScreen.kt:179:                onLoadMore = { viewModel.loadMorePopularTV() },
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeScreen.kt:180:                canLoadMore = canLoadMorePopularTV
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeScreen.kt:187:                onLoadMore = { viewModel.loadMoreTopRated() },
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeScreen.kt:188:                canLoadMore = canLoadMoreTopRated
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeScreen.kt:96:    // canLoadMore flags — each is true while there are more pages available
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeScreen.kt:97:    // for that row. Passed into ContentRow so the "Load More" button hides
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeScreen.kt:99:    val canLoadMoreTrending by viewModel.canLoadMoreTrending.collectAsState()
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:249:        _canLoadMoreRecommended.value = movies.size >= pageSize || tv.size >= pageSize
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:256:     * the other loadMore* functions.
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:258:    fun loadMoreRecommended() = viewModelScope.launch {
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:282:                _canLoadMoreRecommended.value = false
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:297:            _canLoadMoreRecommended.value =
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:325:    fun loadMoreTrending() = viewModelScope.launch {
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:334:                _canLoadMoreTrending.value = false
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:347:            _canLoadMoreTrending.value = more.size >= pageSize
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:352:    fun loadMoreNowPlaying() = viewModelScope.launch {
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:360:                _canLoadMoreNowPlaying.value = false
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:371:            _canLoadMoreNowPlaying.value = more.size >= pageSize
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:376:    fun loadMorePopularTV() = viewModelScope.launch {
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:384:                _canLoadMorePopularTV.value = false
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:395:            _canLoadMorePopularTV.value = more.size >= pageSize
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:400:    fun loadMoreTopRated() = viewModelScope.launch {
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:408:                _canLoadMoreTopRated.value = false
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:419:            _canLoadMoreTopRated.value = more.size >= pageSize
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:424:    fun loadMorePopularMovies() = viewModelScope.launch {
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:432:                _canLoadMorePopularMovies.value = false
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:443:            _canLoadMorePopularMovies.value = more.size >= pageSize
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:65:    // The genre query used by the Recommended row so loadMoreRecommended()
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:76:    // ── canLoadMore flags (per row) ───────────────────────────────────── //
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:78:    // row's loadMoreX() function. Set true on initial load (TMDB returns ~20
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:80:    // loadMore() returns fewer than a full page or only duplicates — that
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:81:    // means we've hit the end of the catalog and the "Load More" button
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:83:    private val _canLoadMoreTrending = MutableStateFlow(true)
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:84:    val canLoadMoreTrending: StateFlow<Boolean> = _canLoadMoreTrending
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:86:    private val _canLoadMoreNowPlaying = MutableStateFlow(true)
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:87:    val canLoadMoreNowPlaying: StateFlow<Boolean> = _canLoadMoreNowPlaying
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:89:    private val _canLoadMorePopularTV = MutableStateFlow(true)
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:90:    val canLoadMorePopularTV: StateFlow<Boolean> = _canLoadMorePopularTV
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:92:    private val _canLoadMoreTopRated = MutableStateFlow(true)
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:93:    val canLoadMoreTopRated: StateFlow<Boolean> = _canLoadMoreTopRated
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:95:    private val _canLoadMorePopularMovies = MutableStateFlow(true)
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:96:    val canLoadMorePopularMovies: StateFlow<Boolean> = _canLoadMorePopularMovies
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:98:    private val _canLoadMoreRecommended = MutableStateFlow(false)
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/home/HomeViewModel.kt:99:    val canLoadMoreRecommended: StateFlow<Boolean> = _canLoadMoreRecommended
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/movies/MoviesScreen.kt:29:    val canLoadMorePopular by viewModel.canLoadMorePopular.collectAsState()
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/movies/MoviesScreen.kt:30:    val canLoadMoreTopRated by viewModel.canLoadMoreTopRated.collectAsState()
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/movies/MoviesScreen.kt:61:                onLoadMore = { viewModel.loadMore() },
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/movies/MoviesScreen.kt:62:                canLoadMore = canLoadMorePopular,
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/movies/MoviesScreen.kt:70:                onLoadMore = { viewModel.loadMoreTopRated() },
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/movies/MoviesScreen.kt:71:                canLoadMore = canLoadMoreTopRated
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/movies/MoviesViewModel.kt:103:        canLoadMoreFlag: MutableStateFlow<Boolean>
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/movies/MoviesViewModel.kt:115:                canLoadMoreFlag.value = false
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/movies/MoviesViewModel.kt:120:                canLoadMoreFlag.value = false
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/movies/MoviesViewModel.kt:127:            canLoadMoreFlag.value = false
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/movies/MoviesViewModel.kt:131:    fun loadMore() = viewModelScope.launch {
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/movies/MoviesViewModel.kt:134:            if (!_canLoadMorePopular.value) return@withLock
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/movies/MoviesViewModel.kt:151:                _canLoadMorePopular.value = false
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/movies/MoviesViewModel.kt:159:     * streamable titles — mirroring [loadMore] for the Popular row.
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/movies/MoviesViewModel.kt:161:    fun loadMoreTopRated() = viewModelScope.launch {
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/movies/MoviesViewModel.kt:164:            if (!_canLoadMoreTopRated.value) return@withLock
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/movies/MoviesViewModel.kt:180:                _canLoadMoreTopRated.value = false
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/movies/MoviesViewModel.kt:31:    // -- canLoadMore flags -----------------------------------------------
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/movies/MoviesViewModel.kt:32:    // Each row exposes a flag that the UI uses to show/hide its Load More
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/movies/MoviesViewModel.kt:33:    // button.  TMDB returns ~20 items per page; when a loadMore() fetch
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/movies/MoviesViewModel.kt:38:    private val _canLoadMorePopular = MutableStateFlow(true)
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/movies/MoviesViewModel.kt:39:    val canLoadMorePopular: StateFlow<Boolean> = _canLoadMorePopular
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/movies/MoviesViewModel.kt:41:    private val _canLoadMoreTopRated = MutableStateFlow(true)
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/movies/MoviesViewModel.kt:42:    val canLoadMoreTopRated: StateFlow<Boolean> = _canLoadMoreTopRated
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/movies/MoviesViewModel.kt:53:            refineRow(_popular, _canLoadMorePopular)
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/movies/MoviesViewModel.kt:57:            refineRow(_topRated, _canLoadMoreTopRated)
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/movies/MoviesViewModel.kt:69:     * always has a reasonable number of cards and the Load More button is
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/movies/MoviesViewModel.kt:74:        canLoadMoreFlag: MutableStateFlow<Boolean>
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/movies/MoviesViewModel.kt:85:            // user always sees a reasonable number of cards + the Load More
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/movies/MoviesViewModel.kt:89:            if (canLoadMoreFlag.value && available.size < 6) {
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/movies/MoviesViewModel.kt:90:                autoLoadNextPagePopular(row, canLoadMoreFlag)
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/tv/TvScreen.kt:29:    val canLoadMorePopular by viewModel.canLoadMorePopular.collectAsState()
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/tv/TvScreen.kt:30:    val canLoadMoreTopRated by viewModel.canLoadMoreTopRated.collectAsState()
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/tv/TvScreen.kt:62:                onLoadMore = { viewModel.loadMore() },
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/tv/TvScreen.kt:63:                canLoadMore = canLoadMorePopular,
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/tv/TvScreen.kt:71:                onLoadMore = { viewModel.loadMoreTopRated() },
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/tv/TvScreen.kt:72:                canLoadMore = canLoadMoreTopRated
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/tv/TvViewModel.kt:101:        canLoadMoreFlag: MutableStateFlow<Boolean>
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/tv/TvViewModel.kt:113:                canLoadMoreFlag.value = false
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/tv/TvViewModel.kt:118:                canLoadMoreFlag.value = false
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/tv/TvViewModel.kt:125:            canLoadMoreFlag.value = false
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/tv/TvViewModel.kt:129:    fun loadMore() = viewModelScope.launch {
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/tv/TvViewModel.kt:132:            if (!_canLoadMorePopular.value) return@withLock
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/tv/TvViewModel.kt:149:                _canLoadMorePopular.value = false
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/tv/TvViewModel.kt:157:     * streamable titles — mirroring [loadMore] for the Popular row.
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/tv/TvViewModel.kt:159:    fun loadMoreTopRated() = viewModelScope.launch {
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/tv/TvViewModel.kt:162:            if (!_canLoadMoreTopRated.value) return@withLock
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/tv/TvViewModel.kt:178:                _canLoadMoreTopRated.value = false
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/tv/TvViewModel.kt:31:    // -- canLoadMore flags -----------------------------------------------
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/tv/TvViewModel.kt:32:    // Each row exposes a flag that the UI uses to show/hide its Load More
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/tv/TvViewModel.kt:33:    // button.  TMDB returns ~20 items per page; when a loadMore() fetch
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/tv/TvViewModel.kt:38:    private val _canLoadMorePopular = MutableStateFlow(true)
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/tv/TvViewModel.kt:39:    val canLoadMorePopular: StateFlow<Boolean> = _canLoadMorePopular
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/tv/TvViewModel.kt:41:    private val _canLoadMoreTopRated = MutableStateFlow(true)
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/tv/TvViewModel.kt:42:    val canLoadMoreTopRated: StateFlow<Boolean> = _canLoadMoreTopRated
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/tv/TvViewModel.kt:53:            refineRow(_popular, _canLoadMorePopular)
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/tv/TvViewModel.kt:57:            refineRow(_topRated, _canLoadMoreTopRated)
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/tv/TvViewModel.kt:69:     * always has a reasonable number of cards and the Load More button is
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/tv/TvViewModel.kt:74:        canLoadMoreFlag: MutableStateFlow<Boolean>
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/tv/TvViewModel.kt:85:            // user always sees a reasonable number of cards + the Load More
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/tv/TvViewModel.kt:87:            if (canLoadMoreFlag.value && available.size < 6) {
+app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/tv/TvViewModel.kt:88:                autoLoadNextPage(row, canLoadMoreFlag)

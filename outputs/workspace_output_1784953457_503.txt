@@ -1,0 +1,14 @@
+On branch feat/more-addons-and-ui-fixes
+Changes to be committed:
+  (use "git restore --staged <file>..." to unstage)
+	modified:   app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/MainActivity.kt
+	modified:   app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/components/ContentCard.kt
+	modified:   app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/components/HeroBanner.kt
+	new file:   app/src/main/java/com/ashtonhardy/piratesfilmcove/ui/util/SideRailFocus.kt
+	modified:   todo.md
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	outputs/
+	summarized_conversations/
+

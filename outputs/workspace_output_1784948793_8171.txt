@@ -1,0 +1,41 @@
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/engine/:
+total 44
+drwxr-xr-x 2 root root  4096 Jul 25 02:51 .
+drwxr-xr-x 8 root root  4096 Jul 25 02:51 ..
+-rw-r--r-- 1 root root 17026 Jul 25 02:51 KodiEngine.kt
+-rw-r--r-- 1 root root  5706 Jul 25 02:51 KodiEngineService.kt
+-rw-r--r-- 1 root root  7108 Jul 25 02:51 StreamCache.kt
+
+app/src/main/java/com/ashtonhardy/piratesfilmcove/data/server/:
+total 540
+drwxr-xr-x 2 root root  4096 Jul 25 02:51 .
+drwxr-xr-x 8 root root  4096 Jul 25 02:51 ..
+-rw-r--r-- 1 root root 13066 Jul 25 02:51 AnnasCinemaExtractor.kt
+-rw-r--r-- 1 root root 16807 Jul 25 02:51 DahmerMoviesExtractor.kt
+-rw-r--r-- 1 root root 36830 Jul 25 02:51 EmbedExtractor.kt
+-rw-r--r-- 1 root root 14961 Jul 25 02:51 KissKhExtractor.kt
+-rw-r--r-- 1 root root 19058 Jul 25 02:51 LookMovieHeadlessExtractor.kt
+-rw-r--r-- 1 root root 32215 Jul 25 02:51 LookMovieWebExtractor.kt
+-rw-r--r-- 1 root root 20444 Jul 25 02:51 LordFlixExtractor.kt
+-rw-r--r-- 1 root root 13659 Jul 25 02:51 MeowTvExtractor.kt
+-rw-r--r-- 1 root root 16165 Jul 25 02:51 NoTorrentExtractor.kt
+-rw-r--r-- 1 root root 13140 Jul 25 02:51 NovaStreamExtractor.kt
+-rw-r--r-- 1 root root 13851 Jul 25 02:51 NuvioStreamsExtractor.kt
+-rw-r--r-- 1 root root 11195 Jul 25 02:51 RemoteServerListFetcher.kt
+-rw-r--r-- 1 root root  2563 Jul 25 02:51 ServerConfig.kt
+-rw-r--r-- 1 root root  7188 Jul 25 02:51 ServerManager.kt
+-rw-r--r-- 1 root root 15561 Jul 25 02:51 SmashStreamsExtractor.kt
+-rw-r--r-- 1 root root 15301 Jul 25 02:51 StreamAvailabilityChecker.kt
+-rw-r--r-- 1 root root 27173 Jul 25 02:51 StreamExtractor.kt
+-rw-r--r-- 1 root root  2603 Jul 25 02:51 StreamProviders.kt
+-rw-r--r-- 1 root root  6914 Jul 25 02:51 SuperEmbedExtractor.kt
+-rw-r--r-- 1 root root 17764 Jul 25 02:51 TwoEmbedExtractor.kt
+-rw-r--r-- 1 root root 23134 Jul 25 02:51 VidLinkExtractor.kt
+-rw-r--r-- 1 root root 29399 Jul 25 02:51 VidSrcExtractor.kt
+-rw-r--r-- 1 root root 18321 Jul 25 02:51 VidSrcMeResolver.kt
+-rw-r--r-- 1 root root 26986 Jul 25 02:51 VidSrcNetExtractor.kt
+-rw-r--r-- 1 root root  5957 Jul 25 02:51 VidSrcProExtractor.kt
+-rw-r--r-- 1 root root 27741 Jul 25 02:51 VidStormExtractor.kt
+-rw-r--r-- 1 root root 15318 Jul 25 02:51 VidSyncExtractor.kt
+-rw-r--r-- 1 root root 17996 Jul 25 02:51 VideasyExtractor.kt
+-rw-r--r-- 1 root root 13487 Jul 25 02:51 VixSrcExtractor.kt

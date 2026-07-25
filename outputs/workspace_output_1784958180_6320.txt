@@ -1,0 +1,26 @@
+            val mediaJson = fetch(mediainfoUrl, referer = embedUrl)
+                ?: return Result.Error("VidPlay: mediainfo fetch failed")
+            val mediaResp = try { JSONObject(mediaJson) } catch (e: Exception) {
+                return Result.Error("VidPlay: mediainfo parse failed")
+            }
+            val result = mediaResp.opt("result")
+            if (result !is JSONObject) return Result.Error("VidPlay: no result in mediainfo")
+            val sourcesArr = result.optJSONArray("sources")
+            if (sourcesArr == null || sourcesArr.length() == 0) {
+                return Result.Error("VidPlay: no sources in mediainfo")
+            }
+            val streamUrl = sourcesArr.optJSONObject(0)?.optString("file", "")
+            if (streamUrl.isBlank()) return Result.Error("VidPlay: empty stream file")
+
+            Log.d(TAG, "🎬 VidPlay → $streamUrl")
+            Result.Stream(streamUrl, vidplayHeaders(embedUrl), "VidSrc.to (VidPlay)")
+        } catch (e: Exception) {
+            Result.Error("VidPlay: ${e.message}")
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────//
+    //  FileMoon resolver                                                     //
+    // ───────────────────────────────────────────────────────────────────────//
+
+    /**

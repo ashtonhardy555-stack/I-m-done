@@ -1,0 +1,37 @@
+private fun NetflixScreenSwitch(
+    currentTab: Tab,
+    onItemClick: (TmdbItem) -> Unit,
+    onSearchWithGenre: (String) -> Unit,
+    onResume: (TmdbItem, Long) -> Unit
+) {
+    AnimatedContent(
+        targetState = currentTab,
+        transitionSpec = {
+            fadeIn(tween(280)) togetherWith fadeOut(tween(180))
+        },
+        label = "screenSwitch"
+    ) { tab ->
+        when (tab) {
+            Tab.Home -> HomeScreen(
+                onItemClick = onItemClick,
+                onSearchWithGenre = onSearchWithGenre,
+                onResume = onResume
+            )
+            Tab.Movies -> MoviesScreen(onItemClick = onItemClick)
+            Tab.TV -> TvScreen(onItemClick = onItemClick)
+            Tab.Browse -> BrowseScreen(onItemClick = onItemClick)
+            Tab.Updates -> UpdatesScreen()
+        }
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────── //
+//  Netflix top navigation bar (phone)                                 //
+//  Transparent over the hero, with a top→bottom black gradient so the //
+//  white text always reads. Tabs are D-pad focusable with the red     //
+//  underline that Netflix uses for the active section.                //
+// ──────────────────────────────────────────────────────────────────── //
+@Composable
+private fun NetflixTopBar(
+    currentTab: Tab,
+    onTabSelected: (Tab) -> Unit,

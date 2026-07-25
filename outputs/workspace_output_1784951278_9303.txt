@@ -1,0 +1,31 @@
+    // Movies → Netflix-style DetailScreen (Play button launches the player).
+    // TV shows → Netflix-style SeasonEpisodePicker (detail hero + episodes).
+    // This is a stable, remembered lambda so the screen tree below it does
+    // NOT recompose every time AppRoot re-renders (scroll perf).
+    val onItemClick: (TmdbItem) -> Unit = remember {
+        { item ->
+            showSearch = false
+            searchGenre = null
+            if (item.isMovie) selectedMovie = item
+            else selectedTv = item
+        }
+    }
+
+    // ── Continue Watching resume handler ─────────────────────────── //
+    // Launches the player directly at the saved position (bypassing the
+    // detail screen) so a Continue Watching card resumes in one click.
+    val onResume: (TmdbItem, Long) -> Unit = remember {
+        { item, positionMs -> launchResume(item, positionMs) }
+    }
+
+    // Stable search-with-genre callback (passed into the always-visible main
+    // screen tree — kept stable for the same scroll-perf reason).
+    val onSearchWithGenre: (String) -> Unit = remember {
+        { genreId ->
+            searchGenre = genreId
+            showSearch = true
+        }
+    }
+
+    // ── Back-button hierarchy ──────────────────────────────────────────────
+    // On a TV remote the Back button should NEVER instantly quit the app.

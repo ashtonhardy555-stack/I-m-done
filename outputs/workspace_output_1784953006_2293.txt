@@ -1,0 +1,73 @@
+            }
+        }
+    }
+}
+
+@Composable
+private fun TopNavTab(tab: Tab, isSelected: Boolean, onClick: () -> Unit) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isFocused by interactionSource.collectIsFocusedAsState()
+    val color = if (isSelected) Color.White else TextMuted
+
+    Column(
+        modifier = Modifier
+            .clip(RoundedCornerShape(4.dp))
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick
+            )
+            .padding(vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = tab.label,
+            color = if (isFocused && !isSelected) TextPrimary else color,
+            fontSize = 14.sp,
+            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+        )
+        Spacer(Modifier.height(4.dp))
+        // Red underline under the active tab (Netflix active-section marker).
+        Box(
+            modifier = Modifier
+                .width(if (isSelected) 24.dp else 0.dp)
+                .height(3.dp)
+                .background(Red, RoundedCornerShape(2.dp))
+        )
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────── //
+//  TV side navigation rail (Android TV)                               //
+//  Vertical icon+label rail with the red focus highlight.             //
+// ──────────────────────────────────────────────────────────────────── //
+@Composable
+private fun TvSideNav(
+    currentTab: Tab,
+    onTabSelected: (Tab) -> Unit,
+    onSearchClick: () -> Unit,
+    onDismiss: () -> Unit = {},
+    showHint: Boolean = false,
+    focusRequester: FocusRequester? = null
+) {
+    Surface(
+        color = Bg2,
+        shadowElevation = 0.dp,
+        modifier = Modifier
+            .fillMaxHeight()
+            .width(120.dp)
+            // Pressing Right while focused inside the rail slides it back
+            // away (D-pad dismiss without having to pick an item). Back is
+            // handled by the BackHandler in AppRoot.
+            .onKeyEvent { event ->
+                if (event.type == KeyEventType.KeyUp && event.key == Key.DirectionRight) {
+                    onDismiss()
+                    true
+                } else false
+            }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxHeight()
+                .padding(vertical = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,

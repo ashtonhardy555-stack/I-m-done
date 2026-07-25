@@ -1,0 +1,30 @@
+AutoUpdater.kt
+MainActivity.kt
+Search
+browse
+components
+detail
+home
+movies
+player
+theme
+tv
+updates
+util
+===Browse===
+18:import androidx.compose.foundation.focusGroup
+19:import androidx.compose.foundation.lazy.LazyRow
+22:import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+49:import com.ashtonhardy.piratesfilmcove.ui.components.ContentCard
+74:    // A single LazyVerticalGrid hosts the title, the genre selector, the
+77:    // while the cards flow into dims.gridColumns columns (3 on phone, 5 on TV).
+79:    // focusGroup(): clamps D-pad focus inside the screen so Up from the first
+82:    LazyVerticalGrid(
+83:        columns = GridCells.Fixed(dims.gridColumns),
+86:            .focusGroup()
+97:        item(span = { GridItemSpan(dims.gridColumns) }) {
+108:        item(span = { GridItemSpan(dims.gridColumns) }) {
+109:            LazyRow(
+134:            item(span = { GridItemSpan(dims.gridColumns) }) {
+152:            ContentCard(
+164:            item(span = { GridItemSpan(dims.gridColumns) }) {

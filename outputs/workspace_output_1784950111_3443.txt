@@ -1,0 +1,21 @@
+
+    // ─────────────────────────────────────────────────────────────────────//
+    //  TMDB → IMDb resolution                                              //
+    // ─────────────────────────────────────────────────────────────────────//
+
+    private suspend fun resolveImdbId(tmdbId: Int, isTv: Boolean): String? {
+        val key = BuildConfig.TMDB_API_KEY
+        val resp = if (isTv) {
+            ApiClient.tmdbApi.getTvExternalIds(tmdbId, key)
+        } else {
+            ApiClient.tmdbApi.getMovieExternalIds(tmdbId, key)
+        }
+        return resp.imdbId
+    }
+
+    // ─────────────────────────────────────────────────────────────────────//
+    //  Stream parsing                                                       //
+    // ─────────────────────────────────────────────────────────────────────//
+
+    private data class Candidate(
+        val url: String,

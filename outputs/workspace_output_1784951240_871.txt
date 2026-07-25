@@ -1,0 +1,51 @@
+    // On a TV remote the Back button should NEVER instantly quit the app.
+    // It peels off overlays one layer at a time: detail → search → base.
+    // Only at the base screen do we let the system handle back (exit).
+    BackHandler(enabled = selectedTv != null) { selectedTv = null }
+    BackHandler(enabled = selectedMovie != null) { selectedMovie = null }
+    BackHandler(enabled = showSearch) {
+        showSearch = false
+        searchGenre = null
+    }
+    // TV: Back also dismisses the side rail (if visible) before anything else
+    // peels off, so a TV remote user is never stuck with the rail on screen.
+    BackHandler(enabled = sideNavVisible) {
+        sideNavVisible = false
+        sideNavAutoShown = false
+    }
+
+    // ── One-time Buy Me a Coffee dialog (phone, first launch only) ────── //
+    if (showBmcDialog) {
+        BuyMeCoffeeDialog(onOpen = onBmcOpen, onDismiss = onBmcDismiss)
+    }
+
+    // ── Search overlay ──
+    if (showSearch) {
+        SearchScreen(
+            onItemClick = onItemClick,
+            onClose = {
+                showSearch = false
+                searchGenre = null
+            },
+            initialGenre = searchGenre
+        )
+        return
+    }
+
+    // ── Movie detail overlay (Netflix-style DetailScreen) ──
+    selectedMovie?.let { movie ->
+        DetailScreen(
+            item = movie,
+            onPlayMovie = { launchMovie(it) },
+            onBack = { selectedMovie = null },
+            onItemOpen = onItemClick
+        )
+        return
+    }
+
+    // ── Season / episode picker overlay (TV detail hero + episodes) ──
+    selectedTv?.let { tv ->
+        SeasonEpisodePicker(
+            item = tv,
+            onPlay = { season, episode -> launchTv(tv, season, episode) },
+            onBack = { selectedTv = null },

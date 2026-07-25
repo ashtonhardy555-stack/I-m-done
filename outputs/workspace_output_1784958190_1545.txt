@@ -1,0 +1,11 @@
+253:             if (sourcesArr == null || sourcesArr.length() == 0) {
+254:                 return Result.Error("VidPlay: no sources in mediainfo")
+255:             }
+256:             val streamUrl = sourcesArr.optJSONObject(0)?.optString("file", "")
+257:             if (streamUrl.isBlank()) return Result.Error("VidPlay: empty stream file")
+258: 
+259:             Log.d(TAG, "🎬 VidPlay → $streamUrl")
+260:             Result.Stream(streamUrl, vidplayHeaders(embedUrl), "VidSrc.to (VidPlay)")
+261:         } catch (e: Exception) {
+262:             Result.Error("VidPlay: ${e.message}")
+263:         }
