@@ -1,42 +1,16 @@
-# Add Headless Kodi-Style Server Extractors
+# Piratesfilm Cove — app improvements
 
-## Context
-The app has a "Kodi-like headless engine" (KodiEngine) that runs the LookMovie
-addon flow (search → storage → security API → .m3u8) in pure OkHttp (no WebView,
-no Kodi runtime). The user wants MORE servers added that work the same way —
-headless, pure OkHttp extractors that resolve direct stream URLs through the
-Kodi engine.
+## 1. New Kodi addon sources (no debrid / no trakt)
+- [x] Research NEW Kodi addons online (Free99 + others) for fresh scraper/API URLs NOT already in the app
+- [x] Create VidSrcToExtractor.kt — vidsrc.to RC4 decryption flow (pure OkHttp, contains VidPlay + FileMoon internally)
+- [x] Analyse existing extractors NOT yet wired into the KodiEngine (15 of them, all TMDB-id based)
+- [x] Wire VidSrcTo + 15 existing headless extractors into KodiEngine.kt (adapters + addons list)
 
-## Tasks
+## 2. UI bugs
+- [x] Fix "Load More" buttons disappearing prematurely (HomeViewModel, MoviesViewModel, TvViewModel, SearchViewModel, BrowseViewModel — base canLoadMore on RAW TMDB page size)
+- [x] Fix hero banner being clipped on home screen (HeroBanner height / HomeScreen top padding / DeviceInfo TV dims)
+- [x] Fix search results disappearing before Enter (SearchViewModel/SearchScreen IME noise — updateQuery same-value guard + onKeyEvent Enter handler that hides keypad without clearFocus)
+- [x] Show search results in side-to-side layout + active category/genre label (SearchScreen — LazyVerticalGrid with side-to-side genre pill LazyRow + active category/genre label header, mirrors BrowseScreen)
 
-### Phase 1: Research & Understand Existing Architecture
-- [x] Merge PR #43 (animateFloat fix) — build was broken
-- [x] Verify the build passes after merge (run #29888416981 SUCCESS)
-- [x] Read LookMovieHeadlessExtractor.kt — the reference implementation
-- [x] Read KodiEngine.kt — the addon orchestration layer (Addon interface)
-- [x] Read PlayerActivity.kt — the parallel race that uses all extractors
-- [x] Read existing extractor patterns (VidStorm, NoTorrent, VidLink, VixSrc, etc.)
-- [x] Research Stremio addon API endpoints (NuvioStreams, etc.)
-
-### Phase 2: Create New Headless Extractors (Kodi-style, pure OkHttp)
-- [x] Create SmashStreamsExtractor.kt — Stremio addon API (JSON streams)
-- [x] Create NuvioStreamsExtractor.kt — Stremio addon with direct stream URLs
-- [x] Create AnnasCinemaExtractor.kt — Stremio addon aggregator
-- [x] Create NovaStreamExtractor.kt — Stremio addon with direct stream URLs
-
-### Phase 3: Wire Into KodiEngine (Addon interface)
-- [x] Add each new extractor as a KodiEngine.Addon adapter
-- [x] Ensure they participate in the engine's pre-resolve / cache flow
-- [x] Extend ResolveRequest to include tmdbId + contentType
-
-### Phase 4: Wire Into PlayerActivity Parallel Race
-- [x] Add try*() helper for each new extractor (SmashStreams, NuvioStreams, AnnasCinema, NovaStream)
-- [x] Add each to the deferreds list in the parallel race
-- [x] Add provider reliability weights for new providers
-- [x] Add new providers to RACE_PROVIDER_BASES set
-- [x] Add new providers to isEnglishStream default-English allowlist
-- [x] Update engine-first ResolveRequest in PlayerActivity to include tmdbId
-
-### Phase 5: Build & Test
-- [x] Create PR with the new extractors (PR #44)
-- [x] Monitor the CI build to ensure it passes (run #29890036015 SUCCESS in 4m19s)
+## 3. Ship it
+- [x] Commit, push, create PR to GitHub on feat/more-addons-and-ui-fixes

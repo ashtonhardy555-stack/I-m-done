@@ -33,6 +33,15 @@ class SearchViewModel : ViewModel() {
     val filtering: StateFlow<Boolean> = _filtering
 
     /**
+     * The genre id currently being browsed (the preset / side-to-side bar
+     * selection), or null when the user is doing a free-text search. Empty
+     * string means "Trending" (no genre filter). Exposed so the screen can
+     * highlight the active genre pill and show the category label.
+     */
+    private val _activeGenreId = MutableStateFlow<String?>(null)
+    val activeGenreId: StateFlow<String?> = _activeGenreId
+
+    /**
      * True when there are more pages available to load via [loadMore]. Set
      * false when the last page returned fewer than a full page of results so
      * the "Load More" button hides once we've exhausted the catalog.
@@ -46,8 +55,9 @@ class SearchViewModel : ViewModel() {
 
     private var searchJob: Job? = null
 
-    // When a genre is preset (from the Home "Quick Browse" chips) the screen
-    // shows a discover feed for that genre until the user types a real query.
+    // When a genre is preset (from the Home "Quick Browse" chips or the
+    // side-to-side bar) the screen shows a discover feed for that genre
+    // until the user types a real query.
     private var presetGenre: String? = null
 
     // Current page of results (1-based). Reset to 1 on every new query / genre.
@@ -68,6 +78,7 @@ class SearchViewModel : ViewModel() {
         presetGenre = genreId?.takeIf { it.isNotBlank() }
         committedQuery = ""
         page = 1
+        _activeGenreId.value = genreId ?: ""
         searchJob?.cancel()
         searchJob = viewModelScope.launch {
             _isLoading.value = true
@@ -95,6 +106,18 @@ class SearchViewModel : ViewModel() {
         }
     }
 
+    /**
+     * Switch the side-to-side genre bar to a new genre. Mirrors
+     * [setInitialGenre] but is called when the user taps a genre pill while
+     * already on the search screen. Clears any free-text query so the browse
+     * feed takes over.
+     */
+    fun selectGenre(genreId: String?) {
+        // Clear the text query so the browse feed is what's shown.
+        _query.value = ""
+        setInitialGenre(genreId)
+    }
+
     fun updateQuery(newQuery: String) {
         // Guard against spurious re-issues: if the query hasn't actually
         // changed, don't cancel the in-flight search job and don't re-run
@@ -107,7 +130,10 @@ class SearchViewModel : ViewModel() {
         if (newQuery == _query.value) return
         _query.value = newQuery
         // Once the user starts typing, drop the genre preset.
-        if (newQuery.isNotBlank()) presetGenre = null
+        if (newQuery.isNotBlank()) {
+            presetGenre = null
+            _activeGenreId.value = null
+        }
 
         if (newQuery.length < 2) {
             _results.value = emptyList()
@@ -158,14 +184,18 @@ class SearchViewModel : ViewModel() {
                         val type = if (tvGenreIds.contains(presetGenre)) "tv" else "movie"
                         repo.discover(type = type, genreId = presetGenre, page = nextPage)
                     }
-                    // Detect end of catalog.
-                    _canLoadMore.value = raw.size >= pageSize
+                    // Detect end of catalog based on the RAW page size, not
+                    // the deduped/filtered count (dedup can shrink the batch
+                    // below pageSize even when TMDB returned a full page).
+                    val rawSize = raw.size
                     // Dedupe against already-loaded items.
                     val existing = _results.value.map { it.id }.toSet()
                     val fresh = raw.filter { it.id !in existing }
                     if (fresh.isEmpty()) {
-                        // Page returned only duplicates - stop paging.
-                        _canLoadMore.value = false
+                        // Page returned only duplicates, but keep the Load More
+                        // button alive if the raw page was full — the next page
+                        // may have new titles.
+                        _canLoadMore.value = rawSize >= pageSize
                         return@withLock
                     }
                     // Append immediately so the grid grows, then refine the
@@ -173,6 +203,10 @@ class SearchViewModel : ViewModel() {
                     _results.value = _results.value + fresh
                     page = nextPage
                     refineResults(fresh, replace = false)
+                    // End-of-catalog decision based on the RAW page size so the
+                    // Load More button stays visible as long as TMDB has more
+                    // pages, regardless of how many the availability filter kept.
+                    _canLoadMore.value = rawSize >= pageSize
                 } catch (e: Exception) {
                     e.printStackTrace()
                     _canLoadMore.value = false

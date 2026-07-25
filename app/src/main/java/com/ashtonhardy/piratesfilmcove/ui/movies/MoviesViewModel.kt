@@ -135,7 +135,13 @@ class MoviesViewModel : ViewModel() {
             _isLoadingMore.value = true
             popularPage++
             val existing = _popular.value.map { it.id }.toSet()
-            val more = repo.getPopularMovies(popularPage).filter { it.id !in existing }
+            // Capture the RAW page size BEFORE dedup so the end-of-catalog
+            // decision is based on the raw TMDB response, not the filtered
+            // count. (Dedup can shrink the batch below pageSize even when
+            // TMDB returned a full page — that was the Load More bug.)
+            val rawPage = repo.getPopularMovies(popularPage)
+            val rawSize = rawPage.size
+            val more = rawPage.filter { it.id !in existing }
             // Append the raw batch immediately, then filter the new batch.
             _popular.value = _popular.value + more
             val ctx = appContext()
@@ -145,9 +151,10 @@ class MoviesViewModel : ViewModel() {
                 _popular.value = _popular.value.filter { it.id !in moreIds } + availableMore
             }
             _isLoadingMore.value = false
-            // End-of-catalog: TMDB sent fewer than a full page (or every
-            // item was a duplicate), so there's nothing more to load.
-            if (more.size < pageSize) {
+            // End-of-catalog: TMDB sent fewer than a full page of raw results.
+            // Note: we check the RAW page size, not the deduped/filtered count,
+            // so the button stays visible as long as TMDB still has pages.
+            if (rawSize < pageSize) {
                 _canLoadMorePopular.value = false
             }
         }
@@ -165,7 +172,11 @@ class MoviesViewModel : ViewModel() {
             _isLoadingMore.value = true
             topRatedPage++
             val existing = _topRated.value.map { it.id }.toSet()
-            val more = repo.getTopRatedMovies(topRatedPage).filter { it.id !in existing }
+            // Capture the RAW page size BEFORE dedup so the end-of-catalog
+            // decision is based on the raw TMDB response.
+            val rawPage = repo.getTopRatedMovies(topRatedPage)
+            val rawSize = rawPage.size
+            val more = rawPage.filter { it.id !in existing }
             _topRated.value = _topRated.value + more
             val ctx = appContext()
             if (ctx != null) {
@@ -174,9 +185,8 @@ class MoviesViewModel : ViewModel() {
                 _topRated.value = _topRated.value.filter { it.id !in moreIds } + availableMore
             }
             _isLoadingMore.value = false
-            // End-of-catalog: TMDB sent fewer than a full page (or every
-            // item was a duplicate), so there's nothing more to load.
-            if (more.size < pageSize) {
+            // End-of-catalog: TMDB sent fewer than a full page of raw results.
+            if (rawSize < pageSize) {
                 _canLoadMoreTopRated.value = false
             }
         }
