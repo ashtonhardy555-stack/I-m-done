@@ -130,16 +130,7 @@ object StreamAvailabilityChecker {
     suspend fun filterAvailable(
         context: Context,
         items: List<TmdbItem>
-    ): List<TmdbItem> = withContext(Dispatchers.IO) {
-        if (items.isEmpty()) return@withContext emptyList()
-        ServerManager.initialize(context)
-        coroutineScope {
-            val results = items.map { item ->
-                async { item to isAvailable(context, item) }
-            }.map { it.await() }
-            results.filter { it.second }.map { it.first }
-        }
-    }
+    ): List<TmdbItem> = items
 
     // ------------------------------------------------------------------ //
     //  Probing                                                           //
