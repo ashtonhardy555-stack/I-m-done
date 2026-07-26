@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Piratesfilm Cove — Ad-Free Streaming</title>
+    <link rel="stylesheet" href="style.css">
+    <!-- HLS.js for playing .m3u8 streams -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.min.js"></script>
+<script src="https://sites.super.myninja.ai/_assets/ninja-daytona-script.js"></script>
+</head>
+<body>
+
+<!-- Navigation Bar -->
+<nav class="navbar" id="navbar">
+    <div class="logo" onclick="navigateTo('home')">Piratesfilm Cove</div>
+    <div class="nav-links">
+        <a class="nav-link active" data-page="home" onclick="navigateTo('home')">Home</a>
+        <a class="nav-link" data-page="movies" onclick="navigateTo('movies')">Movies</a>
+        <a class="nav-link" data-page="tv" onclick="navigateTo('tv')">TV Shows</a>
+    </div>
+    <div class="search-container">
+        <input type="text" class="search-input" id="searchInput"
+               placeholder="Search movies & shows..."
+               oninput="handleSearch(event)">
+    </div>
+</nav>
+
+<!-- Main Content -->
+<div class="content-container" id="content">
+
+    <!-- Home Page -->
+    <div id="page-home" class="page">
+        <!-- Hero Banner -->
+        <div class="hero-banner" id="heroBanner">
+            <div class="hero-bg" id="heroBg"></div>
+            <div class="hero-overlay"></div>
+            <div class="hero-content">
+                <h1 class="hero-title" id="heroTitle">Loading...</h1>
+                <div class="hero-meta" id="heroMeta"></div>
+                <p class="hero-overview" id="heroOverview"></p>
+                <div class="hero-buttons">
+                    <button class="btn-play" onclick="playHero()">
+                        <span>▶</span> Play
+                    </button>
+                    <button class="btn-info" onclick="showHeroInfo()">
+                        <span>ⓘ</span> More Info
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Trending Movies Row -->
+        <div class="content-row">
+            <h2 class="row-title">Trending Movies</h2>
+            <div class="row-grid" id="row-trending-movies">
+                <div class="loading-container"><div class="spinner"></div></div>
+            </div>
+        </div>
+
+        <!-- Trending TV Row -->
+        <div class="content-row">
+            <h2 class="row-title">Trending TV Shows</h2>
+            <div class="row-grid" id="row-trending-tv">
+                <div class="loading-container"><div class="spinner"></div></div>
+            </div>
+        </div>
+
+        <!-- Popular Movies Row -->
+        <div class="content-row">
+            <h2 class="row-title">Popular Movies</h2>
+            <div class="row-grid" id="row-popular-movies">
+                <div class="loading-container"><div class="spinner"></div></div>
+            </div>
+        </div>
+
+        <!-- Popular TV Row -->
+        <div class="content-row">
+            <h2 class="row-title">Popular TV Shows</h2>
+            <div class="row-grid" id="row-popular-tv">
+                <div class="loading-container"><div class="spinner"></div></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Movies Page -->
+    <div id="page-movies" class="page" style="display:none">
+        <div class="content-row">
+            <h2 class="row-title">Popular Movies</h2>
+            <div class="row-grid" id="movies-grid">
+                <div class="loading-container"><div class="spinner"></div></div>
+            </div>
+        </div>
+        <div class="content-row">
+            <h2 class="row-title">Top Rated Movies</h2>
+            <div class="row-grid" id="movies-top">
+                <div class="loading-container"><div class="spinner"></div></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- TV Page -->
+    <div id="page-tv" class="page" style="display:none">
+        <div class="content-row">
+            <h2 class="row-title">Popular TV Shows</h2>
+            <div class="row-grid" id="tv-grid">
+                <div class="loading-container"><div class="spinner"></div></div>
+            </div>
+        </div>
+        <div class="content-row">
+            <h2 class="row-title">Top Rated TV Shows</h2>
+            <div class="row-grid" id="tv-top">
+                <div class="loading-container"><div class="spinner"></div></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Search Page -->
+    <div id="page-search" class="page" style="display:none">
+        <div class="content-row">
+            <h2 class="row-title" id="search-title">Search Results</h2>
+            <div class="row-grid" id="search-grid">
+                <div class="loading-container"><div class="spinner"></div></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal (Detail View) -->
+<div class="modal-overlay" id="modalOverlay" style="display:none">
+    <div class="modal-content">
+        <button class="modal-close" onclick="closeModal()">×</button>
+        <div class="modal-hero-image" id="modalImage"></div>
+        <div class="modal-body">
+            <h2 class="modal-title" id="modalTitle"></h2>
+            <div class="modal-meta" id="modalMeta"></div>
+            <p class="modal-overview" id="modalOverview"></p>
+
+            <!-- Season Selector (TV only) -->
+            <div id="seasonSection" style="display:none">
+                <h3 style="font-size:18px; margin-bottom:12px;">Episodes</h3>
+                <div class="season-selector" id="seasonSelector"></div>
+                <div class="episode-list" id="episodeList">
+                    <div class="loading-container"><div class="spinner"></div></div>
+                </div>
+            </div>
+
+            <button class="modal-play-button" id="modalPlayButton" onclick="playFromModal()">
+                <span>▶</span> Play
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Player View -->
+<div class="player-container" id="playerContainer" style="display:none">
+    <div class="player-header" id="playerHeader">
+        <button class="player-back-button" onclick="closePlayer()">
+            <span>←</span> <span>Back</span>
+        </button>
+        <div class="player-title" id="playerTitle"></div>
+    </div>
+    <video class="video-player" id="videoPlayer" controls autoplay></video>
+</div>
+
+<!-- VPN Status Badge -->
+<div class="vpn-badge" id="vpnBadge">
+    <div class="vpn-dot"></div>
+    <span>VPN Protected · Ad-Free · LookMovie Engine</span>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
