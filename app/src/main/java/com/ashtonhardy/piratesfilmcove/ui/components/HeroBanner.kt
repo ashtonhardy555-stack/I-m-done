@@ -48,6 +48,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -418,7 +419,7 @@ private fun HeroButton(
             // Capture the button's on-screen X so the side-rail handler can
             // see that the hero is at the far-left edge.
             .onGloballyPositioned { coords ->
-                btnXInWindow = coords.positionInWindow.x
+                btnXInWindow = coords.positionInRoot().x
             }
             .then(
                 if (isFocused && isTv) {
