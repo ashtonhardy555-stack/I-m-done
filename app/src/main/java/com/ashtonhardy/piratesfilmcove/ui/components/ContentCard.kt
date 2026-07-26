@@ -40,6 +40,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -177,11 +178,11 @@ fun ContentCard(
             // (always kept current by onGloballyPositioned) and reported to
             // AppRoot via LocalSideRailXReporter in the LaunchedEffect below
             // when this card gains focus. Reporting in a coroutine (not
-            // during layout) is the safe Compose pattern. positionInWindow.x
+            // during layout) is the safe Compose pattern. positionInRoot().x
             // is the card's left edge in px.
             .onGloballyPositioned { coords ->
-                cardXInWindow = coords.positionInWindow.x
-                cardYInWindow = coords.positionInWindow.y
+                cardXInWindow = coords.positionInRoot().x
+                cardYInWindow = coords.positionInRoot().y
             }
             // Shadow is ALWAYS in the chain (structural stability — see the
             // note above). Its elevation animates 0 → 24dp so idle cards pay
