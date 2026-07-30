@@ -1,6 +1,6 @@
 {
   "version": 15,
-  "updated": "2026-07-29T08:14:38Z",
+  "updated": "2026-07-30T08:02:07Z",
   "description": "v15: HEADLESS-ONLY (no WebView). All extraction is pure OkHttp, matching the confirmed-working LookMovieHeadlessExtractor pattern. Disabled all Cloudflare-protected servers that require WebView JS-challenge solving (VidFast, CineSrc, Peachify, MultiEmbed, VidSrc.cc/to, VidZee, VidStorm, SmashyStream, Whvx, Hexa, VidSync, etc.) since pure OkHttp cannot solve CF challenges. Kept non-CF servers + enc-dec.app-backed extractors with dedicated headless code (VidLink, Videasy w/ 10 sub-servers, LordFlix w/ 10 sub-servers + hongkong host fix, KissKh). LookMovie fires first for TV shows. Removed dead false positives (vidsrc.net parking, embed.lol store).",
   "servers": [
     {
@@ -32,7 +32,7 @@
       "movieUrlTemplate": "{base}/movie/{id}",
       "tvUrlTemplate": "{base}/tv/{id}/{season}/{episode}",
       "tier": 1,
-      "reliability": 1,
+      "reliability": 0,
       "cloudflare": false,
       "enabled": false
     },
@@ -208,7 +208,7 @@
       "movieUrlTemplate": "{base}/embed/movie/{id}",
       "tvUrlTemplate": "{base}/embed/tv/{id}/{season}/{episode}",
       "tier": 2,
-      "reliability": 90,
+      "reliability": 96,
       "cloudflare": false,
       "enabled": true
     },
@@ -252,7 +252,7 @@
       "movieUrlTemplate": "{base}/movie/{id}",
       "tvUrlTemplate": "{base}/tv/{id}/{season}/{episode}",
       "tier": 2,
-      "reliability": 40,
+      "reliability": 76,
       "cloudflare": false,
       "enabled": true
     },
@@ -406,7 +406,7 @@
       "movieUrlTemplate": "{base}/embed/movie/{id}",
       "tvUrlTemplate": "{base}/embed/tv/{id}/{season}/{episode}",
       "tier": 3,
-      "reliability": 98,
+      "reliability": 99,
       "cloudflare": false,
       "enabled": true
     },
@@ -505,7 +505,7 @@
       "movieUrlTemplate": "{base}/movie/{id}",
       "tvUrlTemplate": "{base}/tv/{id}/{season}/{episode}",
       "tier": 2,
-      "reliability": 70,
+      "reliability": 88,
       "cloudflare": true,
       "enabled": true
     },
