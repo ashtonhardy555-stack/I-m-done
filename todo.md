@@ -19,5 +19,5 @@
 - [x] Ensure auto-play next episode does NOT trigger ads (guard with isAutoPlay flag)
 
 ## Verify & ship
-- [ ] Verify changes compile-consistent (imports, references)
-- [ ] Commit on a new branch, push, open PR
+- [x] Verify changes compile-consistent (imports, references)
+- [x] Commit on a new branch, push, open PR (#62)
