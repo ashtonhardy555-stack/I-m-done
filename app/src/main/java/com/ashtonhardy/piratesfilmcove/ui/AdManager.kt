@@ -62,10 +62,6 @@ object AdManager {
 
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    // Handler tokens for cancelling the auto-close timers.
-    private val MANUAL_AD_TOKEN = Any()
-    private val NEXT_EPISODE_AD_TOKEN = Any()
-
     // ── Manual-launch interstitial state ────────────────────────────────── //
     @Volatile
     private var loadedManualAd: InterstitialAd? = null
@@ -288,18 +284,22 @@ object AdManager {
         }
     }
 
+    /** Runnable for the manual ad auto-close timer (stored for cancellation). */
+    private val manualAutoCloseRunnable = Runnable {
+        Log.d(TAG, "Manual ad 10s auto-close fired.")
+        currentManualAd = null
+        fireManualDismissed()
+    }
+
     /** Starts the 10-second auto-close timer for the manual ad. */
     private fun startManualAutoClose() {
-        mainHandler.postDelayed({
-            Log.d(TAG, "Manual ad 10s auto-close fired.")
-            currentManualAd = null
-            fireManualDismissed()
-        }, AD_AUTO_CLOSE_SECONDS * 1000, MANUAL_AD_TOKEN)
+        mainHandler.removeCallbacks(manualAutoCloseRunnable)
+        mainHandler.postDelayed(manualAutoCloseRunnable, AD_AUTO_CLOSE_SECONDS * 1000L)
     }
 
     /** Cancels the manual ad auto-close timer (e.g. user dismissed first). */
     private fun cancelManualAutoClose() {
-        mainHandler.removeCallbacksAndMessages(MANUAL_AD_TOKEN)
+        mainHandler.removeCallbacks(manualAutoCloseRunnable)
     }
 
     /** Fires the manual ad dismissed callback once, then clears it. */
@@ -426,18 +426,22 @@ object AdManager {
         }
     }
 
+    /** Runnable for the next-episode ad auto-close timer (stored for cancellation). */
+    private val nextEpisodeAutoCloseRunnable = Runnable {
+        Log.d(TAG, "Next-episode ad 10s auto-close fired.")
+        currentNextEpisodeAd = null
+        fireNextEpisodeDismissed()
+    }
+
     /** Starts the 10-second auto-close timer for the next-episode ad. */
     private fun startNextEpisodeAutoClose() {
-        mainHandler.postDelayed({
-            Log.d(TAG, "Next-episode ad 10s auto-close fired.")
-            currentNextEpisodeAd = null
-            fireNextEpisodeDismissed()
-        }, AD_AUTO_CLOSE_SECONDS * 1000, NEXT_EPISODE_AD_TOKEN)
+        mainHandler.removeCallbacks(nextEpisodeAutoCloseRunnable)
+        mainHandler.postDelayed(nextEpisodeAutoCloseRunnable, AD_AUTO_CLOSE_SECONDS * 1000L)
     }
 
     /** Cancels the next-episode ad auto-close timer (e.g. user dismissed first). */
     private fun cancelNextEpisodeAutoClose() {
-        mainHandler.removeCallbacksAndMessages(NEXT_EPISODE_AD_TOKEN)
+        mainHandler.removeCallbacks(nextEpisodeAutoCloseRunnable)
     }
 
     /** Fires the next-episode ad dismissed callback once, then clears it. */
