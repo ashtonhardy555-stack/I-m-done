@@ -14,3 +14,6 @@ keystore.properties
 
 # Sandbox agent output artifacts
 outputs/
+build_logs.txt
+ci_status.txt
+poll_ci.sh
