@@ -9,7 +9,7 @@ import com.google.android.gms.ads.AdRequest
 import com.google.android.gms.ads.FullScreenContentCallback
 import com.google.android.gms.ads.LoadAdError
 import com.google.android.gms.ads.OnUserEarnedRewardListener
-import com.google.android.gms.ads.RewardItem
+import com.google.android.gms.ads.rewarded.RewardItem
 import com.google.android.gms.ads.rewarded.RewardedAd
 import com.google.android.gms.ads.rewarded.RewardedAdLoadCallback
 import java.util.concurrent.atomic.AtomicBoolean

@@ -20,7 +20,7 @@
 -keep class com.google.android.gms.ads.AdError { *; }
 -keep class com.google.android.gms.ads.FullScreenContentCallback { *; }
 -keep class com.google.android.gms.ads.OnUserEarnedRewardListener { *; }
--keep class com.google.android.gms.ads.RewardItem { *; }
+-keep class com.google.android.gms.ads.rewarded.RewardItem { *; }
 -keep class com.google.android.gms.ads.rewarded.RewardedAd { *; }
 -keep class com.google.android.gms.ads.rewarded.RewardedAdLoadCallback { *; }
 -keep class com.google.android.gms.ads.AdRequest$Builder { *; }
