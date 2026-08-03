@@ -133,9 +133,10 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
 
-    // Google Mobile Ads SDK — used for the interstitial ad shown before
+    // Google Mobile Ads SDK — used for the Rewarded Video ads shown before
     // manually-launched playback (movies / TV episodes clicked by the user).
-    // Auto-play of the next TV episode does NOT trigger an ad (same Activity
-    // instance, no re-launch).
+    // The rewarded ad plays a full-screen video ad in-app (like a YouTube
+    // pre-roll) with a built-in skip button after 5 seconds. Auto-play of
+    // the next TV episode also shows a rewarded ad during the loading gap.
     implementation("com.google.android.gms:play-services-ads:23.3.0")
 }

@@ -182,7 +182,7 @@ class PlayerActivity : ComponentActivity() {
             resumePositionMs: Long = 0L,
             // True ONLY when this launch is an automatic advance to the next
             // TV episode (not a user tap). When true the pre-playback
-            // interstitial ad is suppressed. Manual launches from the UI
+            // rewarded video ad is suppressed. Manual launches from the UI
             // always leave this false so the ad shows before playback.
             isAutoPlay: Boolean = false
         ): Intent = Intent(context, PlayerActivity::class.java).apply {
@@ -282,7 +282,7 @@ class PlayerActivity : ComponentActivity() {
         val resumePositionMs = intent.getLongExtra("RESUME_MS", 0L)
         // True only for an automatic advance to the next TV episode (never a
         // user tap). Manual launches default to false so the pre-playback
-        // interstitial ad is shown; auto-play suppresses it.
+        // rewarded video ad is shown; auto-play suppresses it.
         val isAutoPlay = intent.getBooleanExtra("IS_AUTOPLAY", false)
 
         if (tmdbId == -1) {
@@ -303,12 +303,13 @@ class PlayerActivity : ComponentActivity() {
         progressPosterPath = posterUrl?.let { extractTmdbPath(it) }
         progressBackdropPath = backdropUrl?.let { extractTmdbPath(it) }
 
-        // ── Pre-playback interstitial ad (manual launches only) ────────── //
+        // ── Pre-playback rewarded video ad (manual launches only) ──────── //
         // For a manual (user-tapped) launch we reset the per-launch ad guard.
         // The actual ad is shown from inside PlayerScreen via a LaunchedEffect,
         // and extraction is gated on an `adGateOpen` Compose state so playback
-        // does NOT begin resolving until the ad is dismissed (user tap or the
-        // 10-second auto-close). Auto-play launches skip the manual ad.
+        // does NOT begin resolving until the rewarded video ad is dismissed
+        // (user skips/closes after 5s, ad finishes, or load failure/timeout).
+        // Auto-play launches skip the manual ad.
         if (!isAutoPlay) {
             com.ashtonhardy.piratesfilmcove.ui.AdManager.resetForNewLaunch()
         }
@@ -522,11 +523,11 @@ fun PlayerScreen(
     val scope = rememberCoroutineScope()
 
     // --- Ad gate ------------------------------------------------------- //
-    // For manual (user-tapped) launches the pre-playback interstitial ad is
-    // shown before extraction begins. `adGateOpen` starts false so the
+    // For manual (user-tapped) launches the pre-playback rewarded video ad
+    // is shown before extraction begins. `adGateOpen` starts false so the
     // extraction LaunchedEffect is blocked; it flips to true inside the ad's
-    // onAdDismissed callback (user dismissal OR 10-second auto-close OR load
-    // failure/timeout). Auto-play launches start with the gate already open.
+    // onAdDismissed callback (user skips/closes the ad after 5s, ad finishes,
+    // or load failure/timeout). Auto-play launches start with the gate open.
     var adGateOpen by remember { mutableStateOf(isAutoPlayLaunch) }
 
     // --- Player + extraction state ---------------------------------- //
@@ -627,25 +628,28 @@ fun PlayerScreen(
     }
 
     // --------------------------------------------------------------- //
-    //  Pre-playback interstitial ad (manual launches only)             //
+    //  Pre-playback rewarded video ad (manual launches only)           //
     // --------------------------------------------------------------- //
-    // Show the manual interstitial for a user-tapped launch. Extraction is
-    // gated on `adGateOpen` below — it will NOT run until this callback fires
-    // (ad dismissed by user tap, or load failure/timeout). The ad does NOT
-    // auto-close — the user must close it, and only then does the video start
-    // loading. Auto-play launches skip this entirely.
+    // Show the manual rewarded video ad for a user-tapped launch. It plays
+    // full-screen in the app (like a YouTube pre-roll) with a skip button
+    // that appears after 5 seconds. Extraction is gated on `adGateOpen`
+    // below — it will NOT run until this callback fires (ad skipped/closed
+    // by the user after 5s, ad finished, or load failure/timeout). The real
+    // video only starts loading after the ad is gone. Auto-play launches
+    // skip this entirely.
     LaunchedEffect(isAutoPlayLaunch) {
         if (!isAutoPlayLaunch) {
-            // Show a message on the loading screen so the user knows an ad
-            // is about to play and the video will follow it.
-            infoMessage = "Your video will play after a short ad…"
+            // Show a message on the loading screen so the user knows a short
+            // skippable video ad is about to play and the video will follow.
+            infoMessage = "Your video will play after a short ad — you can skip in 5 seconds…"
             (localContext as? android.app.Activity)?.let { activity ->
-                com.ashtonhardy.piratesfilmcove.ui.AdManager.showInterstitialBeforePlayback(
+                com.ashtonhardy.piratesfilmcove.ui.AdManager.showRewardedBeforePlayback(
                     activity = activity,
                     isAutoPlay = false
                 ) {
-                    // onAdDismissed — the user closed the ad, open the gate
-                    // so extraction can begin.
+                    // onAdDismissed — the user skipped/closed the ad (or it
+                    // finished / failed to load). Open the gate so extraction
+                    // can begin and the real video starts.
                     infoMessage = null
                     adGateOpen = true
                 }
@@ -1411,16 +1415,19 @@ fun PlayerScreen(
                             }
                             Log.d("Player", "Auto-playing next episode: S$nextSeason E$nextEp")
                             nextEpisodeLabel = "Next episode: S$nextSeason E$nextEp"
-                            // Show the next-episode interstitial ad during the
-                            // auto-load gap (between this episode ending and the
-                            // next one starting to play). It is automatically
-                            // suppressed the moment the next episode actually
-                            // starts playing (STATE_READY → AdManager.onPlaybackStarted).
+                            // Show the next-episode rewarded video ad during
+                            // the auto-load gap (between this episode ending
+                            // and the next one starting to play). It plays
+                            // full-screen in the app (like a YouTube ad) with
+                            // a skip button after 5 seconds. It is
+                            // automatically suppressed the moment the next
+                            // episode actually starts playing (STATE_READY →
+                            // AdManager.onPlaybackStarted).
                             //
                             // The next episode does NOT begin resolving/playing
-                            // until this callback fires (ad dismissed by user
-                            // tap, 10-second auto-close, or load failure). We
-                            // move the episode-advancement code INSIDE the
+                            // until this callback fires (ad skipped/closed by
+                            // the user after 5s, ad finished, or load failure).
+                            // We move the episode-advancement code INSIDE the
                             // callback so auto-playback waits for the ad.
                             (localContext as? android.app.Activity)?.let { activity ->
                                 com.ashtonhardy.piratesfilmcove.ui.AdManager

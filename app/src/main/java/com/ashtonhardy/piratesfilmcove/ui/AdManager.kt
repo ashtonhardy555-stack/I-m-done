@@ -8,64 +8,59 @@ import com.google.android.gms.ads.AdError
 import com.google.android.gms.ads.AdRequest
 import com.google.android.gms.ads.FullScreenContentCallback
 import com.google.android.gms.ads.LoadAdError
-import com.google.android.gms.ads.interstitial.InterstitialAd
-import com.google.android.gms.ads.interstitial.InterstitialAdLoadCallback
+import com.google.android.gms.ads.OnUserEarnedRewardListener
+import com.google.android.gms.ads.RewardItem
+import com.google.android.gms.ads.rewarded.RewardedAd
+import com.google.android.gms.ads.rewarded.RewardedAdLoadCallback
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * AdManager — owns the AdMob interstitial ads used around playback.
+ * AdManager — owns the AdMob **Rewarded Video** ads used around playback.
  *
- * Two REAL ad units (no test ads):
- *  1. [INTERSTITIAL_AD_UNIT_ID] — shown before a **manually-tapped** movie or
- *     TV episode starts (a fresh PlayerActivity launch). Never shown for
- *     auto-play.
- *  2. [NEXT_EPISODE_AD_UNIT_ID] — shown while the player **auto-loads the next
- *     episode** of a show (the gap between one episode ending and the next
- *     beginning to play). It is dismissed/suppressed the moment the next
- *     episode actually starts playing.
+ * A rewarded video ad plays a full-screen video ad **inside the app** (just like
+ * a YouTube pre-roll ad) and shows a built-in **skip / close button after 5
+ * seconds**. The real movie/show video does NOT start loading until the user
+ * skips or closes the ad (the dismissal callback opens the playback gate).
+ *
+ * Two ad slots share the same ad unit:
+ *  1. [REWARDED_AD_UNIT_ID] — shown before a **manually-tapped** movie or TV
+ *     episode starts (a fresh PlayerActivity launch). Never shown for auto-play.
+ *  2. The same unit is reused for the **next-episode** auto-play gap ad.
  *
  * Critical behaviours:
+ *  • "Plays like a YouTube ad": The rewarded video ad plays full-screen in the
+ *    app. After 5 seconds the SDK reveals a close button (the same UX as a
+ *    YouTube skippable ad). Tapping it dismisses the ad and fires
+ *    [onAdDismissedFullScreenContent], which opens the playback gate so the
+ *    real video starts.
+ *  • "Video only plays after the ad is closed": Both show methods accept an
+ *    [onAdDismissed] callback that fires when the ad is dismissed (by user
+ *    skip/close, on load failure, or on poll timeout). The caller gates
+ *    playback (stream resolution) on this callback.
  *  • "All ads stop when playback starts": [onPlaybackStarted] is called by
  *    PlayerActivity the instant ExoPlayer reports STATE_READY. That flips a
- *    [playbackActive] gate which prevents any not-yet-shown ad from appearing
- *    and cancels pending requests.
- *  • "Auto-playback won't start until the ad is closed": Both show methods
- *    accept an [onAdDismissed] callback that fires when the ad is dismissed
- *    (by user tap, or on load failure / timeout). The caller gates playback
- *    on this callback so the next episode does NOT begin resolving/playing
- *    until the ad is gone.
- *  • "Ads stay until the user closes them": There is no auto-close. Each
- *    interstitial remains fullscreen until the user taps to dismiss it, at
- *    which point the dismissal callback fires and playback proceeds.
+ *    [playbackActive] gate which prevents any not-yet-shown ad from appearing.
  */
 object AdManager {
 
     private const val TAG = "AdManager"
 
     /**
-     * AdMob interstitial ad-unit ID shown before a **manual** playback launch
-     * (user taps a movie/show). Uses the same proven ad unit as the next-
-     * episode ad because that is the unit AdMob is actually serving fill for;
-     * the previously-tried unit (6722496029) never received fill, so no ad
-     * ever appeared and the poll just delayed playback. App ID (with "~")
-     * lives in AndroidManifest.xml.
+     * AdMob **Rewarded Video** ad-unit ID. This is the unit the user asked us
+     * to use (`7919374650`). Rewarded video ads play a full-screen video ad
+     * in-app with a built-in skip / close button that appears after 5 seconds
+     * — exactly like a YouTube pre-roll ad. Both the manual pre-playback ad
+     * and the next-episode auto-play ad use this unit. The AdMob app ID (with
+     * "~") lives in AndroidManifest.xml.
      */
-    const val INTERSTITIAL_AD_UNIT_ID = "ca-app-pub-8069271908902310/6882278128"
+    const val REWARDED_AD_UNIT_ID = "ca-app-pub-8069271908902310/7919374650"
 
     /**
-     * AdMob interstitial ad-unit ID shown while the player **auto-loads the
-     * next episode** of a show (the post-STATE_ENDED loading gap). Stopped the
-     * moment the next episode starts playing.
-     */
-    const val NEXT_EPISODE_AD_UNIT_ID = "ca-app-pub-8069271908902310/6882278128"
-
-    /**
-     * How long [showInterstitialBeforePlayback] polls waiting for the manual
-     * ad to finish loading before giving up (and letting playback proceed
-     * without an ad). Kept short (5s) so playback is never delayed long when
-     * no ad is available. The manual ad uses the same proven ad unit as the
-     * next-episode ad, which reliably receives fill, so it is normally
-     * preloaded well before the user taps anything.
+     * How long [showRewardedBeforePlayback] polls waiting for the manual ad to
+     * finish loading before giving up (and letting playback proceed without an
+     * ad). Kept short (5s) so playback is never delayed long when no ad is
+     * available. The ad is preloaded at app start (warmUp) so it is normally
+     * ready well before the user taps anything.
      */
     private const val MANUAL_AD_POLL_TIMEOUT_MS = 5_000L
 
@@ -80,9 +75,9 @@ object AdManager {
 
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    // ── Manual-launch interstitial state ────────────────────────────────── //
+    // ── Manual-launch rewarded ad state ──────────────────────────────────── //
     @Volatile
-    private var loadedManualAd: InterstitialAd? = null
+    private var loadedManualAd: RewardedAd? = null
     private val manualLoading = AtomicBoolean(false)
     /** Prevents double-showing across an Activity recreation for one launch. */
     private val manualAlreadyShown = AtomicBoolean(false)
@@ -91,13 +86,13 @@ object AdManager {
 
     /** The ad currently fullscreen, if any. */
     @Volatile
-    private var currentManualAd: InterstitialAd? = null
+    private var currentManualAd: RewardedAd? = null
     @Volatile
     private var manualAdDismissedCallback: (() -> Unit)? = null
 
-    // ── Next-episode interstitial state ─────────────────────────────────── //
+    // ── Next-episode rewarded ad state ───────────────────────────────────── //
     @Volatile
-    private var loadedNextEpisodeAd: InterstitialAd? = null
+    private var loadedNextEpisodeAd: RewardedAd? = null
     private val nextEpisodeLoading = AtomicBoolean(false)
     /** True when a "show the next-episode ad" request is pending but the ad
      *  wasn't loaded yet — we honour it once the ad loads, unless playback
@@ -106,7 +101,7 @@ object AdManager {
 
     /** The ad currently fullscreen, if any. */
     @Volatile
-    private var currentNextEpisodeAd: InterstitialAd? = null
+    private var currentNextEpisodeAd: RewardedAd? = null
     @Volatile
     private var nextEpisodeAdDismissedCallback: (() -> Unit)? = null
 
@@ -119,7 +114,7 @@ object AdManager {
     @Volatile
     private var appContext: android.content.Context? = null
 
-    // ── Playback gate ───────────────────────────────────────────────────── //
+    // ── Playback gate ────────────────────────────────────────────────────── //
     // True while a show/movie is actively playing. While true, no ad is shown
     // (a pending next-episode ad is cancelled). Set by [onPlaybackStarted],
     // cleared by [resetForNewLaunch] / when a loading gap begins.
@@ -131,7 +126,7 @@ object AdManager {
 
     /**
      * Initialises the Mobile Ads SDK and kicks off a background preload of both
-     * interstitials so they are ready when needed. Safe to call multiple times.
+     * rewarded ads so they are ready when needed. Safe to call multiple times.
      */
     fun init(context: android.content.Context) {
         if (initialised) return
@@ -149,7 +144,7 @@ object AdManager {
     /**
      * Best-effort "warm up" — call this as early as possible (e.g. from the
      * home screen becoming visible) to make sure the Mobile Ads SDK is
-     * initialised and the manual interstitial is preloading. No-op if already
+     * initialised and the manual rewarded ad is preloading. No-op if already
      * done. This exists so the manual ad has the maximum possible head start
      * before the user taps a movie/show, which is the single biggest factor in
      * whether the ad is ready in time.
@@ -163,10 +158,10 @@ object AdManager {
         }
     }
 
-    // ── Preloading ──────────────────────────────────────────────────────── //
+    // ── Preloading ───────────────────────────────────────────────────────── //
 
     /**
-     * Loads the manual-launch interstitial if one isn't already loaded/loading.
+     * Loads the manual-launch rewarded ad if one isn't already loaded/loading.
      * If the load fails, it is automatically retried (up to
      * [MANUAL_AD_MAX_RETRIES] times with a [MANUAL_AD_RETRY_DELAY_MS] gap) so a
      * transient network/SDK hiccup doesn't leave the manual ad permanently
@@ -175,16 +170,16 @@ object AdManager {
     fun preloadManualAd(context: android.content.Context) {
         val ctx = context.applicationContext
         if (loadedManualAd != null || !manualLoading.compareAndSet(false, true)) return
-        InterstitialAd.load(
+        RewardedAd.load(
             ctx,
-            INTERSTITIAL_AD_UNIT_ID,
+            REWARDED_AD_UNIT_ID,
             AdRequest.Builder().build(),
-            object : InterstitialAdLoadCallback() {
-                override fun onAdLoaded(ad: InterstitialAd) {
+            object : RewardedAdLoadCallback() {
+                override fun onAdLoaded(ad: RewardedAd) {
                     loadedManualAd = ad
                     manualLoading.set(false)
                     manualLoadRetries = 0
-                    Log.d(TAG, "Manual interstitial loaded.")
+                    Log.d(TAG, "Manual rewarded ad loaded.")
                     // If a manual show request was polling waiting for this ad,
                     // the poll thread will pick up loadedManualAd on its next
                     // iteration — no extra wiring needed here.
@@ -193,7 +188,7 @@ object AdManager {
                 override fun onAdFailedToLoad(error: LoadAdError) {
                     loadedManualAd = null
                     manualLoading.set(false)
-                    Log.w(TAG, "Manual interstitial failed (attempt ${manualLoadRetries + 1}): code=${error.code} msg=${error.message}")
+                    Log.w(TAG, "Manual rewarded ad failed (attempt ${manualLoadRetries + 1}): code=${error.code} msg=${error.message}")
                     // Auto-retry so a transient failure doesn't permanently
                     // kill the manual ad for the session.
                     if (manualLoadRetries < MANUAL_AD_MAX_RETRIES) {
@@ -204,25 +199,25 @@ object AdManager {
                             appContext?.let { preloadManualAd(it) }
                         }, MANUAL_AD_RETRY_DELAY_MS)
                     } else {
-                        Log.w(TAG, "Manual interstitial gave up after $MANUAL_AD_MAX_RETRIES retries.")
+                        Log.w(TAG, "Manual rewarded ad gave up after $MANUAL_AD_MAX_RETRIES retries.")
                     }
                 }
             }
         )
     }
 
-    /** Loads the next-episode interstitial if one isn't already loaded/loading. */
+    /** Loads the next-episode rewarded ad if one isn't already loaded/loading. */
     fun preloadNextEpisodeAd(context: android.content.Context) {
         if (loadedNextEpisodeAd != null || !nextEpisodeLoading.compareAndSet(false, true)) return
-        InterstitialAd.load(
+        RewardedAd.load(
             context.applicationContext,
-            NEXT_EPISODE_AD_UNIT_ID,
+            REWARDED_AD_UNIT_ID,
             AdRequest.Builder().build(),
-            object : InterstitialAdLoadCallback() {
-                override fun onAdLoaded(ad: InterstitialAd) {
+            object : RewardedAdLoadCallback() {
+                override fun onAdLoaded(ad: RewardedAd) {
                     loadedNextEpisodeAd = ad
                     nextEpisodeLoading.set(false)
-                    Log.d(TAG, "Next-episode interstitial loaded.")
+                    Log.d(TAG, "Next-episode rewarded ad loaded.")
                     // If a show request was pending (the next episode started
                     // loading before the ad was ready), honour it now — unless
                     // playback has already started in the meantime.
@@ -235,17 +230,23 @@ object AdManager {
                 override fun onAdFailedToLoad(error: LoadAdError) {
                     loadedNextEpisodeAd = null
                     nextEpisodeLoading.set(false)
-                    Log.w(TAG, "Next-episode interstitial failed: code=${error.code} msg=${error.message}")
+                    Log.w(TAG, "Next-episode rewarded ad failed: code=${error.code} msg=${error.message}")
                 }
             }
         )
     }
 
-    // ── Showing ─────────────────────────────────────────────────────────── //
+    // ── Showing ──────────────────────────────────────────────────────────── //
 
     /**
-     * Shows the manual-launch interstitial before playback, **once per manual
-     * launch**. Call from PlayerScreen for a user-initiated launch only.
+     * Shows the manual-launch rewarded video ad before playback, **once per
+     * manual launch**. Call from PlayerScreen for a user-initiated launch only.
+     *
+     * The rewarded ad plays a full-screen video ad in-app (like a YouTube
+     * pre-roll). After 5 seconds the SDK reveals a skip / close button. When
+     * the user taps it (or the ad finishes naturally) the
+     * [onAdDismissedFullScreenContent] callback fires → [onAdDismissed] is
+     * invoked → the caller opens the playback gate so the real video starts.
      *
      * If the ad is not loaded yet, a background thread polls every
      * [AD_POLL_STEP_MS] for up to [MANUAL_AD_POLL_TIMEOUT_MS]; if it loads
@@ -255,11 +256,11 @@ object AdManager {
      * initial load gets a second chance within the poll window.
      *
      * @param isAutoPlay True only for an auto-advance launch — suppresses the ad.
-     * @param onAdDismissed Fires when the ad is dismissed (user tap, load
+     * @param onAdDismissed Fires when the ad is dismissed (user skip/close, load
      *     failure, or poll timeout). The caller uses this to gate playback
      *     start.
      */
-    fun showInterstitialBeforePlayback(
+    fun showRewardedBeforePlayback(
         activity: Activity,
         isAutoPlay: Boolean,
         onAdDismissed: () -> Unit = {}
@@ -273,17 +274,17 @@ object AdManager {
         if (!manualAlreadyShown.compareAndSet(false, true)) {
             // Already shown for this launch — do NOT fire onAdDismissed here.
             // Firing it would open the playback gate prematurely (before the
-            // already-in-flight ad is dismissed by the user), which is what
-            // caused videos to start playing under the ad. The in-flight
-            // show's own onAdDismissedFullScreenContent callback will open the
-            // gate when the user actually closes the ad.
+            // already-in-flight ad is dismissed by the user), which would
+            // cause the video to start playing under the ad. The in-flight
+            // show's own onAdDismissedFullScreenContent callback will open
+            // the gate when the user actually closes/skips the ad.
             Log.d(TAG, "Manual ad already requested for this launch — ignoring duplicate request (gate stays closed).")
             return
         }
 
         val ad = loadedManualAd
         if (ad == null) {
-            Log.d(TAG, "Manual interstitial not ready — kicking off preload + polling for up to ${MANUAL_AD_POLL_TIMEOUT_MS}ms.")
+            Log.d(TAG, "Manual rewarded ad not ready — kicking off preload + polling for up to ${MANUAL_AD_POLL_TIMEOUT_MS}ms.")
             // Kick off a fresh load right now in case the initial preload
             // failed or hasn't run yet (e.g. user tapped very quickly after
             // a cold launch). preloadManualAd is a no-op if one is already
@@ -324,10 +325,10 @@ object AdManager {
         }.start()
     }
 
-    /** Internal: presents an already-loaded manual interstitial. */
+    /** Internal: presents an already-loaded manual rewarded ad. */
     private fun showLoadedManualAd(
         activity: Activity,
-        ad: InterstitialAd,
+        ad: RewardedAd,
         onAdDismissed: () -> Unit
     ) {
         manualAdDismissedCallback = onAdDismissed
@@ -337,7 +338,11 @@ object AdManager {
 
         ad.fullScreenContentCallback = object : FullScreenContentCallback() {
             override fun onAdDismissedFullScreenContent() {
-                Log.d(TAG, "Manual ad dismissed by user — firing callback.")
+                // The user skipped/closed the ad (or it finished naturally).
+                // This fires after the 5-second skip button is tapped, OR
+                // when the ad plays to completion — either way the real
+                // video can now start.
+                Log.d(TAG, "Manual ad dismissed by user — firing callback (video will start now).")
                 currentManualAd = null
                 fireManualDismissed()
             }
@@ -349,13 +354,22 @@ object AdManager {
             }
 
             override fun onAdShowedFullScreenContent() {
-                // No auto-close — the ad stays fullscreen until the user
-                // taps to close it. Playback is gated on the dismissal
-                // callback so the video will NOT start until then.
-                Log.d(TAG, "Manual ad showed fullscreen — waiting for user to close it.")
+                // The rewarded video ad is now playing full-screen. After 5
+                // seconds the SDK will reveal a skip / close button (just
+                // like a YouTube ad). Playback is gated on the dismissal
+                // callback so the real video will NOT start until the user
+                // skips/closes the ad.
+                Log.d(TAG, "Manual rewarded ad is playing — skip button appears after 5s.")
             }
         }
-        runCatching { ad.show(activity) }.onFailure {
+        runCatching {
+            // show() with an OnUserEarnedRewardListener so the rewarded ad
+            // can be displayed (required by the API). We don't use the
+            // reward — the "reward" here is simply unlocking the video.
+            ad.show(activity) { rewardItem: RewardItem ->
+                Log.d(TAG, "Ad reward earned: ${rewardItem.amount} ${rewardItem.type} — unlocking video.")
+            }
+        }.onFailure {
             Log.w(TAG, "Manual ad.show() threw: ${it.message}")
             currentManualAd = null
             fireManualDismissed()
@@ -370,18 +384,19 @@ object AdManager {
         cb?.invoke()
     }
 
-    // ── Next-episode ad ─────────────────────────────────────────────────── //
+    // ── Next-episode ad ──────────────────────────────────────────────────── //
 
     /**
-     * Shows the next-episode interstitial **during the auto-load gap** — i.e.
-     * right after one episode ends and the next begins resolving. Call this
-     * from PlayerActivity's onEpisodeEnded path, BEFORE the next episode
-     * starts playing. The ad is automatically suppressed/dismissed the moment
-     * playback starts (see [onPlaybackStarted]).
+     * Shows the next-episode rewarded video ad **during the auto-load gap** —
+     * i.e. right after one episode ends and the next begins resolving. Call
+     * this from PlayerActivity's onEpisodeEnded path, BEFORE the next episode
+     * starts playing. The ad plays full-screen (YouTube-style) with a skip
+     * button after 5 seconds; the next episode does NOT begin resolving/playing
+     * until the user skips/closes the ad.
      *
-     * @param onAdDismissed Fires when the ad is dismissed (user tap, or load
-     *     failure). The caller should advance to the next episode INSIDE this
-     *     callback so auto-playback does not begin until the ad is closed.
+     * @param onAdDismissed Fires when the ad is dismissed (user skip/close, or
+     *     load failure). The caller should advance to the next episode INSIDE
+     *     this callback so auto-playback does not begin until the ad is closed.
      */
     fun showNextEpisodeAdDuringLoad(
         activity: Activity,
@@ -438,7 +453,7 @@ object AdManager {
         }.start()
     }
 
-    /** Internal: actually presents an already-loaded next-episode interstitial. */
+    /** Internal: actually presents an already-loaded next-episode rewarded ad. */
     private fun showLoadedNextEpisodeAd(activity: Activity) {
         val ad = loadedNextEpisodeAd
         if (ad == null) {
@@ -459,6 +474,8 @@ object AdManager {
 
         ad.fullScreenContentCallback = object : FullScreenContentCallback() {
             override fun onAdDismissedFullScreenContent() {
+                // The user skipped/closed the ad (skip button after 5s) or it
+                // finished. The next episode can now begin resolving/playing.
                 Log.d(TAG, "Next-episode ad dismissed by user — firing callback.")
                 currentNextEpisodeAd = null
                 fireNextEpisodeDismissed()
@@ -471,13 +488,18 @@ object AdManager {
             }
 
             override fun onAdShowedFullScreenContent() {
-                // No auto-close — the ad stays fullscreen until the user
-                // taps to close it. The next episode does NOT begin
-                // resolving/playing until this dismissal fires.
-                Log.d(TAG, "Next-episode ad showed fullscreen — waiting for user to close it.")
+                // The rewarded video ad is now playing full-screen. After 5
+                // seconds the SDK reveals a skip / close button. The next
+                // episode does NOT begin resolving/playing until this
+                // dismissal fires.
+                Log.d(TAG, "Next-episode rewarded ad is playing — skip button appears after 5s.")
             }
         }
-        runCatching { ad.show(activity) }.onFailure {
+        runCatching {
+            ad.show(activity) { rewardItem: RewardItem ->
+                Log.d(TAG, "Next-episode ad reward earned: ${rewardItem.amount} ${rewardItem.type}.")
+            }
+        }.onFailure {
             Log.w(TAG, "Next-episode ad.show() threw: ${it.message}")
             currentNextEpisodeAd = null
             fireNextEpisodeDismissed()
@@ -494,7 +516,7 @@ object AdManager {
         cb?.invoke()
     }
 
-    // ── Playback-start gate (the "ads stop when playback starts" hook) ──── //
+    // ── Playback-start gate (the "ads stop when playback starts" hook) ────── //
 
     /**
      * Called by PlayerActivity the instant the selected show/movie actually
@@ -502,7 +524,7 @@ object AdManager {
      *  • cancels any pending next-episode ad that hasn't been shown yet,
      *  • ensures no ad is presented on top of playing video.
      *
-     * If an interstitial is already fullscreen (shown during the loading gap),
+     * If a rewarded ad is already fullscreen (shown during the loading gap),
      * it remains until the user dismisses it — at which point the already-
      * buffered/playing video is revealed. We do not show any further ad until
      * the next loading gap.
@@ -514,7 +536,7 @@ object AdManager {
     }
 
     /**
-     * Resets the per-launch "already shown" guard for the manual interstitial.
+     * Resets the per-launch "already shown" guard for the manual ad.
      * Called by PlayerActivity when a brand-new manual launch begins.
      */
     fun resetForNewLaunch() {

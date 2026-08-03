@@ -37,8 +37,8 @@
         android:banner="@mipmap/ic_launcher"
         android:usesCleartextTraffic="true">
 
-        <!-- Google AdMob App ID. The "/6722496029" ad-unit ID is configured
-             at runtime in AdManager (INTERSTITIAL_AD_UNIT_ID). -->
+        <!-- Google AdMob App ID. The "/7919374650" rewarded video ad-unit ID
+             is configured at runtime in AdManager (REWARDED_AD_UNIT_ID). -->
         <meta-data
             android:name="com.google.android.gms.ads.APPLICATION_ID"
             android:value="ca-app-pub-8069271908902310~6722496029" />
