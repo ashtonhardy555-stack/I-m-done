@@ -1328,6 +1328,11 @@ fun PlayerScreen(
                     progressPosterPath = posterUrl?.let { extractTmdbPath(it) },
                     progressBackdropPath = backdropUrl?.let { extractTmdbPath(it) },
                     onPlayingChange = { playing -> isPlaying = playing },
+                    // The instant the selected show/movie starts playing
+                    // (STATE_READY), stop all ads so nothing overlays the video.
+                    onPlaybackStart = {
+                        com.ashtonhardy.piratesfilmcove.ui.AdManager.onPlaybackStarted()
+                    },
                     onEpisodeEnded = {
                         // ── Next-episode auto-play (TV shows only) ────────── //
                         // Fired by ExoPlayerView when playback reaches
@@ -1371,6 +1376,15 @@ fun PlayerScreen(
                             }
                             Log.d("Player", "Auto-playing next episode: S$nextSeason E$nextEp")
                             nextEpisodeLabel = "Next episode: S$nextSeason E$nextEp"
+                            // Show the next-episode interstitial ad during the
+                            // auto-load gap (between this episode ending and the
+                            // next one starting to play). It is automatically
+                            // suppressed the moment the next episode actually
+                            // starts playing (STATE_READY → AdManager.onPlaybackStarted).
+                            (localContext as? android.app.Activity)?.let {
+                                com.ashtonhardy.piratesfilmcove.ui.AdManager
+                                    .showNextEpisodeAdDuringLoad(it)
+                            }
                             // Reset extraction state for the new episode.
                             streamUrl = null
                             streamHeaders = emptyMap()
@@ -1930,7 +1944,11 @@ private fun ExoPlayerView(
     progressBackdropPath: String? = null,
     onPlayingChange: (Boolean) -> Unit = {},
     onPlayerError: (isFatal: Boolean) -> Unit = {},
-    onEpisodeEnded: () -> Unit = {}
+    onEpisodeEnded: () -> Unit = {},
+    // Fired the instant ExoPlayer reaches STATE_READY (the first frame of the
+    // selected show/movie renders) — used to stop all ads so nothing ever
+    // overlays playing video.
+    onPlaybackStart: () -> Unit = {}
 ) {
     var player: ExoPlayer? by remember { mutableStateOf(null) }
     var trackSelector: DefaultTrackSelector? by remember { mutableStateOf(null) }
@@ -1963,6 +1981,10 @@ private fun ExoPlayerView(
     // version. Fired when playback reaches STATE_ENDED so PlayerScreen can
     // auto-play the next TV episode (unless the user has left the player).
     val episodeEndedHandler = rememberUpdatedState(onEpisodeEnded)
+
+    // Fired the instant playback reaches STATE_READY so the parent can stop
+    // all ads (no ad ever overlays the playing video).
+    val playbackStartHandler = rememberUpdatedState(onPlaybackStart)
 
     // ── Periodic watch-progress saver ─────────────────────────────── //
     // While the player is alive and actively playing, poll its position every
@@ -2153,6 +2175,13 @@ private fun ExoPlayerView(
                                 Log.d("ExoPlayer", "State: $state")
                                 if (state == Player.STATE_READY) {
                                     isReady = true
+                                    // Playback of the selected show/movie has
+                                    // started → stop all ads so nothing ever
+                                    // overlays the playing video. This both
+                                    // suppresses any pending next-episode ad
+                                    // and guarantees the manual-launch ad is
+                                    // never shown on top of playing content.
+                                    playbackStartHandler.value.invoke()
                                     // Playback successfully started → reset the
                                     // transient retry counter so a later stall
                                     // gets a fresh allowance of retries.

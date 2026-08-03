@@ -11,60 +11,86 @@ import com.google.android.gms.ads.interstitial.InterstitialAdLoadCallback
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * AdManager — owns the AdMob interstitial ad shown before playback.
+ * AdManager — owns the AdMob interstitial ads used around playback.
  *
- * Behaviour the product requires:
- *  • An interstitial ad is shown the first time the user **manually** taps a
- *    movie or TV episode to watch it (a fresh PlayerActivity launch).
- *  • The ad is **NOT** shown when the player auto-plays the next episode of a
- *    show — that advance happens inside the same PlayerActivity instance
- *    (on STATE_ENDED the extraction LaunchedEffect simply re-fires), so
- *    PlayerActivity.onCreate() — the only place that calls
- *    [showInterstitialBeforePlayback] — never runs again for the auto-play.
- *    This keeps the binge experience ad-free exactly as requested.
+ * Two ad units:
+ *  1. [INTERSTITIAL_AD_UNIT_ID] — shown before a **manually-tapped** movie or
+ *     TV episode starts (a fresh PlayerActivity launch). Never shown for
+ *     auto-play.
+ *  2. [NEXT_EPISODE_AD_UNIT_ID] — shown while the player **auto-loads the next
+ *     episode** of a show (the gap between one episode ending and the next
+ *     beginning to play). It is dismissed/suppressed the moment the next
+ *     episode actually starts playing.
+ *
+ * Critical behaviour — "all ads stop when playback starts":
+ *  • [onPlaybackStarted] is called by PlayerActivity the instant ExoPlayer
+ *    reports STATE_READY (the first frame of the selected show/movie renders).
+ *  • That flips a [playbackActive] gate which:
+ *      – prevents any ad that has NOT yet been shown from being shown, and
+ *      – clears any pending "show next-episode ad" request,
+ *    so no ad ever appears on top of playing video. If an interstitial is
+ *    already fullscreen (it was shown during the loading gap), the user
+ *    dismisses it to reveal the already-buffered video underneath; once
+ *    dismissed we do not show another until the next loading gap.
  *
  * Implementation notes:
  *  • The Mobile Ads SDK is initialised once in
- *    PiratesfilmCoveApplication.onCreate() via [init].
- *  • The interstitial is preloaded in the background right after init so it is
- *    usually ready by the time the user taps something. If it isn't ready yet
- *    when a manual launch happens, we skip the ad and just play — we never
- *    block playback on a network ad load (better UX, and matches "don't show
- *    ads when auto-playing" spirit of never getting in the way of the video).
- *  • A per-show flag ([alreadyShownThisSession]) guards against showing the ad
- *    more than once for a single manual launch, even if onCreate runs twice
- *    (e.g. a config-change recreation).
+ *    PiratesfilmCoveApplication.onCreate() via [init], which also preloads both
+ *    interstitials so they are usually ready when needed.
+ *  • Ad loads are non-blocking: if an ad isn't ready when its show moment
+ *    arrives, we simply skip it (and keep preloading) — playback is never
+ *    blocked on a network ad load.
  */
 object AdManager {
 
     private const val TAG = "AdManager"
 
     /**
-     * The AdMob interstitial ad-unit ID for this app.
-     * App ID (with "~") lives in AndroidManifest.xml; this is the ad unit
-     * (with "/") that identifies the interstitial placement.
+     * AdMob interstitial ad-unit ID shown before a **manual** playback launch
+     * (user taps a movie/show). App ID (with "~") lives in AndroidManifest.xml.
      */
     const val INTERSTITIAL_AD_UNIT_ID = "ca-app-pub-8069271908902310/6722496029"
 
-    /** The currently loaded interstitial, or null while loading / after it
-     *  has been shown and consumed. */
+    /**
+     * AdMob interstitial ad-unit ID shown while the player **auto-loads the
+     * next episode** of a show (the post-STATE_ENDED loading gap). Stopped the
+     * moment the next episode starts playing.
+     */
+    const val NEXT_EPISODE_AD_UNIT_ID = "ca-app-pub-8069271908902310/6882278128"
+
+    // ── Manual-launch interstitial state ──────────────────────────────── //
     @Volatile
-    private var loadedAd: InterstitialAd? = null
-
-    /** True while a load is in flight, to avoid stacking duplicate requests. */
-    private val loading = AtomicBoolean(false)
-
+    private var loadedManualAd: InterstitialAd? = null
+    private val manualLoading = AtomicBoolean(false)
     /** Prevents double-showing across an Activity recreation for one launch. */
-    private val alreadyShownThisSession = AtomicBoolean(false)
+    private val manualAlreadyShown = AtomicBoolean(false)
+
+    // ── Next-episode interstitial state ───────────────────────────────── //
+    @Volatile
+    private var loadedNextEpisodeAd: InterstitialAd? = null
+    private val nextEpisodeLoading = AtomicBoolean(false)
+    /** True when a "show the next-episode ad" request is pending but the ad
+     *  wasn't loaded yet — we honour it once the ad loads, unless playback
+     *  has already started by then. */
+    private val nextEpisodeShowPending = AtomicBoolean(false)
 
     /** Whether the SDK has been initialised. */
     @Volatile
     private var initialised = false
 
+    // ── Playback gate ─────────────────────────────────────────────────── //
+    // True while a show/movie is actively playing. While true, no ad is shown
+    // (a pending next-episode ad is cancelled). Set by [onPlaybackStarted],
+    // cleared by [onLoadingGap] / [resetForNewLaunch].
+    private val playbackActive = AtomicBoolean(false)
+
+    /** Activity we should show ads against (set when a show request is made). */
+    @Volatile
+    private var hostActivity: Activity? = null
+
     /**
-     * Initialises the Mobile Ads SDK and kicks off a background preload of the
-     * interstitial so it is ready when the user taps something to watch.
-     * Safe to call multiple times; only the first call does work.
+     * Initialises the Mobile Ads SDK and kicks off a background preload of both
+     * interstitials so they are ready when needed. Safe to call multiple times.
      */
     fun init(context: android.content.Context) {
         if (initialised) return
@@ -72,101 +98,179 @@ object AdManager {
         runCatching {
             com.google.android.gms.ads.MobileAds.initialize(context) {
                 Log.d(TAG, "Mobile Ads SDK initialised.")
-                preload(context)
+                preloadManualAd(context)
+                preloadNextEpisodeAd(context)
             }
         }.onFailure { Log.w(TAG, "MobileAds.initialize failed: ${it.message}") }
     }
 
-    /**
-     * Starts (or re-starts) a background load of the interstitial if one isn't
-     * already loaded or loading. Called from [init] and again after an ad is
-     * shown so the next manual launch has a fresh ad ready.
-     */
-    fun preload(context: android.content.Context) {
-        if (loadedAd != null || !loading.compareAndSet(false, true)) return
-        val request = AdRequest.Builder().build()
+    // ── Preloading ────────────────────────────────────────────────────── //
+
+    /** Loads the manual-launch interstitial if one isn't already loaded/loading. */
+    fun preloadManualAd(context: android.content.Context) {
+        if (loadedManualAd != null || !manualLoading.compareAndSet(false, true)) return
         InterstitialAd.load(
             context.applicationContext,
             INTERSTITIAL_AD_UNIT_ID,
-            request,
+            AdRequest.Builder().build(),
             object : InterstitialAdLoadCallback() {
                 override fun onAdLoaded(ad: InterstitialAd) {
-                    loadedAd = ad
-                    loading.set(false)
-                    Log.d(TAG, "Interstitial ad loaded and ready.")
+                    loadedManualAd = ad
+                    manualLoading.set(false)
+                    Log.d(TAG, "Manual interstitial loaded.")
                 }
 
                 override fun onAdFailedToLoad(error: LoadAdError) {
-                    loadedAd = null
-                    loading.set(false)
-                    Log.w(TAG, "Interstitial failed to load: code=${error.code} msg=${error.message}")
+                    loadedManualAd = null
+                    manualLoading.set(false)
+                    Log.w(TAG, "Manual interstitial failed: code=${error.code} msg=${error.message}")
                 }
             }
         )
     }
 
+    /** Loads the next-episode interstitial if one isn't already loaded/loading. */
+    fun preloadNextEpisodeAd(context: android.content.Context) {
+        if (loadedNextEpisodeAd != null || !nextEpisodeLoading.compareAndSet(false, true)) return
+        InterstitialAd.load(
+            context.applicationContext,
+            NEXT_EPISODE_AD_UNIT_ID,
+            AdRequest.Builder().build(),
+            object : InterstitialAdLoadCallback() {
+                override fun onAdLoaded(ad: InterstitialAd) {
+                    loadedNextEpisodeAd = ad
+                    nextEpisodeLoading.set(false)
+                    Log.d(TAG, "Next-episode interstitial loaded.")
+                    // If a show request was pending (the next episode started
+                    // loading before the ad was ready), honour it now — unless
+                    // playback has already started in the meantime.
+                    if (nextEpisodeShowPending.get() && !playbackActive.get()) {
+                        nextEpisodeShowPending.set(false)
+                        hostActivity?.let { showLoadedNextEpisodeAd(it) }
+                    }
+                }
+
+                override fun onAdFailedToLoad(error: LoadAdError) {
+                    loadedNextEpisodeAd = null
+                    nextEpisodeLoading.set(false)
+                    Log.w(TAG, "Next-episode interstitial failed: code=${error.code} msg=${error.message}")
+                }
+            }
+        )
+    }
+
+    // ── Showing ───────────────────────────────────────────────────────── //
+
     /**
-     * Shows the interstitial ad before playback, **once per manual launch**.
+     * Shows the manual-launch interstitial before playback, **once per manual
+     * launch**. Call from PlayerActivity.onCreate for a user-initiated launch
+     * only. Non-blocking: skips if not loaded yet.
      *
-     * Call this from [PlayerActivity.onCreate] for a manual (user-initiated)
-     * launch only. It returns immediately — playback should proceed in
-     * parallel regardless; the ad simply overlays on top when ready and the
-     * video is already waiting underneath. If no ad is loaded yet, or it has
-     * already been shown for this launch, this is a no-op so playback is never
-     * blocked.
-     *
-     * @param activity The PlayerActivity hosting playback.
-     * @param isAutoPlay True only when the launch is an auto-advance (never
-     *                   passed from a manual tap). When true the ad is
-     *                   suppressed as a belt-and-braces guard.
+     * @param isAutoPlay True only for an auto-advance launch — suppresses the ad.
      */
     fun showInterstitialBeforePlayback(activity: Activity, isAutoPlay: Boolean) {
-        // Never show an ad for an auto-play next-episode launch.
         if (isAutoPlay) return
-        // Only one ad per manual launch (survives config-change recreation).
-        if (!alreadyShownThisSession.compareAndSet(false, true)) return
+        if (!manualAlreadyShown.compareAndSet(false, true)) return
 
-        val ad = loadedAd
+        val ad = loadedManualAd
         if (ad == null) {
-            // Not ready yet — don't block the video. Try to preload for next time.
-            Log.d(TAG, "No interstitial ready yet — skipping ad, preloading for next time.")
-            preload(activity)
+            Log.d(TAG, "Manual interstitial not ready — skipping, preloading.")
+            preloadManualAd(activity)
             return
         }
-
-        ad.fullScreenContentCallback = object : FullScreenContentCallback() {
-            override fun onAdDismissedFullScreenContent() {
-                Log.d(TAG, "Ad dismissed — preloading next interstitial.")
-                loadedAd = null
-                preload(activity)
-            }
-
-            override fun onAdFailedToShowFullScreenContent(error: AdError) {
-                Log.w(TAG, "Ad failed to show: ${error.message}")
-                loadedAd = null
-                preload(activity)
-            }
-
-            override fun onAdShowedFullScreenContent() {
-                Log.d(TAG, "Ad showed fullscreen content.")
-            }
+        runCatching { ad.show(activity) }.onFailure {
+            Log.w(TAG, "Manual ad.show() threw: ${it.message}")
+            loadedManualAd = null
+            preloadManualAd(activity)
         }
-
-        runCatching {
-            ad.show(activity)
-        }.onFailure {
-            Log.w(TAG, "ad.show() threw: ${it.message}")
-            loadedAd = null
-            preload(activity)
-        }
+        // The ad is consumed either way once shown; reload for next time.
+        loadedManualAd = null
+        preloadManualAd(activity)
     }
 
     /**
-     * Resets the per-launch "already shown" guard. Called by PlayerActivity
-     * when a brand-new manual launch begins (so the ad can show again for the
-     * next title the user taps) — distinct from an in-place auto-advance.
+     * Shows the next-episode interstitial **during the auto-load gap** — i.e.
+     * right after one episode ends and the next begins resolving. Call this
+     * from PlayerActivity's onEpisodeEnded path, BEFORE the next episode
+     * starts playing. The ad is automatically suppressed/dismissed the moment
+     * playback starts (see [onPlaybackStarted]).
+     */
+    fun showNextEpisodeAdDuringLoad(activity: Activity) {
+        hostActivity = activity
+        // We're entering a loading gap → playback is not active yet.
+        playbackActive.set(false)
+        val ad = loadedNextEpisodeAd
+        if (ad == null) {
+            // Ad not ready yet — remember the request and honour it when the
+            // ad loads (unless playback has started by then).
+            nextEpisodeShowPending.set(true)
+            preloadNextEpisodeAd(activity)
+            Log.d(TAG, "Next-episode ad not ready — request pending, preloading.")
+            return
+        }
+        nextEpisodeShowPending.set(false)
+        showLoadedNextEpisodeAd(activity)
+    }
+
+    /** Internal: actually presents an already-loaded next-episode interstitial. */
+    private fun showLoadedNextEpisodeAd(activity: Activity) {
+        val ad = loadedNextEpisodeAd ?: return
+        // If playback has already started by the time we'd show, don't show.
+        if (playbackActive.get()) {
+            Log.d(TAG, "Playback already started — not showing next-episode ad.")
+            return
+        }
+        ad.fullScreenContentCallback = object : FullScreenContentCallback() {
+            override fun onAdDismissedFullScreenContent() {
+                Log.d(TAG, "Next-episode ad dismissed — reloading.")
+                loadedNextEpisodeAd = null
+                preloadNextEpisodeAd(activity)
+            }
+
+            override fun onAdFailedToShowFullScreenContent(error: AdError) {
+                Log.w(TAG, "Next-episode ad failed to show: ${error.message}")
+                loadedNextEpisodeAd = null
+                preloadNextEpisodeAd(activity)
+            }
+
+            override fun onAdShowedFullScreenContent() {
+                Log.d(TAG, "Next-episode ad showed fullscreen content.")
+            }
+        }
+        runCatching { ad.show(activity) }.onFailure {
+            Log.w(TAG, "Next-episode ad.show() threw: ${it.message}")
+            loadedNextEpisodeAd = null
+            preloadNextEpisodeAd(activity)
+        }
+        loadedNextEpisodeAd = null
+    }
+
+    // ── Playback-start gate (the "ads stop when playback starts" hook) ── //
+
+    /**
+     * Called by PlayerActivity the instant the selected show/movie actually
+     * starts playing (ExoPlayer STATE_READY). This stops all ad activity:
+     *  • cancels any pending next-episode ad that hasn't been shown yet,
+     *  • ensures no ad is presented on top of playing video.
+     *
+     * If an interstitial is already fullscreen (shown during the loading gap),
+     * it remains until the user dismisses it — at which point the already
+     * buffered/playing video is revealed. We do not show any further ad until
+     * the next loading gap.
+     */
+    fun onPlaybackStarted() {
+        playbackActive.set(true)
+        nextEpisodeShowPending.set(false)
+        Log.d(TAG, "Playback started — all pending ads suppressed.")
+    }
+
+    /**
+     * Resets the per-launch "already shown" guard for the manual interstitial.
+     * Called by PlayerActivity when a brand-new manual launch begins.
      */
     fun resetForNewLaunch() {
-        alreadyShownThisSession.set(false)
+        manualAlreadyShown.set(false)
+        playbackActive.set(false)
+        nextEpisodeShowPending.set(false)
     }
 }
