@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "PiratesfilmCove"
+rootProject.name = "mariokart"
 include(":app")

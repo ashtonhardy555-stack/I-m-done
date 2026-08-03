@@ -11,3 +11,6 @@ release.keystore
 keystore.properties
 *.keystore
 *.jks
+
+# Sandbox agent output artifacts
+outputs/

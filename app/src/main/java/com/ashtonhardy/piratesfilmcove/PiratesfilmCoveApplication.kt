@@ -51,6 +51,12 @@ class PiratesfilmCoveApplication : Application(), ImageLoaderFactory {
         // sources in the background. PlayerActivity asks this engine first.
         com.ashtonhardy.piratesfilmcove.data.engine.KodiEngine.init(this)
         com.ashtonhardy.piratesfilmcove.data.engine.KodiEngineService.start(this)
+
+        // Initialise the Google Mobile Ads SDK and preload the interstitial ad
+        // so it is ready when the user taps a movie/show to watch. The ad is
+        // only shown on manual playback launches (never on auto-play of the
+        // next TV episode — see AdManager / PlayerActivity).
+        com.ashtonhardy.piratesfilmcove.ui.AdManager.init(this)
     }
 
     override fun newImageLoader(): ImageLoader {

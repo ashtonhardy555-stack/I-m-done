@@ -179,7 +179,12 @@ class PlayerActivity : ComponentActivity() {
             year: String? = null,
             posterUrl: String? = null,
             backdropUrl: String? = null,
-            resumePositionMs: Long = 0L
+            resumePositionMs: Long = 0L,
+            // True ONLY when this launch is an automatic advance to the next
+            // TV episode (not a user tap). When true the pre-playback
+            // interstitial ad is suppressed. Manual launches from the UI
+            // always leave this false so the ad shows before playback.
+            isAutoPlay: Boolean = false
         ): Intent = Intent(context, PlayerActivity::class.java).apply {
             putExtra("TMDB_ID", tmdbId)
             putExtra("CONTENT_TYPE", contentType)
@@ -193,6 +198,7 @@ class PlayerActivity : ComponentActivity() {
             // STATE_READY fires, so a Continue Watching card picks up exactly
             // where the user left off.
             putExtra("RESUME_MS", resumePositionMs)
+            putExtra("IS_AUTOPLAY", isAutoPlay)
         }
 
         // ── Active-player bridge for Android TV remote controls ──────────── //
@@ -274,6 +280,10 @@ class PlayerActivity : ComponentActivity() {
         val posterUrl = intent.getStringExtra("POSTER_URL")
         val backdropUrl = intent.getStringExtra("BACKDROP_URL")
         val resumePositionMs = intent.getLongExtra("RESUME_MS", 0L)
+        // True only for an automatic advance to the next TV episode (never a
+        // user tap). Manual launches default to false so the pre-playback
+        // interstitial ad is shown; auto-play suppresses it.
+        val isAutoPlay = intent.getBooleanExtra("IS_AUTOPLAY", false)
 
         if (tmdbId == -1) {
             Log.e(TAG, "Invalid TMDB ID")
@@ -292,6 +302,22 @@ class PlayerActivity : ComponentActivity() {
         progressYear = year
         progressPosterPath = posterUrl?.let { extractTmdbPath(it) }
         progressBackdropPath = backdropUrl?.let { extractTmdbPath(it) }
+
+        // ── Pre-playback interstitial ad (manual launches only) ────────── //
+        // Show an AdMob interstitial before the video starts, but ONLY when
+        // this is a genuine user-initiated launch (a tap on a movie/show).
+        // Auto-play of the next TV episode does NOT re-enter onCreate (it
+        // re-fires the extraction LaunchedEffect inside the same instance), so
+        // no ad is shown for those — keeping the binge experience ad-free.
+        // isAutoPlay is an extra belt-and-braces guard. The ad is non-blocking:
+        // if it isn't loaded yet we simply skip it and play immediately.
+        if (!isAutoPlay) {
+            com.ashtonhardy.piratesfilmcove.ui.AdManager.resetForNewLaunch()
+            com.ashtonhardy.piratesfilmcove.ui.AdManager.showInterstitialBeforePlayback(
+                activity = this,
+                isAutoPlay = false
+            )
+        }
 
         setContent {
             NetflixTheme {
