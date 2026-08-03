@@ -1,23 +1,20 @@
-# Rename app to "mariokart" + Add interstitial ads on manual play
+# Todo: Fix Manual Pre-Playback Ad Not Showing for Movies/Shows
 
-## Research
-- [x] Explore repo structure (Android/Kotlin streaming app)
-- [x] Identify current name refs (strings.xml, launcher icon comment, settings.gradle)
-- [x] PlayerActivity launched via newIntent() from MainActivity (manual clicks)
-- [x] Auto-play next episode = same activity, STATE_ENDED re-fires LaunchedEffect (no onCreate) -> ad suppressed naturally
-- [x] Auto-update already works (AutoUpdater + GitHub Releases, triggered at app open)
+## Investigation
+- [x] Pull latest main and read current AdManager.kt
+- [x] Read current PlayerActivity.kt (manual ad LaunchedEffect + extraction gate)
+- [x] Read MainActivity.kt launch paths — all pass isAutoPlay=false ✓
+- [x] Read PiratesfilmCoveApplication.kt (init) ✓
+- [x] Root cause: manual ad not preloaded in time → 5s poll times out → no ad shown.
+        Next-episode ad works because SDK has minutes to load by then.
 
-## Rename to "mariokart" (display name only — preserves auto-update + existing installs)
-- [x] Update strings.xml app_name -> "mariokart"
-- [x] Update launcher icon comment + settings.gradle rootProject name
+## Fix (AdManager.kt)
+- [ ] Add auto-retry on manual ad load failure (retry after delay)
+- [ ] Increase manual ad poll timeout (5s → 15s) to wait for slow SDK init
+- [ ] Kick off a fresh preload from showInterstitialBeforePlayback when ad is null
+- [ ] Add a "warm-up" preload trigger so the manual ad loads ASAP on app open
+- [ ] Verify code compiles (logic check)
 
-## Add AdMob interstitial ad (unit ca-app-pub-8069271908902310/6722496029)
-- [x] Add Google Mobile Ads dependency to app/build.gradle.kts
-- [x] Add AdMob App ID meta-data to AndroidManifest.xml
-- [x] Create AdManager (loads + shows interstitial)
-- [x] Wire ad into PlayerActivity: show ad BEFORE playback on MANUAL clicks only
-- [x] Ensure auto-play next episode does NOT trigger ads (guard with isAutoPlay flag)
-
-## Verify & ship
-- [x] Verify changes compile-consistent (imports, references)
-- [x] Commit on a new branch, push, open PR (#62)
+## Ship
+- [ ] Commit and push to main (triggers CI build)
+- [ ] Report to user

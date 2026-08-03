@@ -143,6 +143,11 @@ private fun AppRoot() {
     var sideNavAutoShown by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
+        // Warm up the Mobile Ads SDK + preload the manual pre-playback
+        // interstitial as early as possible so it is ready by the time the
+        // user taps a movie/show. This is the single biggest factor in
+        // whether the manual ad shows (vs. timing out and being skipped).
+        com.ashtonhardy.piratesfilmcove.ui.AdManager.warmUp(context)
         com.ashtonhardy.piratesfilmcove.ui.AutoUpdater.checkAndPrompt(context)
     }
 

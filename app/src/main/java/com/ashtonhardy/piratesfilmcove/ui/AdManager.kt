@@ -60,6 +60,25 @@ object AdManager {
     /** Number of seconds after which a shown interstitial auto-closes. */
     private const val AD_AUTO_CLOSE_SECONDS = 10L
 
+    /**
+     * How long [showInterstitialBeforePlayback] polls waiting for the manual
+     * ad to finish loading before giving up (and letting playback proceed
+     * without an ad). Generous because the Mobile Ads SDK can take several
+     * seconds to initialise on a cold launch and the ad load is asynchronous
+     * on top of that. The user sees the player's loading spinner during this
+     * window, so a longer wait is invisible to them.
+     */
+    private const val MANUAL_AD_POLL_TIMEOUT_MS = 15_000L
+
+    /** Poll interval used while waiting for an ad to load. */
+    private const val AD_POLL_STEP_MS = 500L
+
+    /** Delay before retrying a failed manual-ad load. */
+    private const val MANUAL_AD_RETRY_DELAY_MS = 3_000L
+
+    /** Max number of times a failed manual-ad load is retried automatically. */
+    private const val MANUAL_AD_MAX_RETRIES = 3
+
     private val mainHandler = Handler(Looper.getMainLooper())
 
     // ── Manual-launch interstitial state ────────────────────────────────── //
@@ -68,6 +87,8 @@ object AdManager {
     private val manualLoading = AtomicBoolean(false)
     /** Prevents double-showing across an Activity recreation for one launch. */
     private val manualAlreadyShown = AtomicBoolean(false)
+    /** How many times the current manual-ad load has been retried. */
+    private var manualLoadRetries = 0
 
     /** The ad currently fullscreen (for auto-close), if any. */
     @Volatile
@@ -94,6 +115,11 @@ object AdManager {
     @Volatile
     private var initialised = false
 
+    /** Application context captured at [init] time so background retries can
+     *  load ads without needing a fresh context each time. */
+    @Volatile
+    private var appContext: android.content.Context? = null
+
     // ── Playback gate ───────────────────────────────────────────────────── //
     // True while a show/movie is actively playing. While true, no ad is shown
     // (a pending next-episode ad is cancelled). Set by [onPlaybackStarted],
@@ -111,35 +137,76 @@ object AdManager {
     fun init(context: android.content.Context) {
         if (initialised) return
         initialised = true
+        appContext = context.applicationContext
         runCatching {
             com.google.android.gms.ads.MobileAds.initialize(context) {
                 Log.d(TAG, "Mobile Ads SDK initialised.")
-                preloadManualAd(context)
-                preloadNextEpisodeAd(context)
+                preloadManualAd(context.applicationContext)
+                preloadNextEpisodeAd(context.applicationContext)
             }
         }.onFailure { Log.w(TAG, "MobileAds.initialize failed: ${it.message}") }
     }
 
+    /**
+     * Best-effort "warm up" — call this as early as possible (e.g. from the
+     * home screen becoming visible) to make sure the Mobile Ads SDK is
+     * initialised and the manual interstitial is preloading. No-op if already
+     * done. This exists so the manual ad has the maximum possible head start
+     * before the user taps a movie/show, which is the single biggest factor in
+     * whether the ad is ready in time.
+     */
+    fun warmUp(context: android.content.Context) {
+        if (!initialised) {
+            init(context)
+        } else {
+            // Already initialised — just make sure a preload is in flight.
+            appContext?.let { preloadManualAd(it) }
+        }
+    }
+
     // ── Preloading ──────────────────────────────────────────────────────── //
 
-    /** Loads the manual-launch interstitial if one isn't already loaded/loading. */
+    /**
+     * Loads the manual-launch interstitial if one isn't already loaded/loading.
+     * If the load fails, it is automatically retried (up to
+     * [MANUAL_AD_MAX_RETRIES] times with a [MANUAL_AD_RETRY_DELAY_MS] gap) so a
+     * transient network/SDK hiccup doesn't leave the manual ad permanently
+     * unavailable — which was the root cause of "ads not playing for movies".
+     */
     fun preloadManualAd(context: android.content.Context) {
+        val ctx = context.applicationContext
         if (loadedManualAd != null || !manualLoading.compareAndSet(false, true)) return
         InterstitialAd.load(
-            context.applicationContext,
+            ctx,
             INTERSTITIAL_AD_UNIT_ID,
             AdRequest.Builder().build(),
             object : InterstitialAdLoadCallback() {
                 override fun onAdLoaded(ad: InterstitialAd) {
                     loadedManualAd = ad
                     manualLoading.set(false)
+                    manualLoadRetries = 0
                     Log.d(TAG, "Manual interstitial loaded.")
+                    // If a manual show request was polling waiting for this ad,
+                    // the poll thread will pick up loadedManualAd on its next
+                    // iteration — no extra wiring needed here.
                 }
 
                 override fun onAdFailedToLoad(error: LoadAdError) {
                     loadedManualAd = null
                     manualLoading.set(false)
-                    Log.w(TAG, "Manual interstitial failed: code=${error.code} msg=${error.message}")
+                    Log.w(TAG, "Manual interstitial failed (attempt ${manualLoadRetries + 1}): code=${error.code} msg=${error.message}")
+                    // Auto-retry so a transient failure doesn't permanently
+                    // kill the manual ad for the session.
+                    if (manualLoadRetries < MANUAL_AD_MAX_RETRIES) {
+                        manualLoadRetries++
+                        mainHandler.postDelayed({
+                            // Re-attempt the load (preloadManualAd guards
+                            // against double-loads via manualLoading).
+                            appContext?.let { preloadManualAd(it) }
+                        }, MANUAL_AD_RETRY_DELAY_MS)
+                    } else {
+                        Log.w(TAG, "Manual interstitial gave up after $MANUAL_AD_MAX_RETRIES retries.")
+                    }
                 }
             }
         )
@@ -181,14 +248,16 @@ object AdManager {
      * Shows the manual-launch interstitial before playback, **once per manual
      * launch**. Call from PlayerScreen for a user-initiated launch only.
      *
-     * If the ad is not loaded yet, a background thread polls every 500 ms for
-     * up to 5 seconds; if it loads within that window the ad is shown,
-     * otherwise the [onAdDismissed] callback is fired immediately (so playback
-     * is never blocked forever on a missing ad).
+     * If the ad is not loaded yet, a background thread polls every
+     * [AD_POLL_STEP_MS] for up to [MANUAL_AD_POLL_TIMEOUT_MS]; if it loads
+     * within that window the ad is shown, otherwise the [onAdDismissed]
+     * callback is fired immediately (so playback is never blocked forever on a
+     * missing ad). A fresh preload is also kicked off immediately so a failed
+     * initial load gets a second chance within the poll window.
      *
      * @param isAutoPlay True only for an auto-advance launch — suppresses the ad.
      * @param onAdDismissed Fires when the ad is dismissed (user tap, 10-second
-     *     auto-close, load failure, or 5-second timeout). The caller uses this
+     *     auto-close, load failure, or poll timeout). The caller uses this
      *     to gate playback start.
      */
     fun showInterstitialBeforePlayback(
@@ -210,7 +279,12 @@ object AdManager {
 
         val ad = loadedManualAd
         if (ad == null) {
-            Log.d(TAG, "Manual interstitial not ready — polling for up to 5s.")
+            Log.d(TAG, "Manual interstitial not ready — kicking off preload + polling for up to ${MANUAL_AD_POLL_TIMEOUT_MS}ms.")
+            // Kick off a fresh load right now in case the initial preload
+            // failed or hasn't run yet (e.g. user tapped very quickly after
+            // a cold launch). preloadManualAd is a no-op if one is already
+            // loading, so this is safe to call unconditionally.
+            preloadManualAd(activity.applicationContext)
             manualAdDismissedCallback = onAdDismissed
             pollAndShowManualAd(activity)
             return
@@ -219,16 +293,17 @@ object AdManager {
     }
 
     /**
-     * Polls the manual ad for up to 5 seconds (every 500 ms). Shows it when it
-     * loads, or fires [manualAdDismissedCallback] on timeout.
+     * Polls the manual ad for up to [MANUAL_AD_POLL_TIMEOUT_MS] (every
+     * [AD_POLL_STEP_MS]). Shows it when it loads, or fires
+     * [manualAdDismissedCallback] on timeout so playback is never blocked
+     * forever on a missing ad.
      */
     private fun pollAndShowManualAd(activity: Activity) {
         Thread {
-            var waited = 0
-            val step = 500
-            while (waited < 5000) {
-                Thread.sleep(step.toLong())
-                waited += step
+            var waited = 0L
+            while (waited < MANUAL_AD_POLL_TIMEOUT_MS) {
+                Thread.sleep(AD_POLL_STEP_MS)
+                waited += AD_POLL_STEP_MS
                 val ad = loadedManualAd
                 if (ad != null) {
                     mainHandler.post {
@@ -240,7 +315,7 @@ object AdManager {
                 }
             }
             // Timed out — fire the callback so playback can proceed.
-            Log.d(TAG, "Manual ad poll timed out after 5s — proceeding without ad.")
+            Log.d(TAG, "Manual ad poll timed out after ${MANUAL_AD_POLL_TIMEOUT_MS}ms — proceeding without ad.")
             mainHandler.post { fireManualDismissed() }
         }.start()
     }
