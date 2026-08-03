@@ -31,14 +31,12 @@ import java.util.concurrent.atomic.AtomicBoolean
  *    and cancels pending requests.
  *  • "Auto-playback won't start until the ad is closed": Both show methods
  *    accept an [onAdDismissed] callback that fires when the ad is dismissed
- *    (by user tap, by the 10-second auto-close timer, or on load failure /
- *    timeout). The caller gates playback on this callback so the next episode
- *    does NOT begin resolving/playing until the ad is gone.
- *  • "Ad auto-closes after 10 seconds": Each shown ad starts a
- *    [AD_AUTO_CLOSE_SECONDS] timer. When it fires, the ad's dismissal
- *    callback runs (which fires [onAdDismissed]) and the ad reference is
- *    cleared so the system can reclaim it. If the user dismisses the ad
- *    manually first, the timer is cancelled.
+ *    (by user tap, or on load failure / timeout). The caller gates playback
+ *    on this callback so the next episode does NOT begin resolving/playing
+ *    until the ad is gone.
+ *  • "Ads stay until the user closes them": There is no auto-close. Each
+ *    interstitial remains fullscreen until the user taps to dismiss it, at
+ *    which point the dismissal callback fires and playback proceeds.
  */
 object AdManager {
 
@@ -60,9 +58,6 @@ object AdManager {
      * moment the next episode starts playing.
      */
     const val NEXT_EPISODE_AD_UNIT_ID = "ca-app-pub-8069271908902310/6882278128"
-
-    /** Number of seconds after which a shown interstitial auto-closes. */
-    private const val AD_AUTO_CLOSE_SECONDS = 10L
 
     /**
      * How long [showInterstitialBeforePlayback] polls waiting for the manual
@@ -94,7 +89,7 @@ object AdManager {
     /** How many times the current manual-ad load has been retried. */
     private var manualLoadRetries = 0
 
-    /** The ad currently fullscreen (for auto-close), if any. */
+    /** The ad currently fullscreen, if any. */
     @Volatile
     private var currentManualAd: InterstitialAd? = null
     @Volatile
@@ -109,7 +104,7 @@ object AdManager {
      *  has already started by then. */
     private val nextEpisodeShowPending = AtomicBoolean(false)
 
-    /** The ad currently fullscreen (for auto-close), if any. */
+    /** The ad currently fullscreen, if any. */
     @Volatile
     private var currentNextEpisodeAd: InterstitialAd? = null
     @Volatile
@@ -260,9 +255,9 @@ object AdManager {
      * initial load gets a second chance within the poll window.
      *
      * @param isAutoPlay True only for an auto-advance launch — suppresses the ad.
-     * @param onAdDismissed Fires when the ad is dismissed (user tap, 10-second
-     *     auto-close, load failure, or poll timeout). The caller uses this
-     *     to gate playback start.
+     * @param onAdDismissed Fires when the ad is dismissed (user tap, load
+     *     failure, or poll timeout). The caller uses this to gate playback
+     *     start.
      */
     fun showInterstitialBeforePlayback(
         activity: Activity,
@@ -276,8 +271,13 @@ object AdManager {
             return
         }
         if (!manualAlreadyShown.compareAndSet(false, true)) {
-            // Already shown for this launch — don't double-fire.
-            onAdDismissed()
+            // Already shown for this launch — do NOT fire onAdDismissed here.
+            // Firing it would open the playback gate prematurely (before the
+            // already-in-flight ad is dismissed by the user), which is what
+            // caused videos to start playing under the ad. The in-flight
+            // show's own onAdDismissedFullScreenContent callback will open the
+            // gate when the user actually closes the ad.
+            Log.d(TAG, "Manual ad already requested for this launch — ignoring duplicate request (gate stays closed).")
             return
         }
 
@@ -338,47 +338,28 @@ object AdManager {
         ad.fullScreenContentCallback = object : FullScreenContentCallback() {
             override fun onAdDismissedFullScreenContent() {
                 Log.d(TAG, "Manual ad dismissed by user — firing callback.")
-                cancelManualAutoClose()
                 currentManualAd = null
                 fireManualDismissed()
             }
 
             override fun onAdFailedToShowFullScreenContent(error: AdError) {
                 Log.w(TAG, "Manual ad failed to show: ${error.message}")
-                cancelManualAutoClose()
                 currentManualAd = null
                 fireManualDismissed()
             }
 
             override fun onAdShowedFullScreenContent() {
-                Log.d(TAG, "Manual ad showed fullscreen — starting 10s auto-close.")
-                startManualAutoClose()
+                // No auto-close — the ad stays fullscreen until the user
+                // taps to close it. Playback is gated on the dismissal
+                // callback so the video will NOT start until then.
+                Log.d(TAG, "Manual ad showed fullscreen — waiting for user to close it.")
             }
         }
         runCatching { ad.show(activity) }.onFailure {
             Log.w(TAG, "Manual ad.show() threw: ${it.message}")
-            cancelManualAutoClose()
             currentManualAd = null
             fireManualDismissed()
         }
-    }
-
-    /** Runnable for the manual ad auto-close timer (stored for cancellation). */
-    private val manualAutoCloseRunnable = Runnable {
-        Log.d(TAG, "Manual ad 10s auto-close fired.")
-        currentManualAd = null
-        fireManualDismissed()
-    }
-
-    /** Starts the 10-second auto-close timer for the manual ad. */
-    private fun startManualAutoClose() {
-        mainHandler.removeCallbacks(manualAutoCloseRunnable)
-        mainHandler.postDelayed(manualAutoCloseRunnable, AD_AUTO_CLOSE_SECONDS * 1000L)
-    }
-
-    /** Cancels the manual ad auto-close timer (e.g. user dismissed first). */
-    private fun cancelManualAutoClose() {
-        mainHandler.removeCallbacks(manualAutoCloseRunnable)
     }
 
     /** Fires the manual ad dismissed callback once, then clears it. */
@@ -398,10 +379,9 @@ object AdManager {
      * starts playing. The ad is automatically suppressed/dismissed the moment
      * playback starts (see [onPlaybackStarted]).
      *
-     * @param onAdDismissed Fires when the ad is dismissed (user tap, 10-second
-     *     auto-close, or load failure). The caller should advance to the next
-     *     episode INSIDE this callback so auto-playback does not begin until
-     *     the ad is closed.
+     * @param onAdDismissed Fires when the ad is dismissed (user tap, or load
+     *     failure). The caller should advance to the next episode INSIDE this
+     *     callback so auto-playback does not begin until the ad is closed.
      */
     fun showNextEpisodeAdDuringLoad(
         activity: Activity,
@@ -416,9 +396,9 @@ object AdManager {
         if (ad == null) {
             // Ad not ready yet — remember the request and honour it when the
             // ad loads. We also start a 5-second poll: if the ad loads within
-            // that window it is shown (and its own 10s auto-close + dismissal
-            // callback handle the rest); if it doesn't, we fire onAdDismissed
-            // so the caller (and the next episode) is not blocked forever.
+            // that window it is shown (and its own dismissal callback handles
+            // the rest); if it doesn't, we fire onAdDismissed so the caller
+            // (and the next episode) is not blocked forever.
             nextEpisodeShowPending.set(true)
             preloadNextEpisodeAd(activity)
             Log.d(TAG, "Next-episode ad not ready — polling for up to 5s.")
@@ -480,47 +460,28 @@ object AdManager {
         ad.fullScreenContentCallback = object : FullScreenContentCallback() {
             override fun onAdDismissedFullScreenContent() {
                 Log.d(TAG, "Next-episode ad dismissed by user — firing callback.")
-                cancelNextEpisodeAutoClose()
                 currentNextEpisodeAd = null
                 fireNextEpisodeDismissed()
             }
 
             override fun onAdFailedToShowFullScreenContent(error: AdError) {
                 Log.w(TAG, "Next-episode ad failed to show: ${error.message}")
-                cancelNextEpisodeAutoClose()
                 currentNextEpisodeAd = null
                 fireNextEpisodeDismissed()
             }
 
             override fun onAdShowedFullScreenContent() {
-                Log.d(TAG, "Next-episode ad showed fullscreen — starting 10s auto-close.")
-                startNextEpisodeAutoClose()
+                // No auto-close — the ad stays fullscreen until the user
+                // taps to close it. The next episode does NOT begin
+                // resolving/playing until this dismissal fires.
+                Log.d(TAG, "Next-episode ad showed fullscreen — waiting for user to close it.")
             }
         }
         runCatching { ad.show(activity) }.onFailure {
             Log.w(TAG, "Next-episode ad.show() threw: ${it.message}")
-            cancelNextEpisodeAutoClose()
             currentNextEpisodeAd = null
             fireNextEpisodeDismissed()
         }
-    }
-
-    /** Runnable for the next-episode ad auto-close timer (stored for cancellation). */
-    private val nextEpisodeAutoCloseRunnable = Runnable {
-        Log.d(TAG, "Next-episode ad 10s auto-close fired.")
-        currentNextEpisodeAd = null
-        fireNextEpisodeDismissed()
-    }
-
-    /** Starts the 10-second auto-close timer for the next-episode ad. */
-    private fun startNextEpisodeAutoClose() {
-        mainHandler.removeCallbacks(nextEpisodeAutoCloseRunnable)
-        mainHandler.postDelayed(nextEpisodeAutoCloseRunnable, AD_AUTO_CLOSE_SECONDS * 1000L)
-    }
-
-    /** Cancels the next-episode ad auto-close timer (e.g. user dismissed first). */
-    private fun cancelNextEpisodeAutoClose() {
-        mainHandler.removeCallbacks(nextEpisodeAutoCloseRunnable)
     }
 
     /** Fires the next-episode ad dismissed callback once, then clears it. */
@@ -542,9 +503,9 @@ object AdManager {
      *  • ensures no ad is presented on top of playing video.
      *
      * If an interstitial is already fullscreen (shown during the loading gap),
-     * it remains until the user dismisses it or the 10-second auto-close fires
-     * — at which point the already-buffered/playing video is revealed. We do
-     * not show any further ad until the next loading gap.
+     * it remains until the user dismisses it — at which point the already-
+     * buffered/playing video is revealed. We do not show any further ad until
+     * the next loading gap.
      */
     fun onPlaybackStarted() {
         playbackActive.set(true)
@@ -560,7 +521,6 @@ object AdManager {
         manualAlreadyShown.set(false)
         playbackActive.set(false)
         nextEpisodeShowPending.set(false)
-        cancelManualAutoClose()
         // If a stale callback exists (e.g. Activity destroyed mid-ad), fire it
         // so nothing is left hanging.
         fireManualDismissed()

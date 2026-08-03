@@ -631,17 +631,22 @@ fun PlayerScreen(
     // --------------------------------------------------------------- //
     // Show the manual interstitial for a user-tapped launch. Extraction is
     // gated on `adGateOpen` below — it will NOT run until this callback fires
-    // (ad dismissed by user tap, 10-second auto-close, or load
-    // failure/timeout). Auto-play launches skip this entirely.
+    // (ad dismissed by user tap, or load failure/timeout). The ad does NOT
+    // auto-close — the user must close it, and only then does the video start
+    // loading. Auto-play launches skip this entirely.
     LaunchedEffect(isAutoPlayLaunch) {
         if (!isAutoPlayLaunch) {
+            // Show a message on the loading screen so the user knows an ad
+            // is about to play and the video will follow it.
+            infoMessage = "Your video will play after a short ad…"
             (localContext as? android.app.Activity)?.let { activity ->
                 com.ashtonhardy.piratesfilmcove.ui.AdManager.showInterstitialBeforePlayback(
                     activity = activity,
                     isAutoPlay = false
                 ) {
-                    // onAdDismissed — the ad is gone, open the gate so
-                    // extraction can begin.
+                    // onAdDismissed — the user closed the ad, open the gate
+                    // so extraction can begin.
+                    infoMessage = null
                     adGateOpen = true
                 }
             }
