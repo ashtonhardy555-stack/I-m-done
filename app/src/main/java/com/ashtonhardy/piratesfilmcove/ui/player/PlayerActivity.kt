@@ -304,19 +304,13 @@ class PlayerActivity : ComponentActivity() {
         progressBackdropPath = backdropUrl?.let { extractTmdbPath(it) }
 
         // ── Pre-playback interstitial ad (manual launches only) ────────── //
-        // Show an AdMob interstitial before the video starts, but ONLY when
-        // this is a genuine user-initiated launch (a tap on a movie/show).
-        // Auto-play of the next TV episode does NOT re-enter onCreate (it
-        // re-fires the extraction LaunchedEffect inside the same instance), so
-        // no ad is shown for those — keeping the binge experience ad-free.
-        // isAutoPlay is an extra belt-and-braces guard. The ad is non-blocking:
-        // if it isn't loaded yet we simply skip it and play immediately.
+        // For a manual (user-tapped) launch we reset the per-launch ad guard.
+        // The actual ad is shown from inside PlayerScreen via a LaunchedEffect,
+        // and extraction is gated on an `adGateOpen` Compose state so playback
+        // does NOT begin resolving until the ad is dismissed (user tap or the
+        // 10-second auto-close). Auto-play launches skip the manual ad.
         if (!isAutoPlay) {
             com.ashtonhardy.piratesfilmcove.ui.AdManager.resetForNewLaunch()
-            com.ashtonhardy.piratesfilmcove.ui.AdManager.showInterstitialBeforePlayback(
-                activity = this,
-                isAutoPlay = false
-            )
         }
 
         setContent {
@@ -330,7 +324,8 @@ class PlayerActivity : ComponentActivity() {
                     year = year,
                     posterUrl = posterUrl,
                     backdropUrl = backdropUrl,
-                    resumePositionMs = resumePositionMs
+                    resumePositionMs = resumePositionMs,
+                    isAutoPlayLaunch = isAutoPlay
                 )
             }
         }
@@ -520,10 +515,19 @@ fun PlayerScreen(
     year: String? = null,
     posterUrl: String? = null,
     backdropUrl: String? = null,
-    resumePositionMs: Long = 0L
+    resumePositionMs: Long = 0L,
+    isAutoPlayLaunch: Boolean = false
 ) {
     val localContext = LocalContext.current
     val scope = rememberCoroutineScope()
+
+    // --- Ad gate ------------------------------------------------------- //
+    // For manual (user-tapped) launches the pre-playback interstitial ad is
+    // shown before extraction begins. `adGateOpen` starts false so the
+    // extraction LaunchedEffect is blocked; it flips to true inside the ad's
+    // onAdDismissed callback (user dismissal OR 10-second auto-close OR load
+    // failure/timeout). Auto-play launches start with the gate already open.
+    var adGateOpen by remember { mutableStateOf(isAutoPlayLaunch) }
 
     // --- Player + extraction state ---------------------------------- //
     var streamUrl by remember { mutableStateOf<String?>(null) }
@@ -623,9 +627,35 @@ fun PlayerScreen(
     }
 
     // --------------------------------------------------------------- //
+    //  Pre-playback interstitial ad (manual launches only)             //
+    // --------------------------------------------------------------- //
+    // Show the manual interstitial for a user-tapped launch. Extraction is
+    // gated on `adGateOpen` below — it will NOT run until this callback fires
+    // (ad dismissed by user tap, 10-second auto-close, or load
+    // failure/timeout). Auto-play launches skip this entirely.
+    LaunchedEffect(isAutoPlayLaunch) {
+        if (!isAutoPlayLaunch) {
+            (localContext as? android.app.Activity)?.let { activity ->
+                com.ashtonhardy.piratesfilmcove.ui.AdManager.showInterstitialBeforePlayback(
+                    activity = activity,
+                    isAutoPlay = false
+                ) {
+                    // onAdDismissed — the ad is gone, open the gate so
+                    // extraction can begin.
+                    adGateOpen = true
+                }
+            }
+        }
+    }
+
+    // --------------------------------------------------------------- //
     //  Extraction LaunchedEffect                                       //
     // --------------------------------------------------------------- //
-    LaunchedEffect(tmdbId, contentType, currentSeason, currentEpisode, attempt) {
+    // Gated on `adGateOpen`: for manual launches this stays false until the
+    // pre-playback ad is dismissed, so the video does not start resolving
+    // while the ad is still on screen. Auto-play launches start open.
+    LaunchedEffect(tmdbId, contentType, currentSeason, currentEpisode, attempt, adGateOpen) {
+        if (!adGateOpen) return@LaunchedEffect
         isLoading = true
         error = null
         infoMessage = null
@@ -1381,25 +1411,36 @@ fun PlayerScreen(
                             // next one starting to play). It is automatically
                             // suppressed the moment the next episode actually
                             // starts playing (STATE_READY → AdManager.onPlaybackStarted).
-                            (localContext as? android.app.Activity)?.let {
+                            //
+                            // The next episode does NOT begin resolving/playing
+                            // until this callback fires (ad dismissed by user
+                            // tap, 10-second auto-close, or load failure). We
+                            // move the episode-advancement code INSIDE the
+                            // callback so auto-playback waits for the ad.
+                            (localContext as? android.app.Activity)?.let { activity ->
                                 com.ashtonhardy.piratesfilmcove.ui.AdManager
-                                    .showNextEpisodeAdDuringLoad(it)
+                                    .showNextEpisodeAdDuringLoad(activity) {
+                                        // onAdDismissed — the ad is gone.
+                                        // NOW reset extraction state and
+                                        // advance to the next episode so the
+                                        // LaunchedEffect re-fires for it.
+                                        streamUrl = null
+                                        streamHeaders = emptyMap()
+                                        deliveringServerName = null
+                                        error = null
+                                        excludedRaceProviders = emptySet()
+                                        raceFallbackUsed = false
+                                        candidateQueue = emptyList()
+                                        attempt = 0
+                                        startStage = PlayerActivity.STAGE_VIDSTORM
+                                        isLoading = true
+                                        // Advance the mutable season/episode →
+                                        // the LaunchedEffect keyed on them
+                                        // re-fires extraction.
+                                        currentSeason = nextSeason
+                                        currentEpisode = nextEp
+                                    }
                             }
-                            // Reset extraction state for the new episode.
-                            streamUrl = null
-                            streamHeaders = emptyMap()
-                            deliveringServerName = null
-                            error = null
-                            excludedRaceProviders = emptySet()
-                            raceFallbackUsed = false
-                            candidateQueue = emptyList()
-                            attempt = 0
-                            startStage = PlayerActivity.STAGE_VIDSTORM
-                            isLoading = true
-                            // Advance the mutable season/episode → the
-                            // LaunchedEffect keyed on them re-fires extraction.
-                            currentSeason = nextSeason
-                            currentEpisode = nextEp
                         }
                     },
                     onPlayerError = { isFatal ->
