@@ -46,9 +46,13 @@ object AdManager {
 
     /**
      * AdMob interstitial ad-unit ID shown before a **manual** playback launch
-     * (user taps a movie/show). App ID (with "~") lives in AndroidManifest.xml.
+     * (user taps a movie/show). Uses the same proven ad unit as the next-
+     * episode ad because that is the unit AdMob is actually serving fill for;
+     * the previously-tried unit (6722496029) never received fill, so no ad
+     * ever appeared and the poll just delayed playback. App ID (with "~")
+     * lives in AndroidManifest.xml.
      */
-    const val INTERSTITIAL_AD_UNIT_ID = "ca-app-pub-8069271908902310/6722496029"
+    const val INTERSTITIAL_AD_UNIT_ID = "ca-app-pub-8069271908902310/6882278128"
 
     /**
      * AdMob interstitial ad-unit ID shown while the player **auto-loads the
@@ -63,12 +67,12 @@ object AdManager {
     /**
      * How long [showInterstitialBeforePlayback] polls waiting for the manual
      * ad to finish loading before giving up (and letting playback proceed
-     * without an ad). Generous because the Mobile Ads SDK can take several
-     * seconds to initialise on a cold launch and the ad load is asynchronous
-     * on top of that. The user sees the player's loading spinner during this
-     * window, so a longer wait is invisible to them.
+     * without an ad). Kept short (5s) so playback is never delayed long when
+     * no ad is available. The manual ad uses the same proven ad unit as the
+     * next-episode ad, which reliably receives fill, so it is normally
+     * preloaded well before the user taps anything.
      */
-    private const val MANUAL_AD_POLL_TIMEOUT_MS = 15_000L
+    private const val MANUAL_AD_POLL_TIMEOUT_MS = 5_000L
 
     /** Poll interval used while waiting for an ad to load. */
     private const val AD_POLL_STEP_MS = 500L

@@ -1,20 +1,23 @@
-# Todo: Fix Manual Pre-Playback Ad Not Showing for Movies/Shows
+# Todo: Fix Manual Pre-Playback Ad — take 2
+
+## Problem (user feedback)
+- Shows auto-play next episode ad: WORKS ✓
+- Manual tap on movie/show: NO ad, just longer loading ✗
+- My 15s poll made loading slower without ever showing an ad
+- => Manual ad unit (6722496029) is NOT getting ad fill, OR show() path is broken
 
 ## Investigation
-- [x] Pull latest main and read current AdManager.kt
-- [x] Read current PlayerActivity.kt (manual ad LaunchedEffect + extraction gate)
-- [x] Read MainActivity.kt launch paths — all pass isAutoPlay=false ✓
-- [x] Read PiratesfilmCoveApplication.kt (init) ✓
-- [x] Root cause: manual ad not preloaded in time → 5s poll times out → no ad shown.
-        Next-episode ad works because SDK has minutes to load by then.
+- [x] Re-read current AdManager.kt show path for manual ad
+- [ ] Re-read PlayerActivity manual ad LaunchedEffect + adGateOpen
+- [ ] Determine real root cause (ad fill vs show() vs gate logic)
+- [ ] Decide fix approach
 
-## Fix (AdManager.kt)
-- [ ] Add auto-retry on manual ad load failure (retry after delay)
-- [ ] Increase manual ad poll timeout (5s → 15s) to wait for slow SDK init
-- [ ] Kick off a fresh preload from showInterstitialBeforePlayback when ad is null
-- [ ] Add a "warm-up" preload trigger so the manual ad loads ASAP on app open
-- [ ] Verify code compiles (logic check)
+## Fix
+- [ ] Implement real fix
+- [ ] Revert/shorten the 15s poll that made loading slow
+- [ ] Verify logic
 
 ## Ship
-- [ ] Commit and push to main (triggers CI build)
+- [ ] Commit + push to main
+- [ ] Verify CI build
 - [ ] Report to user
