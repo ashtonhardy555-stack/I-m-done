@@ -2,6 +2,7 @@ package com.ashtonhardy.piratesfilmcove.ui.player
 
 import android.content.Context
 import android.content.Intent
+import android.app.Activity
 import android.net.Uri
 import android.os.Bundle
 import android.os.PowerManager
@@ -521,6 +522,16 @@ fun PlayerScreen(
     var isLoading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var infoMessage by remember { mutableStateOf<String?>(null) }
+
+    // --- Interstitial ad gate --------------------------------------- //
+    // A full-screen interstitial ad is shown BEFORE video playback starts.
+    // The user must close the ad before the movie/show begins playing.
+    // `adDismissed` gates the ExoPlayerView: it only appears once the ad has
+    // been closed (or failed to load — in which case we don't block the user).
+    // `adTriggered` prevents the ad from being requested more than once per
+    // playback session (e.g. if streamUrl changes due to fallback retries).
+    var adDismissed by remember { mutableStateOf(false) }
+    var adTriggered by remember { mutableStateOf(false) }
 
     // --- Current season/episode (mutable so the next episode can auto-play) -- //
     // season & episode arrive as immutable params, but to auto-advance to the
@@ -1285,6 +1296,41 @@ fun PlayerScreen(
     }
 
 
+    // ── Interstitial ad gate ────────────────────────────────────────── //
+    // When the stream URL is resolved (isLoading is false, streamUrl is
+    // set, no error), trigger the interstitial ad BEFORE playback. The ad
+    // shows full-screen over this activity. Playback (ExoPlayerView) only
+    // appears once the ad is dismissed (adDismissed = true). If the ad
+    // fails to load, onAdDismissed fires immediately and playback proceeds
+    // without blocking the user.
+    LaunchedEffect(streamUrl, error) {
+        if (streamUrl != null && error == null && !adTriggered && !adDismissed) {
+            adTriggered = true
+            val activity = localContext as? Activity
+            if (activity != null) {
+                com.ashtonhardy.piratesfilmcove.ui.AdManager.showInterstitialAd(activity) {
+                    // onAdDismissed — the ad was closed (or failed to load).
+                    // Now allow playback to start.
+                    adDismissed = true
+                }
+            } else {
+                // No activity context — skip the ad, proceed to playback.
+                adDismissed = true
+            }
+        }
+    }
+
+    // Reset the ad gate when the stream URL is cleared (e.g. fallback retry
+    // or next-episode auto-play) so a fresh ad can be shown for the new
+    // playback session.
+    LaunchedEffect(streamUrl) {
+        if (streamUrl == null) {
+            adTriggered = false
+            adDismissed = false
+        }
+    }
+
+
     // --------------------------------------------------------------- //
     //  UI                                                              //
     // --------------------------------------------------------------- //
@@ -1305,6 +1351,15 @@ fun PlayerScreen(
                 },
                 onBack = { (localContext as? ComponentActivity)?.finish() }
             )
+
+            // ── Interstitial ad is showing (or loading) ── //
+            // The ad displays full-screen over the activity. This composable
+            // just renders a black background with the poster/title so the
+            // user sees something clean behind the ad. ExoPlayerView does NOT
+            // appear until adDismissed becomes true (ad closed or failed).
+            streamUrl != null && !adDismissed -> {
+                AdGateScreen(title, posterUrl, backdropUrl)
+            }
 
             streamUrl != null -> {
                 ExoPlayerView(
@@ -1782,9 +1837,71 @@ private fun ServerPickerOverlay(
 // ---------------------------------------------------------------- //
 
 /**
- * Full-bleed backdrop with the poster + a spinner while the stream is being
- * resolved. The TMDB artwork is the "thumbnail before the video starts".
+ * Ad gate screen — shown while the interstitial ad is displayed full-screen
+ * over the activity. The ad itself renders on top of this composable, so this
+ * just provides a clean black background with the poster/title so the user
+ * sees something nice behind/around the ad. ExoPlayerView does NOT appear
+ * until the ad is dismissed.
  */
+@Composable
+private fun AdGateScreen(
+    title: String,
+    posterUrl: String?,
+    backdropUrl: String?
+) {
+    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+        // Backdrop as full-bleed background (faded).
+        if (!backdropUrl.isNullOrBlank()) {
+            AsyncImage(
+                model = backdropUrl,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+        // Dark scrim.
+        Box(modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xDD000000)))
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            if (!posterUrl.isNullOrBlank()) {
+                AsyncImage(
+                    model = posterUrl,
+                    contentDescription = title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .width(160.dp)
+                        .height(240.dp)
+                        .background(Color(0xFF1F1F1F))
+                )
+                Spacer(Modifier.height(20.dp))
+            }
+            Text(
+                text = title,
+                color = Color.White,
+                style = MaterialTheme.typography.titleLarge,
+                textAlign = TextAlign.Center
+            )
+            Spacer(Modifier.height(24.dp))
+            CircularProgressIndicator(color = Color.White)
+            Spacer(Modifier.height(16.dp))
+            Text(
+                text = "Preparing your stream…",
+                color = Color.White.copy(alpha = 0.8f),
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center
+            )
+        }
+    }
+}
+
 @Composable
 private fun LoadingScreen(
     title: String,

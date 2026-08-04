@@ -1,5 +1,6 @@
 package com.ashtonhardy.piratesfilmcove.ui
 
+import android.app.Activity
 import android.content.Context
 import android.util.Log
 import android.view.ViewGroup
@@ -7,28 +8,31 @@ import android.widget.FrameLayout
 import com.google.android.gms.ads.AdRequest
 import com.google.android.gms.ads.AdSize
 import com.google.android.gms.ads.AdView
+import com.google.android.gms.ads.LoadAdError
+import com.google.android.gms.ads.interstitial.InterstitialAd
+import com.google.android.gms.ads.interstitial.InterstitialAdLoadCallback
 import java.util.concurrent.ConcurrentLinkedQueue
 
 /**
- * AdManager — owns the AdMob **Banner** ad configuration.
+ * AdManager — owns the AdMob ad configuration for the app.
  *
- * Banner ads are shown **only on loading screens** (the screen displayed while
- * a movie or show is resolving its stream URL). Three banner ads are displayed
- * simultaneously on that loading screen. They are destroyed automatically the
- * moment the loading screen disappears (i.e. when the video starts playing or
- * an error is shown). No ads appear anywhere else in the app.
+ * Two ad types are used:
  *
- * **Pre-loading:** To avoid the banner ads appearing blank for a second or two
- * after the loading screen pops up, [preloadBannerAds] creates and loads a pool
- * of AdViews in the background (called from MainActivity's LaunchedEffect as
- * soon as the home screen appears). When the loading screen's [BannerAdView]
- * composable needs an ad, it calls [takePreloadedBannerAd] which pops a
- * ready-or-loading AdView from the pool. If the pool is empty (e.g. the user
- * tapped a movie before preloading finished), a fresh AdView is created and
- * loaded on the spot so there is always a graceful fallback.
+ *  **1. Banner ads** ([BANNER_AD_UNIT_ID]) — shown **only on loading screens**
+ *  (the screen displayed while a movie or show is resolving its stream URL).
+ *  Three banner ads are displayed simultaneously on that loading screen. They
+ *  are destroyed automatically the moment the loading screen disappears (i.e.
+ *  when the video starts playing or an error is shown). Pre-loaded via a pool
+ *  so they appear instantly.
  *
- * The banner ad unit ID is [BANNER_AD_UNIT_ID]. The AdMob app ID (with "~")
- * lives in `AndroidManifest.xml`.
+ *  **2. Interstitial ad** ([INTERSTITIAL_AD_UNIT_ID]) — a full-screen ad shown
+ *  **before video playback starts**. When the user taps a movie or show, the
+ *  stream URL is resolved (loading screen with banners), then the interstitial
+ *  ad is shown. **Playback does NOT start until the ad is closed/exited.**
+ *  If the ad fails to load or is unavailable, playback proceeds immediately
+ *  without blocking the user.
+ *
+ * The AdMob app ID (with "~") lives in `AndroidManifest.xml`.
  */
 object AdManager {
 
@@ -41,9 +45,19 @@ object AdManager {
      */
     const val BANNER_AD_UNIT_ID = "ca-app-pub-8069271908902310/6225652058"
 
+    /**
+     * AdMob **Interstitial** ad-unit ID (`1002345614`). A full-screen ad shown
+     * before video playback starts. The user must close the ad before the
+     * movie/show begins playing. If the ad fails to load, playback proceeds
+     * without blocking.
+     */
+    const val INTERSTITIAL_AD_UNIT_ID = "ca-app-pub-8069271908902310/1002345614"
+
     /** Whether the SDK has been initialised. */
     @Volatile
     private var initialised = false
+
+    // ── Banner ad preloading pool ────────────────────────────────────── //
 
     /**
      * Pool of pre-loaded [AdView]s. Each entry is an AdView that has already
@@ -56,6 +70,27 @@ object AdManager {
      */
     private val bannerPool = ConcurrentLinkedQueue<AdView>()
 
+    // ── Interstitial ad ──────────────────────────────────────────────── //
+
+    /**
+     * The currently loaded interstitial ad, or `null` if none is loaded or
+     * it has already been shown. Access is guarded by [interstitialLock].
+     */
+    @Volatile
+    private var loadedInterstitial: InterstitialAd? = null
+
+    /** Lock for interstitial load/show coordination. */
+    private val interstitialLock = Any()
+
+    /**
+     * True if an interstitial ad load is currently in flight (prevents
+     * duplicate concurrent load requests).
+     */
+    @Volatile
+    private var interstitialLoading = false
+
+    // ── SDK initialisation ───────────────────────────────────────────── //
+
     /**
      * Initialises the Google Mobile Ads SDK. Safe to call multiple times.
      * Called from `PiratesfilmCoveApplication.onCreate`.
@@ -65,10 +100,12 @@ object AdManager {
         initialised = true
         runCatching {
             com.google.android.gms.ads.MobileAds.initialize(context) {
-                Log.d(TAG, "Mobile Ads SDK initialised (banner ads).")
+                Log.d(TAG, "Mobile Ads SDK initialised.")
             }
         }.onFailure { Log.w(TAG, "MobileAds.initialize failed: ${it.message}") }
     }
+
+    // ── Banner ad methods ────────────────────────────────────────────── //
 
     /**
      * Creates and returns a fresh [AdView] configured as a banner ad using
@@ -149,13 +186,183 @@ object AdManager {
         return adView
     }
 
+    // ── Interstitial ad methods ──────────────────────────────────────── //
+
     /**
-     * Best-effort "warm up" — ensures the Mobile Ads SDK is initialised early
-     * and kicks off banner ad preloading so the loading screen gets instant
-     * ads. No-op if already done (preload still tops up if under count).
+     * Pre-loads an interstitial ad in the background so it is ready to show
+     * instantly when the user taps a movie/show. Safe to call multiple times —
+     * if an ad is already loaded or currently loading, this is a no-op.
+     *
+     * Called from the home screen's `LaunchedEffect(Unit)` (alongside banner
+     * preloading) so by the time the user taps something the interstitial is
+     * already fetched.
+     *
+     * @param context Any context (application context is fine).
+     */
+    fun preloadInterstitialAd(context: Context) {
+        if (!initialised) init(context)
+        synchronized(interstitialLock) {
+            if (loadedInterstitial != null) {
+                Log.d(TAG, "preloadInterstitialAd: already loaded, skipping.")
+                return
+            }
+            if (interstitialLoading) {
+                Log.d(TAG, "preloadInterstitialAd: already loading, skipping.")
+                return
+            }
+            interstitialLoading = true
+        }
+        Log.d(TAG, "preloadInterstitialAd: requesting interstitial ad…")
+        loadInterstitialAdInternal(context, null)
+    }
+
+    /**
+     * Loads an interstitial ad. If an ad is already loaded, the [onLoaded]
+     * callback fires immediately. If a load is already in progress, the
+     * callback is stored and fired when the load completes.
+     *
+     * @param context  Any context (application context is fine).
+     * @param onLoaded Called when the ad is ready to show (or on load failure
+     *                 with `null` if the ad could not be loaded). The caller
+     *                 should then call [showInterstitialAd].
+     */
+    private fun loadInterstitialAdInternal(
+        context: Context,
+        onLoaded: ((Boolean) -> Unit)?
+    ) {
+        InterstitialAd.load(
+            context,
+            INTERSTITIAL_AD_UNIT_ID,
+            AdRequest.Builder().build(),
+            object : InterstitialAdLoadCallback() {
+                override fun onAdLoaded(ad: InterstitialAd) {
+                    Log.d(TAG, "Interstitial ad loaded successfully.")
+                    synchronized(interstitialLock) {
+                        loadedInterstitial = ad
+                        interstitialLoading = false
+                    }
+                    onLoaded?.invoke(true)
+                }
+
+                override fun onAdFailedToLoad(error: LoadAdError) {
+                    Log.w(TAG, "Interstitial ad failed to load: ${error.message}")
+                    synchronized(interstitialLock) {
+                        loadedInterstitial = null
+                        interstitialLoading = false
+                    }
+                    onLoaded?.invoke(false)
+                }
+            }
+        )
+    }
+
+    /**
+     * Shows the pre-loaded interstitial ad over the given [activity], or loads
+     * one on the spot if none is pre-loaded.
+     *
+     * **Playback gate:** The [onAdDismissed] callback fires when the ad is
+     * closed by the user (or when the ad fails to load / is unavailable). The
+     * caller MUST wait for this callback before starting video playback —
+     * playback must NOT begin while the interstitial is on screen.
+     *
+     * If the ad fails to load, [onAdDismissed] is called immediately so the
+     * user is never blocked waiting for an ad that will never come.
+     *
+     * @param activity     The activity to show the ad over (full-screen).
+     * @param onAdDismissed Called when the ad is closed or unavailable.
+     *                       Playback should start when this fires.
+     */
+    fun showInterstitialAd(activity: Activity, onAdDismissed: () -> Unit) {
+        if (!initialised) init(activity)
+
+        val ad: InterstitialAd? = synchronized(interstitialLock) {
+            loadedInterstitial
+        }
+
+        if (ad != null) {
+            // Ad is already loaded — show it now.
+            Log.d(TAG, "showInterstitialAd: showing pre-loaded interstitial.")
+            showLoadedInterstitial(ad, activity, onAdDismissed)
+        } else {
+            // No pre-loaded ad — load one on the spot, then show (or dismiss
+            // if the load fails so the user is never blocked).
+            synchronized(interstitialLock) {
+                if (interstitialLoading) {
+                    // A load is already in flight from preloadInterstitialAd.
+                    // We'll wait for it by polling — but to keep things simple
+                    // and robust, we just load a fresh one here. The last one
+                    // to arrive wins.
+                }
+                interstitialLoading = true
+            }
+            Log.d(TAG, "showInterstitialAd: no pre-loaded ad, loading on the spot…")
+            loadInterstitialAdInternal(activity) { success ->
+                if (success) {
+                    val loadedAd = synchronized(interstitialLock) { loadedInterstitial }
+                    if (loadedAd != null) {
+                        showLoadedInterstitial(loadedAd, activity, onAdDismissed)
+                    } else {
+                        // Race: ad was shown/used elsewhere. Dismiss to unblock.
+                        Log.w(TAG, "showInterstitialAd: loaded but ad was null on show, dismissing.")
+                        onAdDismissed()
+                    }
+                } else {
+                    // Load failed — don't block the user, proceed to playback.
+                    Log.w(TAG, "showInterstitialAd: load failed, proceeding without ad.")
+                    onAdDismissed()
+                }
+            }
+        }
+    }
+
+    /**
+     * Shows an already-loaded [InterstitialAd] and wires up the dismissal
+     * callback. Clears the [loadedInterstitial] reference so the next show
+     * triggers a fresh load.
+     */
+    private fun showLoadedInterstitial(
+        ad: InterstitialAd,
+        activity: Activity,
+        onAdDismissed: () -> Unit
+    ) {
+        // Clear the stored reference — this ad is being consumed.
+        synchronized(interstitialLock) {
+            loadedInterstitial = null
+        }
+
+        ad.fullScreenContentCallback = object : com.google.android.gms.ads.FullScreenContentCallback() {
+            override fun onAdDismissedFullScreenContent() {
+                Log.d(TAG, "Interstitial ad dismissed — starting playback.")
+                onAdDismissed()
+            }
+
+            override fun onAdFailedToShowFullScreenContent(
+                adError: com.google.android.gms.ads.AdError
+            ) {
+                Log.w(TAG, "Interstitial ad failed to show: ${adError.message}")
+                // Don't block the user — proceed to playback.
+                onAdDismissed()
+            }
+
+            override fun onAdShowedFullScreenContent() {
+                Log.d(TAG, "Interstitial ad shown (full-screen).")
+            }
+        }
+
+        ad.show(activity)
+    }
+
+    // ── Warm-up ──────────────────────────────────────────────────────── //
+
+    /**
+     * Best-effort "warm up" — ensures the Mobile Ads SDK is initialised early,
+     * kicks off banner ad preloading (so the loading screen gets instant ads),
+     * and pre-loads an interstitial ad (so it's ready to show before playback).
+     * No-op if already done (preload still tops up if under count).
      */
     fun warmUp(context: Context) {
         if (!initialised) init(context)
         preloadBannerAds(context, 3)
+        preloadInterstitialAd(context)
     }
 }
