@@ -168,11 +168,18 @@ class SearchViewModel : ViewModel() {
                         _canLoadMore.value = false
                         return@withLock
                     }
-                    // Append immediately so the grid grows, then refine the
-                    // new batch down to only-streamable titles.
-                    _results.value = _results.value + fresh
+                    // Filter the new batch for availability FIRST, then append
+                    // in a SINGLE update. This avoids the double-update glitch
+                    // (grow then shrink) that caused scroll position jumps and
+                    // made the "Show More" button appear to vanish.
                     page = nextPage
-                    refineResults(fresh, replace = false)
+                    val ctx = appContext()
+                    val availableMore = if (ctx != null) {
+                        StreamAvailabilityChecker.filterAvailable(ctx, fresh)
+                    } else {
+                        fresh
+                    }
+                    _results.value = _results.value + availableMore
                 } catch (e: Exception) {
                     e.printStackTrace()
                     _canLoadMore.value = false

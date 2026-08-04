@@ -1,7 +1,6 @@
 package com.ashtonhardy.piratesfilmcove.ui
 
 import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -38,20 +37,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.LocalCafe
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material.icons.filled.Upgrade
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -91,7 +86,6 @@ import com.ashtonhardy.piratesfilmcove.ui.theme.TextPrimary
 import com.ashtonhardy.piratesfilmcove.ui.tv.SeasonEpisodePicker
 import com.ashtonhardy.piratesfilmcove.ui.tv.TvScreen
 import com.ashtonhardy.piratesfilmcove.ui.updates.UpdatesScreen
-import com.ashtonhardy.piratesfilmcove.ui.util.isTvDevice
 import com.ashtonhardy.piratesfilmcove.ui.util.responsiveDims
 
 private enum class Tab(val label: String, val icon: ImageVector) {
@@ -150,36 +144,6 @@ private fun AppRoot() {
         // screen instead of loading blank and filling in a second later.
         com.ashtonhardy.piratesfilmcove.ui.AdManager.warmUp(context)
         com.ashtonhardy.piratesfilmcove.ui.AutoUpdater.checkAndPrompt(context)
-    }
-
-    // ── One-time "Buy Me a Coffee" prompt (phone only) ────────────────── //
-    // Shows a small support dialog the first time the app is opened on a
-    // phone/tablet. Never shown on Android TV (lean-back UI, no good place
-    // for a tap-through CTA). A SharedPreferences flag ("bmc_prompt_seen")
-    // guarantees it only ever appears once per install; the persistent link
-    // in Updates remains for anyone who dismisses it.
-    val bmcPrefs = remember {
-        context.getSharedPreferences("support_prefs", android.content.Context.MODE_PRIVATE)
-    }
-    // isTvDevice() is @Composable, so it must be called in the composable body
-    // (not inside a remember {} lambda, where composable calls are forbidden).
-    val isTv = isTvDevice()
-    var showBmcDialog by remember {
-        mutableStateOf(
-            !isTv && !bmcPrefs.getBoolean("bmc_prompt_seen", false)
-        )
-    }
-    val onBmcDismiss: () -> Unit = {
-        bmcPrefs.edit().putBoolean("bmc_prompt_seen", true).apply()
-        showBmcDialog = false
-    }
-    val onBmcOpen: () -> Unit = {
-        bmcPrefs.edit().putBoolean("bmc_prompt_seen", true).apply()
-        showBmcDialog = false
-        context.startActivity(
-            Intent(Intent.ACTION_VIEW, Uri.parse("https://www.buymeacoffee.com/Bobyyy555"))
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        )
     }
 
     fun launchMovie(item: TmdbItem) {
@@ -266,7 +230,7 @@ private fun AppRoot() {
         }
     }
 
-    // ── Continue Watching resume handler ─────────────────────────── //
+    // ── Continue Watching resume handler ────────────── //
     // Launches the player directly at the saved position (bypassing the
     // detail screen) so a Continue Watching card resumes in one click.
     val onResume: (TmdbItem, Long) -> Unit = remember {
@@ -282,7 +246,7 @@ private fun AppRoot() {
         }
     }
 
-    // ── Back-button hierarchy ──────────────────────────────────────────────
+    // ── Back-button hierarchy ──────────────────────────────────────────
     // On a TV remote the Back button should NEVER instantly quit the app.
     // It peels off overlays one layer at a time: detail → search → base.
     // Only at the base screen do we let the system handle back (exit).
@@ -297,11 +261,6 @@ private fun AppRoot() {
     BackHandler(enabled = sideNavVisible) {
         sideNavVisible = false
         sideNavAutoShown = false
-    }
-
-    // ── One-time Buy Me a Coffee dialog (phone, first launch only) ────── //
-    if (showBmcDialog) {
-        BuyMeCoffeeDialog(onOpen = onBmcOpen, onDismiss = onBmcDismiss)
     }
 
     // ── Search overlay ──
@@ -751,73 +710,4 @@ private fun TvNavItem(
             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
         )
     }
-}
-
-// ─────────────────────────────────────────────────────────────────────── //
-//  Buy Me a Coffee one-time prompt dialog (phone only)                   //
-//  Shown once on first launch; a "support_prefs" SharedPreferences flag  //
-//  ("bmc_prompt_seen") prevents it from reappearing. Dismiss records the //
-//  flag too, so it never nags again — the persistent link in Updates is  //
-//  the always-available fallback.                                        //
-// ─────────────────────────────────────────────────────────────────────── //
-@Composable
-private fun BuyMeCoffeeDialog(onOpen: () -> Unit, onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = Bg3,
-        titleContentColor = TextPrimary,
-        textContentColor = TextMuted,
-        icon = {
-            Icon(
-                imageVector = Icons.Filled.LocalCafe,
-                contentDescription = null,
-                tint = Color(0xFFFFDD00), // Buy Me a Coffee amber
-                modifier = Modifier.size(40.dp)
-            )
-        },
-        title = {
-            Text(
-                text = "Enjoying the app?",
-                color = TextPrimary,
-                fontWeight = FontWeight.Bold,
-                fontSize = 20.sp
-            )
-        },
-        text = {
-            Text(
-                text = "If you'd like to support its development, " +
-                    "you can buy me a coffee. No pressure at all — " +
-                    "and you won't see this again.",
-                color = TextMuted,
-                fontSize = 14.sp,
-                lineHeight = 20.sp
-            )
-        },
-        confirmButton = {
-            Button(
-                onClick = onOpen,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFDD00)),
-                shape = RoundedCornerShape(8.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.LocalCafe,
-                    contentDescription = null,
-                    tint = Color(0xFF1A1A1A),
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    "Buy me a coffee",
-                    color = Color(0xFF1A1A1A),
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp
-                )
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Maybe later", color = TextMuted, fontSize = 14.sp)
-            }
-        }
-    )
 }

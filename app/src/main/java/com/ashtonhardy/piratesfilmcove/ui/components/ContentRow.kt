@@ -82,9 +82,27 @@ fun ContentRow(
     val dims = responsiveDims()
     val listState = rememberLazyListState()
 
-    // Brief settle so the first card peeks from the left edge consistently.
+    // When new items are appended (Load More was pressed), scroll the row so
+    // the LAST card of the *previous* batch is visible at the left edge —
+    // this naturally reveals the newly-loaded cards and keeps the Load More
+    // button (which lives at the very end) reachable. Without this, the
+    // LazyRow can snap back to an earlier scroll position when the list is
+    // replaced (filtering shrinks it), making it look like the button
+    // "disappeared" when really it just scrolled out of view.
+    //
+    // We track the previous item count and only auto-scroll when the list
+    // GROWS (new items appended), never on the initial load or when the list
+    // shrinks (filtering). This guarantees the row always STARTS at the
+    // beginning (left) on first appearance, and only advances rightward when
+    // the user actively loads more.
+    val previousSize = remember { androidx.compose.runtime.mutableIntStateOf(0) }
     LaunchedEffect(items.size) {
-        if (items.isNotEmpty()) kotlinx.coroutines.delay(80)
+        if (items.size > previousSize.intValue && previousSize.intValue > 0) {
+            // Scroll to the first newly-added card so the user sees the fresh
+            // content and the Load More button is one scroll away at the end.
+            listState.animateScrollToItem(previousSize.intValue)
+        }
+        previousSize.intValue = items.size
     }
 
     Column(modifier = modifier.padding(bottom = if (dims.isTv) 28.dp else 18.dp)) {

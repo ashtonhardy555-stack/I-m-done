@@ -335,14 +335,17 @@ class HomeViewModel : ViewModel() {
                 _isLoadingMore.value = false
                 return@withLock
             }
-            // Append the raw batch immediately, then filter the new batch.
-            _trending.value = _trending.value + more
+            // Filter the new batch for availability FIRST, then append
+            // in a SINGLE update. This avoids the double-update glitch
+            // (grow then shrink) that caused the LazyRow scroll position
+            // to jump and made the Load More button appear to vanish.
             val ctx = appContext()
-            if (ctx != null) {
-                val availableMore = StreamAvailabilityChecker.filterAvailable(ctx, more)
-                val moreIds = more.map { it.id }.toSet()
-                _trending.value = _trending.value.filter { it.id !in moreIds } + availableMore
+            val availableMore = if (ctx != null) {
+                StreamAvailabilityChecker.filterAvailable(ctx, more)
+            } else {
+                more
             }
+            _trending.value = _trending.value + availableMore
             // End of catalog if the raw batch was smaller than a full page.
             _canLoadMoreTrending.value = more.size >= pageSize
             _isLoadingMore.value = false
@@ -361,13 +364,17 @@ class HomeViewModel : ViewModel() {
                 _isLoadingMore.value = false
                 return@withLock
             }
-            _nowPlaying.value = _nowPlaying.value + more
+            // Filter the new batch for availability FIRST, then append
+            // in a SINGLE update. This avoids the double-update glitch
+            // (grow then shrink) that caused the LazyRow scroll position
+            // to jump and made the Load More button appear to vanish.
             val ctx = appContext()
-            if (ctx != null) {
-                val availableMore = StreamAvailabilityChecker.filterAvailable(ctx, more)
-                val moreIds = more.map { it.id }.toSet()
-                _nowPlaying.value = _nowPlaying.value.filter { it.id !in moreIds } + availableMore
+            val availableMore = if (ctx != null) {
+                StreamAvailabilityChecker.filterAvailable(ctx, more)
+            } else {
+                more
             }
+            _nowPlaying.value = _nowPlaying.value + availableMore
             _canLoadMoreNowPlaying.value = more.size >= pageSize
             _isLoadingMore.value = false
         }
@@ -385,13 +392,17 @@ class HomeViewModel : ViewModel() {
                 _isLoadingMore.value = false
                 return@withLock
             }
-            _popularTV.value = _popularTV.value + more
+            // Filter the new batch for availability FIRST, then append
+            // in a SINGLE update. This avoids the double-update glitch
+            // (grow then shrink) that caused the LazyRow scroll position
+            // to jump and made the Load More button appear to vanish.
             val ctx = appContext()
-            if (ctx != null) {
-                val availableMore = StreamAvailabilityChecker.filterAvailable(ctx, more)
-                val moreIds = more.map { it.id }.toSet()
-                _popularTV.value = _popularTV.value.filter { it.id !in moreIds } + availableMore
+            val availableMore = if (ctx != null) {
+                StreamAvailabilityChecker.filterAvailable(ctx, more)
+            } else {
+                more
             }
+            _popularTV.value = _popularTV.value + availableMore
             _canLoadMorePopularTV.value = more.size >= pageSize
             _isLoadingMore.value = false
         }
@@ -409,13 +420,17 @@ class HomeViewModel : ViewModel() {
                 _isLoadingMore.value = false
                 return@withLock
             }
-            _topRated.value = _topRated.value + more
+            // Filter the new batch for availability FIRST, then append
+            // in a SINGLE update. This avoids the double-update glitch
+            // (grow then shrink) that caused the LazyRow scroll position
+            // to jump and made the Load More button appear to vanish.
             val ctx = appContext()
-            if (ctx != null) {
-                val availableMore = StreamAvailabilityChecker.filterAvailable(ctx, more)
-                val moreIds = more.map { it.id }.toSet()
-                _topRated.value = _topRated.value.filter { it.id !in moreIds } + availableMore
+            val availableMore = if (ctx != null) {
+                StreamAvailabilityChecker.filterAvailable(ctx, more)
+            } else {
+                more
             }
+            _topRated.value = _topRated.value + availableMore
             _canLoadMoreTopRated.value = more.size >= pageSize
             _isLoadingMore.value = false
         }
@@ -433,13 +448,17 @@ class HomeViewModel : ViewModel() {
                 _isLoadingMore.value = false
                 return@withLock
             }
-            _popularMovies.value = _popularMovies.value + more
+            // Filter the new batch for availability FIRST, then append
+            // in a SINGLE update. This avoids the double-update glitch
+            // (grow then shrink) that caused the LazyRow scroll position
+            // to jump and made the Load More button appear to vanish.
             val ctx = appContext()
-            if (ctx != null) {
-                val availableMore = StreamAvailabilityChecker.filterAvailable(ctx, more)
-                val moreIds = more.map { it.id }.toSet()
-                _popularMovies.value = _popularMovies.value.filter { it.id !in moreIds } + availableMore
+            val availableMore = if (ctx != null) {
+                StreamAvailabilityChecker.filterAvailable(ctx, more)
+            } else {
+                more
             }
+            _popularMovies.value = _popularMovies.value + availableMore
             _canLoadMorePopularMovies.value = more.size >= pageSize
             _isLoadingMore.value = false
         }

@@ -134,14 +134,17 @@ class TvViewModel : ViewModel() {
             popularPage++
             val existing = _popular.value.map { it.id }.toSet()
             val more = repo.getPopularTV(popularPage).filter { it.id !in existing }
-            // Append the raw batch immediately, then filter the new batch.
-            _popular.value = _popular.value + more
+            // Filter the new batch for availability FIRST, then append
+            // in a SINGLE update. This avoids the double-update glitch
+            // (grow then shrink) that caused the LazyRow scroll position
+            // to jump and made the Load More button appear to vanish.
             val ctx = appContext()
-            if (ctx != null) {
-                val availableMore = StreamAvailabilityChecker.filterAvailable(ctx, more)
-                val moreIds = more.map { it.id }.toSet()
-                _popular.value = _popular.value.filter { it.id !in moreIds } + availableMore
+            val availableMore = if (ctx != null) {
+                StreamAvailabilityChecker.filterAvailable(ctx, more)
+            } else {
+                more
             }
+            _popular.value = _popular.value + availableMore
             _isLoadingMore.value = false
             // End-of-catalog: TMDB sent fewer than a full page (or every
             // item was a duplicate), so there's nothing more to load.
@@ -164,13 +167,17 @@ class TvViewModel : ViewModel() {
             topRatedPage++
             val existing = _topRated.value.map { it.id }.toSet()
             val more = repo.getTopRatedTV(topRatedPage).filter { it.id !in existing }
-            _topRated.value = _topRated.value + more
+            // Filter the new batch for availability FIRST, then append
+            // in a SINGLE update. This avoids the double-update glitch
+            // (grow then shrink) that caused the LazyRow scroll position
+            // to jump and made the Load More button appear to vanish.
             val ctx = appContext()
-            if (ctx != null) {
-                val availableMore = StreamAvailabilityChecker.filterAvailable(ctx, more)
-                val moreIds = more.map { it.id }.toSet()
-                _topRated.value = _topRated.value.filter { it.id !in moreIds } + availableMore
+            val availableMore = if (ctx != null) {
+                StreamAvailabilityChecker.filterAvailable(ctx, more)
+            } else {
+                more
             }
+            _topRated.value = _topRated.value + availableMore
             _isLoadingMore.value = false
             // End-of-catalog: TMDB sent fewer than a full page (or every
             // item was a duplicate), so there's nothing more to load.

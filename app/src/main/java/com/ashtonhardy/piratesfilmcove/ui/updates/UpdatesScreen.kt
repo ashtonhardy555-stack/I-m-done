@@ -9,7 +9,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.LocalCafe
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -29,7 +28,6 @@ import com.ashtonhardy.piratesfilmcove.ui.theme.Bg3
 import com.ashtonhardy.piratesfilmcove.ui.theme.Red
 import com.ashtonhardy.piratesfilmcove.ui.theme.TextMuted
 import com.ashtonhardy.piratesfilmcove.ui.theme.TextPrimary
-import com.ashtonhardy.piratesfilmcove.ui.util.isTvDevice
 import com.ashtonhardy.piratesfilmcove.ui.util.responsiveDims
 import com.ashtonhardy.piratesfilmcove.ui.util.rememberInitialFocusRequester
 import kotlinx.coroutines.launch
@@ -284,51 +282,6 @@ fun UpdatesScreen() {
                         "\"Install unknown apps\" for Netflix in your Android settings.",
                     color = TextMuted, fontSize = 12.sp, lineHeight = 18.sp
                 )
-            }
-        }
-
-        // ── Buy Me a Coffee ─────────────────────────────────────────────── //
-        // A discreet support link shown only on phones/tablets — hidden on
-        // Android TV (no good place for it on the lean-back UI and it would
-        // clutter the Updates focus chain). Opens the creator's BMC page in
-        // the browser. Styled small + muted so it never gets in the way.
-        if (!isTvDevice()) {
-            Spacer(Modifier.height(28.dp))
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 4.dp),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable {
-                            context.startActivity(
-                                Intent(
-                                    Intent.ACTION_VIEW,
-                                    Uri.parse("https://www.buymeacoffee.com/Bobyyy555")
-                                ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            )
-                        }
-                        .padding(horizontal = 14.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.LocalCafe,
-                        contentDescription = null,
-                        tint = Color(0xFFFFDD00), // Buy Me a Coffee amber
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Text(
-                        "Buy me a coffee",
-                        color = TextMuted,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
             }
         }
     }

@@ -35,11 +35,11 @@ object AdManager {
     private const val TAG = "AdManager"
 
     /**
-     * AdMob **Banner** ad-unit ID (`2488038861`). This is a banner-only unit.
+     * AdMob **Banner** ad-unit ID (`6225652058`). This is a banner-only unit.
      * Three instances of this banner are shown on the loading screen while a
      * movie/show is loading. They are destroyed when playback starts.
      */
-    const val BANNER_AD_UNIT_ID = "ca-app-pub-8069271908902310/2488038861"
+    const val BANNER_AD_UNIT_ID = "ca-app-pub-8069271908902310/6225652058"
 
     /** Whether the SDK has been initialised. */
     @Volatile

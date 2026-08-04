@@ -151,17 +151,18 @@ class BrowseViewModel : ViewModel() {
                         genreId = genre?.id?.takeIf { it.isNotEmpty() },
                         page = page
                     ).filter { it.id !in existing }
-                    // Append immediately, then filter the new batch.
-                    _items.value = _items.value + more
+                    // Filter the new batch for availability FIRST, then
+                    // append in a SINGLE update. This avoids the
+                    // double-update glitch (grow then shrink) that
+                    // caused scroll position jumps.
                     _filtering.value = true
                     val ctx = appContext()
-                    if (ctx != null) {
-                        val availableMore = StreamAvailabilityChecker.filterAvailable(ctx, more)
-                        // Keep the already-available items and append only
-                        // the newly-loaded ones that are also available.
-                        val moreIds = more.map { it.id }.toSet()
-                        _items.value = _items.value.filter { it.id !in moreIds } + availableMore
+                    val availableMore = if (ctx != null) {
+                        StreamAvailabilityChecker.filterAvailable(ctx, more)
+                    } else {
+                        more
                     }
+                    _items.value = _items.value + availableMore
                 } catch (e: Exception) {
                     _error.value = "Couldn't load more content."
                 } finally {
