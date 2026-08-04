@@ -181,9 +181,9 @@ class PlayerActivity : ComponentActivity() {
             backdropUrl: String? = null,
             resumePositionMs: Long = 0L,
             // True ONLY when this launch is an automatic advance to the next
-            // TV episode (not a user tap). When true the pre-playback
-            // rewarded video ad is suppressed. Manual launches from the UI
-            // always leave this false so the ad shows before playback.
+            // TV episode (not a user tap). Banner ads show on the loading
+            // screen for every launch type; this flag is kept for the
+            // next-episode auto-play logic.
             isAutoPlay: Boolean = false
         ): Intent = Intent(context, PlayerActivity::class.java).apply {
             putExtra("TMDB_ID", tmdbId)
@@ -281,8 +281,7 @@ class PlayerActivity : ComponentActivity() {
         val backdropUrl = intent.getStringExtra("BACKDROP_URL")
         val resumePositionMs = intent.getLongExtra("RESUME_MS", 0L)
         // True only for an automatic advance to the next TV episode (never a
-        // user tap). Manual launches default to false so the pre-playback
-        // rewarded video ad is shown; auto-play suppresses it.
+        // user tap). Banner ads show on the loading screen for every launch.
         val isAutoPlay = intent.getBooleanExtra("IS_AUTOPLAY", false)
 
         if (tmdbId == -1) {
@@ -303,17 +302,11 @@ class PlayerActivity : ComponentActivity() {
         progressPosterPath = posterUrl?.let { extractTmdbPath(it) }
         progressBackdropPath = backdropUrl?.let { extractTmdbPath(it) }
 
-        // ── Pre-playback rewarded video ad (manual launches only) ──────── //
-        // For a manual (user-tapped) launch we reset the per-launch ad guard.
-        // The actual ad is shown from inside PlayerScreen via a LaunchedEffect,
-        // and extraction is gated on an `adGateOpen` Compose state so playback
-        // does NOT begin resolving until the rewarded video ad is dismissed
-        // (user skips/closes after 5s, ad finishes, or load failure/timeout).
-        // Auto-play launches skip the manual ad.
-        if (!isAutoPlay) {
-            com.ashtonhardy.piratesfilmcove.ui.AdManager.resetForNewLaunch()
-        }
-
+        // ── Banner ads ─────────────────────────────────────────────────── //
+        // Banner ads are shown only on the loading screen (while the stream
+        // URL is being resolved). They are destroyed automatically when the
+        // loading screen disappears — no rewarded video ads, no ad gate, and
+        // no ads anywhere else in the app. See AdManager + LoadingScreen.
         setContent {
             NetflixTheme {
                 PlayerScreen(
@@ -522,14 +515,6 @@ fun PlayerScreen(
     val localContext = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    // --- Ad gate ------------------------------------------------------- //
-    // For manual (user-tapped) launches the pre-playback rewarded video ad
-    // is shown before extraction begins. `adGateOpen` starts false so the
-    // extraction LaunchedEffect is blocked; it flips to true inside the ad's
-    // onAdDismissed callback (user skips/closes the ad after 5s, ad finishes,
-    // or load failure/timeout). Auto-play launches start with the gate open.
-    var adGateOpen by remember { mutableStateOf(isAutoPlayLaunch) }
-
     // --- Player + extraction state ---------------------------------- //
     var streamUrl by remember { mutableStateOf<String?>(null) }
     var streamHeaders by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
@@ -628,43 +613,13 @@ fun PlayerScreen(
     }
 
     // --------------------------------------------------------------- //
-    //  Pre-playback rewarded video ad (manual launches only)           //
-    // --------------------------------------------------------------- //
-    // Show the manual rewarded video ad for a user-tapped launch. It plays
-    // full-screen in the app (like a YouTube pre-roll) with a skip button
-    // that appears after 5 seconds. Extraction is gated on `adGateOpen`
-    // below — it will NOT run until this callback fires (ad skipped/closed
-    // by the user after 5s, ad finished, or load failure/timeout). The real
-    // video only starts loading after the ad is gone. Auto-play launches
-    // skip this entirely.
-    LaunchedEffect(isAutoPlayLaunch) {
-        if (!isAutoPlayLaunch) {
-            // Show a message on the loading screen so the user knows a short
-            // skippable video ad is about to play and the video will follow.
-            infoMessage = "Your video will play after a short ad — you can skip in 5 seconds…"
-            (localContext as? android.app.Activity)?.let { activity ->
-                com.ashtonhardy.piratesfilmcove.ui.AdManager.showRewardedBeforePlayback(
-                    activity = activity,
-                    isAutoPlay = false
-                ) {
-                    // onAdDismissed — the user skipped/closed the ad (or it
-                    // finished / failed to load). Open the gate so extraction
-                    // can begin and the real video starts.
-                    infoMessage = null
-                    adGateOpen = true
-                }
-            }
-        }
-    }
-
-    // --------------------------------------------------------------- //
     //  Extraction LaunchedEffect                                       //
     // --------------------------------------------------------------- //
-    // Gated on `adGateOpen`: for manual launches this stays false until the
-    // pre-playback ad is dismissed, so the video does not start resolving
-    // while the ad is still on screen. Auto-play launches start open.
-    LaunchedEffect(tmdbId, contentType, currentSeason, currentEpisode, attempt, adGateOpen) {
-        if (!adGateOpen) return@LaunchedEffect
+    // Banner ads are shown on the loading screen (see LoadingScreen) while
+    // this extraction runs. They are removed automatically when the loading
+    // screen disappears. No ad gate is needed — extraction starts
+    // immediately for every launch.
+    LaunchedEffect(tmdbId, contentType, currentSeason, currentEpisode, attempt) {
         isLoading = true
         error = null
         infoMessage = null
@@ -1367,11 +1322,11 @@ fun PlayerScreen(
                     progressPosterPath = posterUrl?.let { extractTmdbPath(it) },
                     progressBackdropPath = backdropUrl?.let { extractTmdbPath(it) },
                     onPlayingChange = { playing -> isPlaying = playing },
-                    // The instant the selected show/movie starts playing
-                    // (STATE_READY), stop all ads so nothing overlays the video.
-                    onPlaybackStart = {
-                        com.ashtonhardy.piratesfilmcove.ui.AdManager.onPlaybackStarted()
-                    },
+                    // When playback starts (STATE_READY) the loading screen
+                    // disappears, which automatically destroys the banner ads
+                    // shown on it (AndroidView onRelease). No manual ad
+                    // cleanup is needed.
+                    onPlaybackStart = { },
                     onEpisodeEnded = {
                         // ── Next-episode auto-play (TV shows only) ────────── //
                         // Fired by ExoPlayerView when playback reaches
@@ -1415,44 +1370,25 @@ fun PlayerScreen(
                             }
                             Log.d("Player", "Auto-playing next episode: S$nextSeason E$nextEp")
                             nextEpisodeLabel = "Next episode: S$nextSeason E$nextEp"
-                            // Show the next-episode rewarded video ad during
-                            // the auto-load gap (between this episode ending
-                            // and the next one starting to play). It plays
-                            // full-screen in the app (like a YouTube ad) with
-                            // a skip button after 5 seconds. It is
-                            // automatically suppressed the moment the next
-                            // episode actually starts playing (STATE_READY →
-                            // AdManager.onPlaybackStarted).
-                            //
-                            // The next episode does NOT begin resolving/playing
-                            // until this callback fires (ad skipped/closed by
-                            // the user after 5s, ad finished, or load failure).
-                            // We move the episode-advancement code INSIDE the
-                            // callback so auto-playback waits for the ad.
-                            (localContext as? android.app.Activity)?.let { activity ->
-                                com.ashtonhardy.piratesfilmcove.ui.AdManager
-                                    .showNextEpisodeAdDuringLoad(activity) {
-                                        // onAdDismissed — the ad is gone.
-                                        // NOW reset extraction state and
-                                        // advance to the next episode so the
-                                        // LaunchedEffect re-fires for it.
-                                        streamUrl = null
-                                        streamHeaders = emptyMap()
-                                        deliveringServerName = null
-                                        error = null
-                                        excludedRaceProviders = emptySet()
-                                        raceFallbackUsed = false
-                                        candidateQueue = emptyList()
-                                        attempt = 0
-                                        startStage = PlayerActivity.STAGE_VIDSTORM
-                                        isLoading = true
-                                        // Advance the mutable season/episode →
-                                        // the LaunchedEffect keyed on them
-                                        // re-fires extraction.
-                                        currentSeason = nextSeason
-                                        currentEpisode = nextEp
-                                    }
-                            }
+                            // Advance to the next episode. The loading screen
+                            // (with banner ads) will appear automatically while
+                            // the next episode resolves, and the banners will
+                            // be destroyed once it starts playing.
+                            streamUrl = null
+                            streamHeaders = emptyMap()
+                            deliveringServerName = null
+                            error = null
+                            excludedRaceProviders = emptySet()
+                            raceFallbackUsed = false
+                            candidateQueue = emptyList()
+                            attempt = 0
+                            startStage = PlayerActivity.STAGE_VIDSTORM
+                            isLoading = true
+                            // Advance the mutable season/episode →
+                            // the LaunchedEffect keyed on them
+                            // re-fires extraction.
+                            currentSeason = nextSeason
+                            currentEpisode = nextEp
                         }
                     },
                     onPlayerError = { isFatal ->
@@ -1902,7 +1838,55 @@ private fun LoadingScreen(
                 textAlign = TextAlign.Center
             )
         }
+
+        // ── Three banner ads shown simultaneously on the loading screen ── //
+        // These AdViews are created via AdManager and embedded with AndroidView.
+        // They are destroyed automatically when this composable leaves the
+        // composition (i.e. when isLoading becomes false and the loading
+        // screen disappears), because the AndroidView onRelease callback
+        // calls adView.destroy(). No ads appear anywhere else in the app.
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .background(Color(0xE6000000))
+                .padding(top = 4.dp, bottom = 4.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            repeat(3) { index ->
+                BannerAdView(modifier = Modifier.fillMaxWidth())
+                if (index < 2) Spacer(Modifier.height(4.dp))
+            }
+        }
     }
+}
+
+/**
+ * A single AdMob banner ad embedded in Compose via [AndroidView]. The AdView
+ * is created through [AdManager.createBannerAd], loaded with
+ * [AdManager.loadBannerAd], and destroyed in the `onRelease` callback when the
+ * composable leaves the composition (loading screen gone → video playing).
+ */
+@Composable
+private fun BannerAdView(modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    AndroidView(
+        modifier = modifier,
+        factory = { ctx ->
+            val adView = com.ashtonhardy.piratesfilmcove.ui.AdManager.createBannerAd(ctx)
+            com.ashtonhardy.piratesfilmcove.ui.AdManager.loadBannerAd(adView)
+            adView
+        },
+        update = { adView ->
+            // Reload the ad each time the view is updated (e.g. recomposition).
+            com.ashtonhardy.piratesfilmcove.ui.AdManager.loadBannerAd(adView)
+        },
+        onRelease = { adView ->
+            // Destroy the AdView when the loading screen disappears so no
+            // banner ad remains visible during playback.
+            runCatching { adView.destroy() }
+        }
+    )
 }
 
 /**

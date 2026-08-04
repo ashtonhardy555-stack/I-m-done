@@ -144,7 +144,7 @@ private fun AppRoot() {
 
     LaunchedEffect(Unit) {
         // Warm up the Mobile Ads SDK + preload the manual pre-playback
-        // rewarded video ad as early as possible so it is ready by the time
+        // banner ad SDK as early as possible so banner ads are ready by the time
         // the user taps a movie/show. This is the single biggest factor in
         // whether the manual ad shows (vs. timing out and being skipped).
         com.ashtonhardy.piratesfilmcove.ui.AdManager.warmUp(context)

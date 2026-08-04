@@ -1,13 +1,12 @@
-# Todo: Remove auto-close + ensure video waits for user to close ad
+# Todo: Banner ads only on loading screens (simplest approach)
 
-## Changes
-- [ ] Remove 10s auto-close timer for manual ad (ad stays until user closes)
-- [ ] Remove 10s auto-close timer for next-episode ad (ad stays until user closes)
-- [ ] Fix manual ad gate so video never plays before user closes the ad
-  - manualAlreadyShown early-return must NOT fire onAdDismissed (opens gate prematurely)
-- [ ] Show "Your video will play after a short ad" message while ad is showing
-
-## Ship
-- [ ] Commit + push to main
-- [ ] Verify CI build
+## Tasks
+- [ ] Rewrite AdManager.kt: replace rewarded video ads with simple banner ad helpers (unit 2488038861)
+- [ ] Remove ad gate logic from PlayerActivity (adGateOpen, rewarded ad LaunchedEffect)
+- [ ] Add 3 banner AdViews to the LoadingScreen composable
+- [ ] Remove next-episode rewarded ad call (banners show automatically when loading)
+- [ ] Remove/simplify onPlaybackStarted (banners die when loading screen goes away)
+- [ ] Update ProGuard rules for banner ads
+- [ ] Update AndroidManifest comment + other comments
+- [ ] Commit and push, verify CI build
 - [ ] Report to user

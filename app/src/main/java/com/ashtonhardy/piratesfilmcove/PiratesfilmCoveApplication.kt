@@ -52,11 +52,10 @@ class PiratesfilmCoveApplication : Application(), ImageLoaderFactory {
         com.ashtonhardy.piratesfilmcove.data.engine.KodiEngine.init(this)
         com.ashtonhardy.piratesfilmcove.data.engine.KodiEngineService.start(this)
 
-        // Initialise the Google Mobile Ads SDK and preload the rewarded video
-        // ad so it is ready when the user taps a movie/show to watch. The ad
-        // is only shown on manual playback launches (never on auto-play of
-        // the next TV episode's first manual open — see AdManager /
-        // PlayerActivity).
+        // Initialise the Google Mobile Ads SDK. Banner ads are shown only on
+        // the loading screen (while a movie/show stream is being resolved)
+        // and are destroyed when playback starts. See AdManager /
+        // PlayerActivity.
         com.ashtonhardy.piratesfilmcove.ui.AdManager.init(this)
     }
 

@@ -133,10 +133,10 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
 
-    // Google Mobile Ads SDK — used for the Rewarded Video ads shown before
-    // manually-launched playback (movies / TV episodes clicked by the user).
-    // The rewarded ad plays a full-screen video ad in-app (like a YouTube
-    // pre-roll) with a built-in skip button after 5 seconds. Auto-play of
-    // the next TV episode also shows a rewarded ad during the loading gap.
+    // Google Mobile Ads SDK — used for banner ads only. Three banner ads
+    // are shown simultaneously on the loading screen while a movie/show
+    // stream is being resolved. They are destroyed automatically when
+    // playback starts. No rewarded or fullscreen ads are used anywhere.
+    // See AdManager / PlayerActivity.
     implementation("com.google.android.gms:play-services-ads:23.3.0")
 }
