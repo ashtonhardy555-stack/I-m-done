@@ -524,13 +524,22 @@ fun PlayerScreen(
     var infoMessage by remember { mutableStateOf<String?>(null) }
 
     // --- Interstitial ad gate --------------------------------------- //
-    // A full-screen interstitial ad is shown BEFORE video playback starts.
-    // The user must close the ad before the movie/show begins playing.
+    // A full-screen interstitial ad is shown BEFORE the FIRST manual playback
+    // only. The user must close the ad before the movie/show begins playing.
     // `adDismissed` gates the ExoPlayerView: it only appears once the ad has
     // been closed (or failed to load — in which case we don't block the user).
-    // `adTriggered` prevents the ad from being requested more than once per
-    // playback session (e.g. if streamUrl changes due to fallback retries).
-    var adDismissed by remember { mutableStateOf(false) }
+    // `adTriggered` prevents the ad from being requested more than once.
+    //
+    // IMPORTANT: The interstitial ad is shown ONLY for a user-initiated launch
+    // (isAutoPlayLaunch == false). When the app auto-plays the NEXT episode of
+    // a TV show, NO interstitial ad is shown — only the 3 banner ads on the
+    // loading screen appear (same as always). adDismissed is initialised to
+    // true for auto-play launches so ExoPlayerView appears immediately once
+    // the stream resolves, with just the banner-ad loading screen in between.
+    // Once the interstitial has been shown+dismissed for the initial manual
+    // playback, adDismissed stays true for all subsequent auto-play episodes
+    // within the same player session — it is never reset.
+    var adDismissed by remember { mutableStateOf(isAutoPlayLaunch) }
     var adTriggered by remember { mutableStateOf(false) }
 
     // --- Current season/episode (mutable so the next episode can auto-play) -- //
@@ -1298,13 +1307,16 @@ fun PlayerScreen(
 
     // ── Interstitial ad gate ────────────────────────────────────────── //
     // When the stream URL is resolved (isLoading is false, streamUrl is
-    // set, no error), trigger the interstitial ad BEFORE playback. The ad
-    // shows full-screen over this activity. Playback (ExoPlayerView) only
-    // appears once the ad is dismissed (adDismissed = true). If the ad
+    // set, no error), trigger the interstitial ad BEFORE playback — but ONLY
+    // for a user-initiated launch (isAutoPlayLaunch == false). Auto-play of
+    // the next TV episode skips the interstitial entirely; the 3 banner ads
+    // on the loading screen are the only ads shown for auto-play.
+    // The ad shows full-screen over this activity. Playback (ExoPlayerView)
+    // only appears once the ad is dismissed (adDismissed = true). If the ad
     // fails to load, onAdDismissed fires immediately and playback proceeds
     // without blocking the user.
     LaunchedEffect(streamUrl, error) {
-        if (streamUrl != null && error == null && !adTriggered && !adDismissed) {
+        if (streamUrl != null && error == null && !adTriggered && !adDismissed && !isAutoPlayLaunch) {
             adTriggered = true
             val activity = localContext as? Activity
             if (activity != null) {
@@ -1320,15 +1332,11 @@ fun PlayerScreen(
         }
     }
 
-    // Reset the ad gate when the stream URL is cleared (e.g. fallback retry
-    // or next-episode auto-play) so a fresh ad can be shown for the new
-    // playback session.
-    LaunchedEffect(streamUrl) {
-        if (streamUrl == null) {
-            adTriggered = false
-            adDismissed = false
-        }
-    }
+    // Note: adDismissed and adTriggered are NOT reset when streamUrl becomes
+    // null (e.g. during fallback retries or next-episode auto-play). This
+    // ensures the interstitial ad shows at most once per player session —
+    // for the initial manual playback only. Subsequent auto-play episodes
+    // go straight through with just the banner-ad loading screen.
 
 
     // --------------------------------------------------------------- //
