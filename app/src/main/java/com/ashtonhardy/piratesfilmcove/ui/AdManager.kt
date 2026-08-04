@@ -89,6 +89,14 @@ object AdManager {
     @Volatile
     private var interstitialLoading = false
 
+    /**
+     * Pending callbacks waiting for an in-flight interstitial load to
+     * complete. When [loadInterstitialAdInternal] finishes, all pending
+     * callbacks are invoked. This prevents duplicate ad requests when
+     * [preloadInterstitialAd] and [showInterstitialAd] race.
+     */
+    private val pendingLoadCallbacks = java.util.concurrent.ConcurrentLinkedQueue<(Boolean) -> Unit>()
+
     // ── SDK initialisation ───────────────────────────────────────────── //
 
     /**
@@ -210,10 +218,48 @@ object AdManager {
                 Log.d(TAG, "preloadInterstitialAd: already loading, skipping.")
                 return
             }
-            interstitialLoading = true
         }
         Log.d(TAG, "preloadInterstitialAd: requesting interstitial ad…")
-        loadInterstitialAdInternal(context, null)
+        // Start the ad load directly. The ad is stored in loadedInterstitial
+        // when it arrives, ready for showInterstitialAd to pick up. Any
+        // showInterstitialAd call that arrives while this load is in flight
+        // will queue its callback via loadInterstitialAdInternal and be fired
+        // when this load completes.
+        synchronized(interstitialLock) {
+            interstitialLoading = true
+        }
+        InterstitialAd.load(
+            context,
+            INTERSTITIAL_AD_UNIT_ID,
+            AdRequest.Builder().build(),
+            object : InterstitialAdLoadCallback() {
+                override fun onAdLoaded(ad: InterstitialAd) {
+                    Log.d(TAG, "Interstitial ad loaded successfully (preload).")
+                    synchronized(interstitialLock) {
+                        loadedInterstitial = ad
+                        interstitialLoading = false
+                    }
+                    // Fire any pending callbacks from showInterstitialAd.
+                    while (true) {
+                        val cb = pendingLoadCallbacks.poll() ?: break
+                        cb.invoke(true)
+                    }
+                }
+
+                override fun onAdFailedToLoad(error: LoadAdError) {
+                    Log.w(TAG, "Interstitial ad failed to load (preload): ${error.message}")
+                    synchronized(interstitialLock) {
+                        loadedInterstitial = null
+                        interstitialLoading = false
+                    }
+                    // Fire any pending callbacks with failure.
+                    while (true) {
+                        val cb = pendingLoadCallbacks.poll() ?: break
+                        cb.invoke(false)
+                    }
+                }
+            }
+        )
     }
 
     /**
@@ -230,6 +276,20 @@ object AdManager {
         context: Context,
         onLoaded: ((Boolean) -> Unit)?
     ) {
+        // If a load is already in flight, just queue the callback instead of
+        // starting a duplicate request.
+        synchronized(interstitialLock) {
+            if (interstitialLoading && onLoaded != null) {
+                pendingLoadCallbacks.add(onLoaded)
+                Log.d(TAG, "loadInterstitialAdInternal: load in flight, queued callback (${pendingLoadCallbacks.size} pending).")
+                return
+            }
+            interstitialLoading = true
+            if (onLoaded != null) {
+                pendingLoadCallbacks.add(onLoaded)
+            }
+        }
+        Log.d(TAG, "loadInterstitialAdInternal: requesting interstitial ad…")
         InterstitialAd.load(
             context,
             INTERSTITIAL_AD_UNIT_ID,
@@ -241,7 +301,11 @@ object AdManager {
                         loadedInterstitial = ad
                         interstitialLoading = false
                     }
-                    onLoaded?.invoke(true)
+                    // Fire all pending callbacks.
+                    while (true) {
+                        val cb = pendingLoadCallbacks.poll() ?: break
+                        cb.invoke(true)
+                    }
                 }
 
                 override fun onAdFailedToLoad(error: LoadAdError) {
@@ -250,7 +314,11 @@ object AdManager {
                         loadedInterstitial = null
                         interstitialLoading = false
                     }
-                    onLoaded?.invoke(false)
+                    // Fire all pending callbacks with failure.
+                    while (true) {
+                        val cb = pendingLoadCallbacks.poll() ?: break
+                        cb.invoke(false)
+                    }
                 }
             }
         )
@@ -275,6 +343,15 @@ object AdManager {
     fun showInterstitialAd(activity: Activity, onAdDismissed: () -> Unit) {
         if (!initialised) init(activity)
 
+        // Guard: ensure onAdDismissed is only called once (timeout OR ad
+        // callback, whichever fires first).
+        val dismissed = java.util.concurrent.atomic.AtomicBoolean(false)
+        fun safeDismiss() {
+            if (dismissed.compareAndSet(false, true)) {
+                onAdDismissed()
+            }
+        }
+
         val ad: InterstitialAd? = synchronized(interstitialLock) {
             loadedInterstitial
         }
@@ -282,34 +359,41 @@ object AdManager {
         if (ad != null) {
             // Ad is already loaded — show it now.
             Log.d(TAG, "showInterstitialAd: showing pre-loaded interstitial.")
-            showLoadedInterstitial(ad, activity, onAdDismissed)
+            showLoadedInterstitial(ad, activity) { safeDismiss() }
         } else {
             // No pre-loaded ad — load one on the spot, then show (or dismiss
-            // if the load fails so the user is never blocked).
-            synchronized(interstitialLock) {
-                if (interstitialLoading) {
-                    // A load is already in flight from preloadInterstitialAd.
-                    // We'll wait for it by polling — but to keep things simple
-                    // and robust, we just load a fresh one here. The last one
-                    // to arrive wins.
-                }
-                interstitialLoading = true
-            }
+            // if the load fails so the user is never blocked). If a load is
+            // already in flight (from preloadInterstitialAd), the callback
+            // is queued and fired when that load completes — no duplicate
+            // ad request is made.
             Log.d(TAG, "showInterstitialAd: no pre-loaded ad, loading on the spot…")
+
+            // Safety timeout: if the ad doesn't load within 6 seconds, proceed
+            // to playback so the user is never stuck on the ad gate screen.
+            val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+            val timeoutRunnable = Runnable {
+                if (!dismissed.get()) {
+                    Log.w(TAG, "showInterstitialAd: timed out after 6s, proceeding without ad.")
+                    safeDismiss()
+                }
+            }
+            mainHandler.postDelayed(timeoutRunnable, 6000L)
+
             loadInterstitialAdInternal(activity) { success ->
+                mainHandler.removeCallbacks(timeoutRunnable)
                 if (success) {
                     val loadedAd = synchronized(interstitialLock) { loadedInterstitial }
                     if (loadedAd != null) {
-                        showLoadedInterstitial(loadedAd, activity, onAdDismissed)
+                        showLoadedInterstitial(loadedAd, activity) { safeDismiss() }
                     } else {
                         // Race: ad was shown/used elsewhere. Dismiss to unblock.
                         Log.w(TAG, "showInterstitialAd: loaded but ad was null on show, dismissing.")
-                        onAdDismissed()
+                        safeDismiss()
                     }
                 } else {
                     // Load failed — don't block the user, proceed to playback.
                     Log.w(TAG, "showInterstitialAd: load failed, proceeding without ad.")
-                    onAdDismissed()
+                    safeDismiss()
                 }
             }
         }

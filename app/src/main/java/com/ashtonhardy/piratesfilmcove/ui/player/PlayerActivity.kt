@@ -308,6 +308,17 @@ class PlayerActivity : ComponentActivity() {
         // URL is being resolved). They are destroyed automatically when the
         // loading screen disappears — no rewarded video ads, no ad gate, and
         // no ads anywhere else in the app. See AdManager + LoadingScreen.
+        //
+        // Interstitial ad: for a user-initiated playback (NOT auto-play next
+        // episode), preload the interstitial ad NOW so it is ready to show
+        // the instant the stream URL resolves. This runs in parallel with
+        // stream extraction, so by the time the loading screen finishes the
+        // interstitial is already loaded and can pop up immediately. For
+        // auto-play launches we skip this — only the 3 banner ads on the
+        // loading screen are shown.
+        if (!isAutoPlay) {
+            com.ashtonhardy.piratesfilmcove.ui.AdManager.preloadInterstitialAd(this)
+        }
         setContent {
             NetflixTheme {
                 PlayerScreen(
