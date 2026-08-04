@@ -143,10 +143,11 @@ private fun AppRoot() {
     var sideNavAutoShown by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
-        // Warm up the Mobile Ads SDK + preload the manual pre-playback
-        // banner ad SDK as early as possible so banner ads are ready by the time
-        // the user taps a movie/show. This is the single biggest factor in
-        // whether the manual ad shows (vs. timing out and being skipped).
+        // Warm up the Mobile Ads SDK + preload 3 banner ads into the pool
+        // as early as possible (the moment the home screen appears). By the
+        // time the user taps a movie/show, the banner ads are already loaded
+        // (or actively loading) so they appear instantly on the loading
+        // screen instead of loading blank and filling in a second later.
         com.ashtonhardy.piratesfilmcove.ui.AdManager.warmUp(context)
         com.ashtonhardy.piratesfilmcove.ui.AutoUpdater.checkAndPrompt(context)
     }

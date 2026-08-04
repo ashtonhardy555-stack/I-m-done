@@ -588,6 +588,11 @@ fun PlayerScreen(
     // Make sure the server list is loaded so the picker has options.
     LaunchedEffect(Unit) {
         ServerManager.initialize(localContext)
+        // Preload 3 banner ads into the pool so they are ready (or actively
+        // loading) by the time the loading screen appears. This is the key to
+        // banner ads showing up instantly with the loading screen instead of
+        // loading blank and filling in a second or two later.
+        com.ashtonhardy.piratesfilmcove.ui.AdManager.preloadBannerAds(localContext, 3)
     }
     val availableServers = remember { mutableStateOf<List<ServerConfig>>(emptyList()) }
     var selectedServerId by remember { mutableStateOf<String?>(null) }
@@ -1863,8 +1868,9 @@ private fun LoadingScreen(
 
 /**
  * A single AdMob banner ad embedded in Compose via [AndroidView]. The AdView
- * is created through [AdManager.createBannerAd], loaded with
- * [AdManager.loadBannerAd], and destroyed in the `onRelease` callback when the
+ * is obtained from [AdManager.takePreloadedBannerAd] (which pops a pre-loaded,
+ * already-loading ad from the pool for instant display, or creates a fresh one
+ * as a fallback). It is destroyed in the `onRelease` callback when the
  * composable leaves the composition (loading screen gone → video playing).
  */
 @Composable
@@ -1873,13 +1879,21 @@ private fun BannerAdView(modifier: Modifier = Modifier) {
     AndroidView(
         modifier = modifier,
         factory = { ctx ->
-            val adView = com.ashtonhardy.piratesfilmcove.ui.AdManager.createBannerAd(ctx)
-            com.ashtonhardy.piratesfilmcove.ui.AdManager.loadBannerAd(adView)
+            // Grab a pre-loaded AdView from the pool if available — it has
+            // already had loadAd() called (in the background from
+            // MainActivity/PlayerScreen) so the ad content is either already
+            // fetched or actively fetching. This eliminates the blank delay
+            // where the loading screen appears before the ad loads. If the
+            // pool is empty, a fresh ad is created and loaded as a fallback.
+            val adView = com.ashtonhardy.piratesfilmcove.ui.AdManager.takePreloadedBannerAd(ctx)
             adView
         },
         update = { adView ->
-            // Reload the ad each time the view is updated (e.g. recomposition).
-            com.ashtonhardy.piratesfilmcove.ui.AdManager.loadBannerAd(adView)
+            // If the ad hasn't loaded yet (pool ad still fetching), reload
+            // to nudge it. If it's already loaded this is a no-op.
+            if (!adView.isLoading) {
+                com.ashtonhardy.piratesfilmcove.ui.AdManager.loadBannerAd(adView)
+            }
         },
         onRelease = { adView ->
             // Destroy the AdView when the loading screen disappears so no
