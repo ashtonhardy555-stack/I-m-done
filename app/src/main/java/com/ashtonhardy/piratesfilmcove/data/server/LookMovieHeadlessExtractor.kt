@@ -27,6 +27,16 @@ import java.util.concurrent.TimeUnit
  * regex parsing, so it benefits from whatever request shape the addon relies
  * on to reach the server.
  *
+ * ## Multi-mirror support (reliability)
+ *
+ * LookMovie operates a network of official mirror/proxy domains (published at
+ * `proxymirrorlookmovie.github.io`). All mirrors use the **identical** URL
+ * structure (`/movies/search/...`, `/api/v1/security/...`), so a single
+ * extraction flow works against any of them. When one mirror is down, 403s,
+ * or shows a reCAPTCHA interstitial, we automatically fall through to the
+ * next mirror. This dramatically improves reliability — a single blocked
+ * domain no longer kills extraction.
+ *
  * ## The flow (a 1:1 port of main.py)
  *
  * 1. **SEARCH** — `GET /movies/search/page/1?q=<title>` (TV: `/shows/search/...`).
@@ -63,15 +73,37 @@ import java.util.concurrent.TimeUnit
  *    reCAPTCHA headlessly on-device is out of scope here; if the play page
  *    returns the reCAPTCHA interstitial we return `Result.Error` and let the
  *    rest of the parallel race cover the title (the other direct providers).
- *  - If the request 403s outright, same outcome: `Result.Error` and the race
- *    continues. This extractor is a *best-effort* racer — when it works it
- *    delivers very clean direct HLS; when LookMovie blocks it, the other
- *    extractors still cover the title.
+ *  - If a mirror 403s outright, we fall through to the next mirror. Only when
+ *    ALL mirrors fail do we return `Result.Error` and let the race continue.
  */
 object LookMovieHeadlessExtractor {
 
     private const val TAG = "LookMovieHeadless"
-    private const val BASE = "https://www.lookmovie2.to"
+
+    /**
+     * Official LookMovie mirror domains (from proxymirrorlookmovie.github.io).
+     * All share the identical URL structure, so the extraction flow works
+     * against any of them. We try them in order — the first that yields a
+     * stream wins. If one is down / 403s / shows reCAPTCHA, we fall through.
+     */
+    private val MIRRORS = listOf(
+        "https://www.lookmovie2.to",
+        "https://lookmovie2.to",
+        "https://lookmovie.ag",
+        "https://lookmovie.site",
+        "https://lookmovie2.la",
+        "https://lookmovie.buzz",
+        "https://lookmovie.click",
+        "https://lookmovie.digital",
+        "https://lookmovie.clinic",
+        "https://lookmovie.foundation",
+        "https://lookmovie.fun",
+        "https://lookmovie.fyi",
+        "https://lookmovie.guru",
+        "https://lookmovie.media",
+        "https://lookmovie.mobi",
+        "https://lookmovie.download"
+    )
 
     // The addon's exact User-Agent (Firefox 115 on Win64). Reusing it maximises
     // the chance the request shape matches what the server expects.
@@ -100,6 +132,11 @@ object LookMovieHeadlessExtractor {
     /**
      * Resolve a direct playable stream for the given title.
      *
+     * Tries each official mirror domain in sequence. The first mirror that
+     * completes the full extraction flow (search → storage → security → play)
+     * wins. If a mirror fails (down, 403, reCAPTCHA, no results), we fall
+     * through to the next one automatically.
+     *
      * @param title     the movie/show title to search for
      * @param year      release year (used to disambiguate search results; may be null)
      * @param isMovie   true for movies, false for TV
@@ -115,20 +152,46 @@ object LookMovieHeadlessExtractor {
     ): Result = withContext(Dispatchers.IO) {
         if (title.isBlank()) return@withContext Result.Error("LookMovie: no title")
 
+        var lastError = "LookMovie: all mirrors failed"
+        for (base in MIRRORS) {
+            val result = tryExtractFromMirror(base, title, year, isMovie, season, episode)
+            when (result) {
+                is Result.Stream -> return@withContext result
+                is Result.Error -> {
+                    lastError = result.message
+                    Log.d(TAG, "mirror $base failed: ${result.message} — trying next")
+                }
+            }
+        }
+        Log.w(TAG, "all ${MIRRORS.size} mirrors failed for '$title': $lastError")
+        Result.Error(lastError)
+    }
+
+    /**
+     * Run the full extraction flow against a single mirror domain.
+     * Returns a [Result] — Stream on success, Error if this mirror fails
+     * (so the caller can try the next mirror).
+     */
+    private fun tryExtractFromMirror(
+        base: String,
+        title: String,
+        year: String?,
+        isMovie: Boolean,
+        season: Int,
+        episode: Int
+    ): Result {
         val root = if (isMovie) "movies" else "shows"
         try {
-            // ── 1. SEARCH ──
+            // —— 1. SEARCH ——
             val query = URLEncoder.encode(title, "UTF-8")
-            val searchUrl = "$BASE/$root/search/page/1?q=$query"
-            val searchHtml = get(searchUrl, baseHeaders(referer = "$BASE/")) ?: run {
-                Log.w(TAG, "search fetch failed / 403")
-                return@withContext Result.Error("LookMovie: search failed")
+            val searchUrl = "$base/$root/search/page/1?q=$query"
+            val searchHtml = get(searchUrl, baseHeaders(referer = "$base/")) ?: run {
+                return Result.Error("search failed/403")
             }
             // v0.8 of the addon changed the captcha marker from ">Thread Defence"
             // to "g-recaptcha" — LookMovie now uses Google reCAPTCHA v2 interstitial.
             if (searchHtml.contains("g-recaptcha")) {
-                Log.w(TAG, "search hit reCAPTCHA interstitial — skipping")
-                return@withContext Result.Error("LookMovie: reCAPTCHA (captcha)")
+                return Result.Error("reCAPTCHA (captcha)")
             }
 
             val slugRegex = if (isMovie)
@@ -143,23 +206,20 @@ object LookMovieHeadlessExtractor {
                 .toList()
 
             if (candidates.isEmpty()) {
-                Log.w(TAG, "no search results for '$title'")
-                return@withContext Result.Error("LookMovie: no results")
+                return Result.Error("no results")
             }
 
             val slug = pickBestSlug(candidates, title, year)
-            Log.d(TAG, "search '$title' → slug '$slug' (of ${candidates.size})")
+            Log.d(TAG, "[$base] search '$title' → slug '$slug' (of ${candidates.size})")
 
-            // ── 2. STORAGE ──
-            val playUrl = "$BASE/$root/play/$slug"
-            val playHtml = get(playUrl, baseHeaders(referer = "$BASE/$root/search/page/1?q=$query"))
+            // —— 2. STORAGE ——
+            val playUrl = "$base/$root/play/$slug"
+            val playHtml = get(playUrl, baseHeaders(referer = "$base/$root/search/page/1?q=$query"))
                 ?: run {
-                    Log.w(TAG, "play fetch failed / 403 for $slug")
-                    return@withContext Result.Error("LookMovie: play fetch failed")
+                    return Result.Error("play fetch failed/403")
                 }
             if (playHtml.contains("g-recaptcha")) {
-                Log.w(TAG, "play hit reCAPTCHA interstitial — skipping")
-                return@withContext Result.Error("LookMovie: reCAPTCHA (captcha)")
+                return Result.Error("reCAPTCHA (captcha)")
             }
 
             // Normalise quote styles the same way the addon does before regexing.
@@ -171,135 +231,99 @@ object LookMovieHeadlessExtractor {
             val idParam: Pair<String, String>  // (paramName, paramValue)
 
             if (isMovie) {
-                // `movie_storage` is assigned as a JS string-key property:
-                //   window["movie_storage"] = {hash:"abc",id_movie:123,...};
-                // The `"?` around the field names makes the field regexes work
-                // whether LookMovie uses unquoted keys (hash:...) or quoted
-                // keys ("hash":...).
                 val storageMatch = Regex("""movie_storage"\]\s*=\s*(\{.*?\})""", RegexOption.DOT_MATCHES_ALL)
                     .find(norm)
                     ?: run {
-                        Log.w(TAG, "no movie_storage block for $slug")
-                        return@withContext Result.Error("LookMovie: no movie_storage")
+                        return Result.Error("no movie_storage")
                     }
                 val storage = storageMatch.groupValues[1]
                 hash = extractField(storage, "hash")
-                    ?: return@withContext Result.Error("LookMovie: no hash")
+                    ?: return Result.Error("no hash")
                 val idMovie = extractNum(storage, "id_movie")
-                    ?: return@withContext Result.Error("LookMovie: no id_movie")
+                    ?: return Result.Error("no id_movie")
                 expires = extractNum(storage, "expires")
-                    ?: return@withContext Result.Error("LookMovie: no expires")
+                    ?: return Result.Error("no expires")
                 securityPath = "/api/v1/security/movie-access"
                 idParam = "id_movie" to idMovie
             } else {
-                // `show_storage` is assigned as a JS string-key property:
-                //   window["show_storage"] = {hash:"abc",expires:123,seasons:[...]};
-                // We extract hash + expires, then scan the seasons array for the
-                // episode matching the requested (season, episode) to get its
-                // id_episode for the episode-access security API.
                 val storageMatch = Regex("""show_storage"\]\s*=\s*(\{.*?\};)""", RegexOption.DOT_MATCHES_ALL)
                     .find(norm)
                     ?: run {
-                        Log.w(TAG, "no show_storage block for $slug")
-                        return@withContext Result.Error("LookMovie: no show_storage")
+                        return Result.Error("no show_storage")
                     }
                 val storage = storageMatch.groupValues[1]
                 hash = extractField(storage, "hash")
-                    ?: return@withContext Result.Error("LookMovie: no hash")
+                    ?: return Result.Error("no hash")
                 expires = extractNum(storage, "expires")
-                    ?: return@withContext Result.Error("LookMovie: no expires")
+                    ?: return Result.Error("no expires")
 
-                // ── Normalise the matched storage block the way the v0.8 addon
+                // —— Normalise the matched storage block the way the v0.8 addon
                 //    does (ListSerial in main.py): collapse escaped quotes,
                 //    strip newlines and triple-spaces so the seasons array
-                //    parses as one contiguous run. Without this, real
-                //    show_storage (which spans many lines) can fail to yield
-                //    the seasons array or its episode objects.
+                //    parses as one contiguous run.
                 val storageClean = storage
                     .replace("\\\"", "'")
                     .replace("\n", "")
                     .replace("   ", "")
 
-                // Scan the seasons array for the requested (season, episode).
-                // `"?seasons"?` handles both unquoted (seasons:) and quoted
-                // ("seasons":) JS keys.
                 val seasonsMatch = Regex(""""?seasons"?\s*:\s*(\[.*?\])""", RegexOption.DOT_MATCHES_ALL)
                     .find(storageClean)
                     ?: run {
-                        Log.w(TAG, "no seasons array for $slug")
-                        return@withContext Result.Error("LookMovie: no seasons")
+                        return Result.Error("no seasons")
                     }
                 val seasons = seasonsMatch.groupValues[1]
 
-                // ── Find the id_episode for the requested (season, episode) ──
-                // Port of the addon's robust per-episode-object parsing
-                // (re.findall('(\{.*?}),', seasons[0]) then extract each
-                // field individually). LookMovie lists episode objects with
-                // fields in an ARBITRARY order (often id_episode FIRST), so a
-                // single fixed-order regex misses every episode. Splitting
-                // each object and pulling season/episode/id_episode out of it
-                // individually works regardless of field order.
+                // —— Find the id_episode for the requested (season, episode) ——
                 val episodeObjectRegex = Regex("""(\{.*?\})(?:,|\])""", RegexOption.DOT_MATCHES_ALL)
-                val seasonRe = Regex("""(?<![A-Za-z_])["']?season["']?\s*:\s*"?(\d+)["']?""")
-                val episodeRe = Regex("""(?<![A-Za-z_])["']?episode["']?\s*:\s*"?(\d+)["']?""")
+                val seasonRe = Regex("""(?<![A-Za-z_])["']?season["']?\s*:\s*"?(\d+)?""")
+                val episodeRe = Regex("""(?<![A-Za-z_])["']?episode["']?\s*:\s*"?(\d+)?""")
                 val idEpisodeRe = Regex("""(?<![A-Za-z_])["']?id_episode["']?\s*:\s*(\d+)""")
                 val ep = episodeObjectRegex.findAll(seasons).firstOrNull { obj ->
                     val s = seasonRe.find(obj.groupValues[1])?.groupValues?.get(1)?.toIntOrNull()
                     val e = episodeRe.find(obj.groupValues[1])?.groupValues?.get(1)?.toIntOrNull()
                     s == season && e == episode
                 } ?: run {
-                    Log.w(TAG, "no S${season}E${episode} in seasons for $slug")
-                    return@withContext Result.Error("LookMovie: episode not found")
+                    return Result.Error("episode not found")
                 }
                 val idEpisode = idEpisodeRe.find(ep.groupValues[1])?.groupValues?.get(1)
                     ?: run {
-                        Log.w(TAG, "S${season}E${episode} matched but no id_episode for $slug")
-                        return@withContext Result.Error("LookMovie: episode not found")
+                        return Result.Error("episode not found")
                     }
                 securityPath = "/api/v1/security/episode-access"
                 idParam = "id_episode" to idEpisode
             }
 
-            // ── 3. SECURITY API ──
-            val securityUrl = "$BASE$securityPath?${idParam.first}=${idParam.second}&hash=$hash&expires=$expires"
+            // —— 3. SECURITY API ——
+            val securityUrl = "$base$securityPath?${idParam.first}=${idParam.second}&hash=$hash&expires=$expires"
             val secBody = get(
                 securityUrl,
                 baseHeaders(referer = playUrl).plus("X-Requested-With" to "XMLHttpRequest")
             ) ?: run {
-                Log.w(TAG, "security API failed / 403")
-                return@withContext Result.Error("LookMovie: security API failed")
+                return Result.Error("security API failed/403")
             }
 
             val json = try { JSONObject(secBody) } catch (e: Exception) {
-                Log.w(TAG, "security response not JSON: ${secBody.take(120)}")
-                return@withContext Result.Error("LookMovie: security not JSON")
+                return Result.Error("security not JSON")
             }
             val streams = json.optJSONObject("streams")
                 ?: run {
-                    Log.w(TAG, "no streams object in security response")
-                    return@withContext Result.Error("LookMovie: no streams")
+                    return Result.Error("no streams")
                 }
-            // v0.8 of the addon changed stream selection from
-            // `list(streams.values())[0]` to
-            // `[x for x in list(streams.values()) if x][0]` — filtering out
-            // empty/falsy stream values before picking the first (highest quality).
             val firstKey = streams.keys().asSequence()
                 .firstOrNull { key ->
                     streams.optString(key, "").takeIf { it.isNotBlank() }?.startsWith("http") == true
                 }
                 ?: run {
-                    Log.w(TAG, "no valid (non-empty) stream in security response")
-                    return@withContext Result.Error("LookMovie: no valid stream")
+                    return Result.Error("no valid stream")
                 }
             val m3u8 = streams.optString(firstKey, "")
             if (m3u8.isBlank() || !m3u8.startsWith("http")) {
-                Log.w(TAG, "stream value invalid: $m3u8")
-                return@withContext Result.Error("LookMovie: invalid stream url")
+                return Result.Error("invalid stream url")
             }
 
-            Log.i(TAG, "✅ LookMovie resolved ($slug) [$firstKey]: $m3u8")
+            Log.i(TAG, "✅ LookMovie [$base] resolved ($slug) [$firstKey]: $m3u8")
 
-            // ── 4. PLAY ──
+            // —— 4. PLAY ——
             // ExoPlayer sends these headers on every playlist + segment fetch,
             // so attaching the t_hash cookie here replaces the addon's local
             // proxy (serverHTTP.py) entirely — a true headless play.
@@ -308,12 +332,11 @@ object LookMovieHeadlessExtractor {
             )
             Result.Stream(m3u8, playHeaders, "LookMovie")
         } catch (e: Exception) {
-            Log.w(TAG, "extraction error: ${e.message}")
-            Result.Error("LookMovie: ${e.message ?: "error"}")
+            Result.Error(e.message ?: "error")
         }
     }
 
-    // ── helpers ──
+    // —— helpers ——
 
     private fun baseHeaders(referer: String): Map<String, String> = mapOf(
         "User-Agent" to UA,
