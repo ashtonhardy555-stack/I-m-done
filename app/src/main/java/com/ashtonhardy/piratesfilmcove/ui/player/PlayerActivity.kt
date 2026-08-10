@@ -182,8 +182,7 @@ class PlayerActivity : ComponentActivity() {
             backdropUrl: String? = null,
             resumePositionMs: Long = 0L,
             // True ONLY when this launch is an automatic advance to the next
-            // TV episode (not a user tap). Banner ads show on the loading
-            // screen for every launch type; this flag is kept for the
+            // TV episode (not a user tap). This flag is kept for the
             // next-episode auto-play logic.
             isAutoPlay: Boolean = false
         ): Intent = Intent(context, PlayerActivity::class.java).apply {
@@ -282,7 +281,7 @@ class PlayerActivity : ComponentActivity() {
         val backdropUrl = intent.getStringExtra("BACKDROP_URL")
         val resumePositionMs = intent.getLongExtra("RESUME_MS", 0L)
         // True only for an automatic advance to the next TV episode (never a
-        // user tap). Banner ads show on the loading screen for every launch.
+        // user tap).
         val isAutoPlay = intent.getBooleanExtra("IS_AUTOPLAY", false)
 
         if (tmdbId == -1) {
@@ -303,22 +302,11 @@ class PlayerActivity : ComponentActivity() {
         progressPosterPath = posterUrl?.let { extractTmdbPath(it) }
         progressBackdropPath = backdropUrl?.let { extractTmdbPath(it) }
 
-        // ── Banner ads ─────────────────────────────────────────────────── //
-        // Banner ads are shown only on the loading screen (while the stream
-        // URL is being resolved). They are destroyed automatically when the
-        // loading screen disappears — no rewarded video ads, no ad gate, and
-        // no ads anywhere else in the app. See AdManager + LoadingScreen.
-        //
-        // Interstitial ad: for a user-initiated playback (NOT auto-play next
-        // episode), preload the interstitial ad NOW so it is ready to show
-        // the instant the stream URL resolves. This runs in parallel with
-        // stream extraction, so by the time the loading screen finishes the
-        // interstitial is already loaded and can pop up immediately. For
-        // auto-play launches we skip this — only the 3 banner ads on the
-        // loading screen are shown.
-        if (!isAutoPlay) {
-            com.ashtonhardy.piratesfilmcove.ui.AdManager.preloadInterstitialAd(this)
-        }
+        // ── Ads removed ─────────────────────────────────────────────────── //
+        // No banner or interstitial ads are shown anywhere in the app. The
+        // loading screen no longer renders banners, and there is no ad gate
+        // before playback — the movie/show starts the instant the stream
+        // resolves.
         setContent {
             NetflixTheme {
                 PlayerScreen(
@@ -534,24 +522,9 @@ fun PlayerScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var infoMessage by remember { mutableStateOf<String?>(null) }
 
-    // --- Interstitial ad gate --------------------------------------- //
-    // A full-screen interstitial ad is shown BEFORE the FIRST manual playback
-    // only. The user must close the ad before the movie/show begins playing.
-    // `adDismissed` gates the ExoPlayerView: it only appears once the ad has
-    // been closed (or failed to load — in which case we don't block the user).
-    // `adTriggered` prevents the ad from being requested more than once.
-    //
-    // IMPORTANT: The interstitial ad is shown ONLY for a user-initiated launch
-    // (isAutoPlayLaunch == false). When the app auto-plays the NEXT episode of
-    // a TV show, NO interstitial ad is shown — only the 3 banner ads on the
-    // loading screen appear (same as always). adDismissed is initialised to
-    // true for auto-play launches so ExoPlayerView appears immediately once
-    // the stream resolves, with just the banner-ad loading screen in between.
-    // Once the interstitial has been shown+dismissed for the initial manual
-    // playback, adDismissed stays true for all subsequent auto-play episodes
-    // within the same player session — it is never reset.
-    var adDismissed by remember { mutableStateOf(isAutoPlayLaunch) }
-    var adTriggered by remember { mutableStateOf(false) }
+    // --- Ads removed -------------------------------------------------- //
+    // No interstitial ad gate and no banner ads. Playback starts the
+    // instant the stream resolves.
 
     // --- Current season/episode (mutable so the next episode can auto-play) -- //
     // season & episode arrive as immutable params, but to auto-advance to the
@@ -619,11 +592,6 @@ fun PlayerScreen(
     // Make sure the server list is loaded so the picker has options.
     LaunchedEffect(Unit) {
         ServerManager.initialize(localContext)
-        // Preload 3 banner ads into the pool so they are ready (or actively
-        // loading) by the time the loading screen appears. This is the key to
-        // banner ads showing up instantly with the loading screen instead of
-        // loading blank and filling in a second or two later.
-        com.ashtonhardy.piratesfilmcove.ui.AdManager.preloadBannerAds(localContext, 3)
     }
     val availableServers = remember { mutableStateOf<List<ServerConfig>>(emptyList()) }
     var selectedServerId by remember { mutableStateOf<String?>(null) }
@@ -651,10 +619,8 @@ fun PlayerScreen(
     // --------------------------------------------------------------- //
     //  Extraction LaunchedEffect                                       //
     // --------------------------------------------------------------- //
-    // Banner ads are shown on the loading screen (see LoadingScreen) while
-    // this extraction runs. They are removed automatically when the loading
-    // screen disappears. No ad gate is needed — extraction starts
-    // immediately for every launch.
+    // The loading screen is shown while this extraction runs. No ad gate
+    // is needed — extraction starts immediately for every launch.
     LaunchedEffect(tmdbId, contentType, currentSeason, currentEpisode, attempt) {
         isLoading = true
         error = null
@@ -1316,40 +1282,6 @@ fun PlayerScreen(
     }
 
 
-    // ── Interstitial ad gate ────────────────────────────────────────── //
-    // When the stream URL is resolved (isLoading is false, streamUrl is
-    // set, no error), trigger the interstitial ad BEFORE playback — but ONLY
-    // for a user-initiated launch (isAutoPlayLaunch == false). Auto-play of
-    // the next TV episode skips the interstitial entirely; the 3 banner ads
-    // on the loading screen are the only ads shown for auto-play.
-    // The ad shows full-screen over this activity. Playback (ExoPlayerView)
-    // only appears once the ad is dismissed (adDismissed = true). If the ad
-    // fails to load, onAdDismissed fires immediately and playback proceeds
-    // without blocking the user.
-    LaunchedEffect(streamUrl, error) {
-        if (streamUrl != null && error == null && !adTriggered && !adDismissed && !isAutoPlayLaunch) {
-            adTriggered = true
-            val activity = localContext as? Activity
-            if (activity != null) {
-                com.ashtonhardy.piratesfilmcove.ui.AdManager.showInterstitialAd(activity) {
-                    // onAdDismissed — the ad was closed (or failed to load).
-                    // Now allow playback to start.
-                    adDismissed = true
-                }
-            } else {
-                // No activity context — skip the ad, proceed to playback.
-                adDismissed = true
-            }
-        }
-    }
-
-    // Note: adDismissed and adTriggered are NOT reset when streamUrl becomes
-    // null (e.g. during fallback retries or next-episode auto-play). This
-    // ensures the interstitial ad shows at most once per player session —
-    // for the initial manual playback only. Subsequent auto-play episodes
-    // go straight through with just the banner-ad loading screen.
-
-
     // --------------------------------------------------------------- //
     //  UI                                                              //
     // --------------------------------------------------------------- //
@@ -1370,15 +1302,6 @@ fun PlayerScreen(
                 },
                 onBack = { (localContext as? ComponentActivity)?.finish() }
             )
-
-            // ── Interstitial ad is showing (or loading) ── //
-            // The ad displays full-screen over the activity. This composable
-            // just renders a black background with the poster/title so the
-            // user sees something clean behind the ad. ExoPlayerView does NOT
-            // appear until adDismissed becomes true (ad closed or failed).
-            streamUrl != null && !adDismissed -> {
-                AdGateScreen(title, posterUrl, backdropUrl)
-            }
 
             streamUrl != null -> {
                 ExoPlayerView(
@@ -1401,10 +1324,6 @@ fun PlayerScreen(
                     progressPosterPath = posterUrl?.let { extractTmdbPath(it) },
                     progressBackdropPath = backdropUrl?.let { extractTmdbPath(it) },
                     onPlayingChange = { playing -> isPlaying = playing },
-                    // When playback starts (STATE_READY) the loading screen
-                    // disappears, which automatically destroys the banner ads
-                    // shown on it (AndroidView onRelease). No manual ad
-                    // cleanup is needed.
                     onPlaybackStart = { },
                     onEpisodeEnded = {
                         // ── Next-episode auto-play (TV shows only) ────────── //
@@ -1450,8 +1369,8 @@ fun PlayerScreen(
                             Log.d("Player", "Auto-playing next episode: S$nextSeason E$nextEp")
                             nextEpisodeLabel = "Next episode: S$nextSeason E$nextEp"
                             // Advance to the next episode. The loading screen
-                            // (with banner ads) will appear automatically while
-                            // the next episode resolves, and the banners will
+                            // will appear automatically while
+                            // the next episode resolves, and it will
                             // be destroyed once it starts playing.
                             streamUrl = null
                             streamHeaders = emptyMap()
@@ -1855,72 +1774,6 @@ private fun ServerPickerOverlay(
 //  Loading / Error screens with poster                              //
 // ---------------------------------------------------------------- //
 
-/**
- * Ad gate screen — shown while the interstitial ad is displayed full-screen
- * over the activity. The ad itself renders on top of this composable, so this
- * just provides a clean black background with the poster/title so the user
- * sees something nice behind/around the ad. ExoPlayerView does NOT appear
- * until the ad is dismissed.
- */
-@Composable
-private fun AdGateScreen(
-    title: String,
-    posterUrl: String?,
-    backdropUrl: String?
-) {
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-        // Backdrop as full-bleed background (faded).
-        if (!backdropUrl.isNullOrBlank()) {
-            AsyncImage(
-                model = backdropUrl,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
-            )
-        }
-        // Dark scrim.
-        Box(modifier = Modifier
-            .fillMaxSize()
-            .background(Color(0xDD000000)))
-
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            if (!posterUrl.isNullOrBlank()) {
-                AsyncImage(
-                    model = posterUrl,
-                    contentDescription = title,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .width(160.dp)
-                        .height(240.dp)
-                        .background(Color(0xFF1F1F1F))
-                )
-                Spacer(Modifier.height(20.dp))
-            }
-            Text(
-                text = title,
-                color = Color.White,
-                style = MaterialTheme.typography.titleLarge,
-                textAlign = TextAlign.Center
-            )
-            Spacer(Modifier.height(24.dp))
-            CircularProgressIndicator(color = Color.White)
-            Spacer(Modifier.height(16.dp))
-            Text(
-                text = "Preparing your stream…",
-                color = Color.White.copy(alpha = 0.8f),
-                style = MaterialTheme.typography.bodyMedium,
-                textAlign = TextAlign.Center
-            )
-        }
-    }
-}
-
 @Composable
 private fun LoadingScreen(
     title: String,
@@ -1979,64 +1832,7 @@ private fun LoadingScreen(
                 textAlign = TextAlign.Center
             )
         }
-
-        // ── Three banner ads shown simultaneously on the loading screen ── //
-        // These AdViews are created via AdManager and embedded with AndroidView.
-        // They are destroyed automatically when this composable leaves the
-        // composition (i.e. when isLoading becomes false and the loading
-        // screen disappears), because the AndroidView onRelease callback
-        // calls adView.destroy(). No ads appear anywhere else in the app.
-        Column(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .background(Color(0xE6000000))
-                .padding(top = 4.dp, bottom = 4.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            repeat(3) { index ->
-                BannerAdView(modifier = Modifier.fillMaxWidth())
-                if (index < 2) Spacer(Modifier.height(4.dp))
-            }
-        }
     }
-}
-
-/**
- * A single AdMob banner ad embedded in Compose via [AndroidView]. The AdView
- * is obtained from [AdManager.takePreloadedBannerAd] (which pops a pre-loaded,
- * already-loading ad from the pool for instant display, or creates a fresh one
- * as a fallback). It is destroyed in the `onRelease` callback when the
- * composable leaves the composition (loading screen gone → video playing).
- */
-@Composable
-private fun BannerAdView(modifier: Modifier = Modifier) {
-    val context = LocalContext.current
-    AndroidView(
-        modifier = modifier,
-        factory = { ctx ->
-            // Grab a pre-loaded AdView from the pool if available — it has
-            // already had loadAd() called (in the background from
-            // MainActivity/PlayerScreen) so the ad content is either already
-            // fetched or actively fetching. This eliminates the blank delay
-            // where the loading screen appears before the ad loads. If the
-            // pool is empty, a fresh ad is created and loaded as a fallback.
-            val adView = com.ashtonhardy.piratesfilmcove.ui.AdManager.takePreloadedBannerAd(ctx)
-            adView
-        },
-        update = { adView ->
-            // If the ad hasn't loaded yet (pool ad still fetching), reload
-            // to nudge it. If it's already loaded this is a no-op.
-            if (!adView.isLoading) {
-                com.ashtonhardy.piratesfilmcove.ui.AdManager.loadBannerAd(adView)
-            }
-        },
-        onRelease = { adView ->
-            // Destroy the AdView when the loading screen disappears so no
-            // banner ad remains visible during playback.
-            runCatching { adView.destroy() }
-        }
-    )
 }
 
 /**
@@ -2382,11 +2178,40 @@ private fun ExoPlayerView(
                                     // only once per media item. This picks up
                                     // exactly where the user left off, just
                                     // like Netflix's "Resume" behaviour.
-                                    if (resumePositionMs > 0 && !resumedForThisMedia) {
+                                    //
+                                    // FALLBACK: if no explicit resume position
+                                    // was passed (e.g. the user opened the
+                                    // episode from the season/episode picker
+                                    // instead of the Continue Watching row),
+                                    // look up the saved progress for THIS
+                                    // EXACT episode (keyed by content type +
+                                    // tmdbId + season + episode) and resume
+                                    // from there. This makes "open the app
+                                    // next time and pick up where you left
+                                    // off" work from any entry point, and it
+                                    // only resumes an INCOMPLETE episode (a
+                                    // finished one starts from the beginning).
+                                    if (!resumedForThisMedia) {
                                         val dur = this@apply.duration
-                                        if (dur > 0 && resumePositionMs < dur - 1_000L) {
-                                            runCatching { this@apply.seekTo(resumePositionMs) }
-                                            Log.d("ExoPlayer", "Resumed to ${resumePositionMs}ms / $dur ms")
+                                        val savedPos = if (resumePositionMs > 0) {
+                                            resumePositionMs
+                                        } else if (progressTmdbId != -1) {
+                                            val key = com.ashtonhardy.piratesfilmcove.data.model.WatchProgress(
+                                                tmdbId = progressTmdbId,
+                                                contentType = progressContentType,
+                                                positionMs = 0L,
+                                                durationMs = 0L,
+                                                season = progressSeason,
+                                                episode = progressEpisode
+                                            ).key
+                                            val rec = com.ashtonhardy.piratesfilmcove.data.repository.WatchProgressStore.get(key)
+                                            // Only resume if the saved episode
+                                            // is still in-progress (not finished).
+                                            if (rec != null && rec.isActive && rec.positionMs > 3_000L) rec.positionMs else 0L
+                                        } else 0L
+                                        if (dur > 0 && savedPos > 0 && savedPos < dur - 1_000L) {
+                                            runCatching { this@apply.seekTo(savedPos) }
+                                            Log.d("ExoPlayer", "Resumed to ${savedPos}ms / $dur ms")
                                         }
                                         resumedForThisMedia = true
                                     }
