@@ -42,6 +42,6 @@
 - [x] Clean up stale ad comments across files
 
 ## Build & PR
-- [ ] Commit changes
-- [ ] Push branch
-- [ ] Open PR with summary
+- [x] Commit changes
+- [x] Push branch
+- [x] Open PR with summary
