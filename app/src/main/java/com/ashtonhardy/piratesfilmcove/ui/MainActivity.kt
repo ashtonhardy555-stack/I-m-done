@@ -137,12 +137,8 @@ private fun AppRoot() {
     var sideNavAutoShown by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
-        // Warm up the Mobile Ads SDK + preload 3 banner ads into the pool
-        // as early as possible (the moment the home screen appears). By the
-        // time the user taps a movie/show, the banner ads are already loaded
-        // (or actively loading) so they appear instantly on the loading
-        // screen instead of loading blank and filling in a second later.
-        com.ashtonhardy.piratesfilmcove.ui.AdManager.warmUp(context)
+        // Ads have been removed — there is no Mobile Ads SDK to warm up and
+        // no banner pool to preload. The auto-updater still runs.
         com.ashtonhardy.piratesfilmcove.ui.AutoUpdater.checkAndPrompt(context)
     }
 
@@ -176,11 +172,14 @@ private fun AppRoot() {
 
     /**
      * Launches the player at a saved resume position — used by the Continue
-     * Watching row. For TV shows the season/episode are looked up from the
-     * stored WatchProgress so the user lands on the exact episode they were
-     * watching, at the exact position. For movies it's a straight resume.
+     * Watching row. The season + episode are passed in directly from the
+     * stored WatchProgress record (the Home screen has them) so a TV show
+     * re-opens the EXACT episode the user was on (e.g. S2 E5), not S1 E1.
+     * The player then seeks to [positionMs] once STATE_READY fires, so the
+     * user picks up exactly where they left off — across app restarts too,
+     * because the position is persisted in WatchProgressStore.
      */
-    fun launchResume(item: TmdbItem, positionMs: Long) {
+    fun launchResume(item: TmdbItem, positionMs: Long, season: Int = 1, episode: Int = 1) {
         if (item.isMovie) {
             val intent = PlayerActivity.newIntent(
                 context = context,
@@ -194,12 +193,10 @@ private fun AppRoot() {
             )
             context.startActivity(intent)
         } else {
-            // TV: look up the stored season/episode so we resume the right
-            // episode (the Continue Watching card may represent S2 E5, etc.).
-            val wp = com.ashtonhardy.piratesfilmcove.data.repository.WatchProgressStore
-                .get("tv_${item.id}")
-            val season = wp?.season ?: 1
-            val episode = wp?.episode ?: 1
+            // TV: use the season/episode passed in from the stored
+            // WatchProgress record so we resume the right episode (the
+            // Continue Watching card may represent S2 E5, etc.). The
+            // position is also passed so the player seeks to the saved spot.
             val intent = PlayerActivity.newIntent(
                 context = context,
                 tmdbId = item.id,
@@ -233,8 +230,10 @@ private fun AppRoot() {
     // ── Continue Watching resume handler ────────────── //
     // Launches the player directly at the saved position (bypassing the
     // detail screen) so a Continue Watching card resumes in one click.
-    val onResume: (TmdbItem, Long) -> Unit = remember {
-        { item, positionMs -> launchResume(item, positionMs) }
+    // The season + episode are forwarded from the stored WatchProgress
+    // record so a TV show resumes the exact episode the user was on.
+    val onResume: (TmdbItem, Long, Int, Int) -> Unit = remember {
+        { item, positionMs, season, episode -> launchResume(item, positionMs, season, episode) }
     }
 
     // Stable search-with-genre callback (passed into the always-visible main
@@ -450,7 +449,7 @@ private fun NetflixScreenSwitch(
     currentTab: Tab,
     onItemClick: (TmdbItem) -> Unit,
     onSearchWithGenre: (String) -> Unit,
-    onResume: (TmdbItem, Long) -> Unit
+    onResume: (TmdbItem, Long, Int, Int) -> Unit
 ) {
     AnimatedContent(
         targetState = currentTab,

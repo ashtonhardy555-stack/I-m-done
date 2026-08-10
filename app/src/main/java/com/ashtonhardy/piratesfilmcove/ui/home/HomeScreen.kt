@@ -80,7 +80,12 @@ private val GENRE_CHIPS = listOf(
 fun HomeScreen(
     onItemClick: (TmdbItem) -> Unit,
     onSearchWithGenre: (String) -> Unit = {},
-    onResume: (TmdbItem, Long) -> Unit = { _, _ -> },
+    // Resume callback: (item, positionMs, season, episode). The season +
+    // episode come straight from the stored WatchProgress record so a TV
+    // Continue Watching card re-opens the EXACT episode the user was on
+    // (not S1E1) and seeks to the saved position. Movies pass season=1,
+    // episode=1 (unused for movies).
+    onResume: (TmdbItem, Long, Int, Int) -> Unit = { _, _, _, _ -> },
     viewModel: HomeViewModel = viewModel()
 ) {
     val heroItems by viewModel.heroItems.collectAsState()
@@ -289,7 +294,7 @@ private fun ContinueWatchingRow(
     items: List<TmdbItem>,
     progressMap: Map<String, WatchProgress>,
     onItemClick: (TmdbItem) -> Unit,
-    onResume: (TmdbItem, Long) -> Unit
+    onResume: (TmdbItem, Long, Int, Int) -> Unit
 ) {
     val dims = responsiveDims()
     val listState = rememberLazyListState()
@@ -338,8 +343,14 @@ private fun ContinueWatchingRow(
                     dims = dims,
                     onClick = {
                         // Primary action = resume from saved position.
+                        // We pass the season + episode straight from the
+                        // stored WatchProgress record (wp) so a TV show
+                        // re-opens the EXACT episode the user was on
+                        // (e.g. S2 E5), not S1 E1. Movies pass 1/1
+                        // (unused). This fixes the bug where Continue
+                        // Watching for TV always resumed season 1 episode 1.
                         if (wp != null) {
-                            onResume(item, wp.positionMs)
+                            onResume(item, wp.positionMs, wp.season, wp.episode)
                         } else {
                             onItemClick(item)
                         }

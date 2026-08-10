@@ -52,11 +52,9 @@ class PiratesfilmCoveApplication : Application(), ImageLoaderFactory {
         com.ashtonhardy.piratesfilmcove.data.engine.KodiEngine.init(this)
         com.ashtonhardy.piratesfilmcove.data.engine.KodiEngineService.start(this)
 
-        // Initialise the Google Mobile Ads SDK. Banner ads are shown only on
-        // the loading screen (while a movie/show stream is being resolved)
-        // and are destroyed when playback starts. See AdManager /
-        // PlayerActivity.
-        com.ashtonhardy.piratesfilmcove.ui.AdManager.init(this)
+        // Ads have been removed from the app entirely. The Google Mobile Ads
+        // SDK is no longer initialised — no banner or interstitial ads are
+        // shown anywhere, and playback is never gated behind an ad.
     }
 
     override fun newImageLoader(): ImageLoader {

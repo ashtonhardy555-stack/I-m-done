@@ -132,11 +132,4 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
-
-    // Google Mobile Ads SDK — used for banner ads only. Three banner ads
-    // are shown simultaneously on the loading screen while a movie/show
-    // stream is being resolved. They are destroyed automatically when
-    // playback starts. No rewarded or fullscreen ads are used anywhere.
-    // See AdManager / PlayerActivity.
-    implementation("com.google.android.gms:play-services-ads:23.3.0")
 }
