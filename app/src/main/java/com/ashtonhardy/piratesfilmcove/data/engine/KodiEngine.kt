@@ -3,7 +3,11 @@ package com.ashtonhardy.piratesfilmcove.data.engine
 import android.content.Context
 import android.util.Log
 import com.ashtonhardy.piratesfilmcove.data.server.AnnasCinemaExtractor
+import com.ashtonhardy.piratesfilmcove.data.server.DahmerMoviesExtractor
+import com.ashtonhardy.piratesfilmcove.data.server.KissKhExtractor
 import com.ashtonhardy.piratesfilmcove.data.server.LookMovieHeadlessExtractor
+import com.ashtonhardy.piratesfilmcove.data.server.LordFlixExtractor
+import com.ashtonhardy.piratesfilmcove.data.server.MeowTvExtractor
 import com.ashtonhardy.piratesfilmcove.data.server.NovaStreamExtractor
 import com.ashtonhardy.piratesfilmcove.data.server.NuvioStreamsExtractor
 import com.ashtonhardy.piratesfilmcove.data.server.SmashStreamsExtractor
@@ -184,11 +188,83 @@ class KodiEngine private constructor(private val context: Context) {
         }
     }
 
+    // -- Title-based / TMDB-id-based direct-API addon adapters --
+    // These are headless (pure OkHttp, no WebView) extractors that resolve
+    // direct playable URLs using the TMDB id (or title derived from it). Like
+    // LookMovie, they do NOT require debrid services or Trakt auth. Each is a
+    // distinct upstream source — adding them gives the engine more independent
+    // paths to a stream, so if one source is down or doesn't have a title,
+    // the next one can cover it. They only run when tmdbId is available.
+
+    /** KissKH — Asian-drama / TV aggregator with broad episode coverage.
+     *  Title-based search via the KissKH API, returns direct HLS URLs. */
+    private val kissKhAddon = object : Addon {
+        override val id = "kisskh"
+        override suspend fun resolve(req: ResolveRequest): AddonResult {
+            if (req.tmdbId <= 0) return AddonResult.Error("KissKH: no tmdbId")
+            val r = KissKhExtractor.extract(req.tmdbId, req.contentType, req.season, req.episode)
+            return when (r) {
+                is KissKhExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "KissKH" })
+                is KissKhExtractor.Result.Error -> AddonResult.Error(r.message)
+            }
+        }
+    }
+
+    /** DahmerMovies — open-directory host. Movies at /movies/{Title} ({Year})/,
+     *  TV at /tvs/{Title}/Season {N}/. Returns direct progressive-download
+     *  file URLs via a CORS/Range proxy worker. Fastest possible playback. */
+    private val dahmerMoviesAddon = object : Addon {
+        override val id = "dahmermovies"
+        override suspend fun resolve(req: ResolveRequest): AddonResult {
+            if (req.tmdbId <= 0) return AddonResult.Error("DahmerMovies: no tmdbId")
+            val r = DahmerMoviesExtractor.extract(req.tmdbId, req.contentType, req.season, req.episode)
+            return when (r) {
+                is DahmerMoviesExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "DahmerMovies" })
+                is DahmerMoviesExtractor.Result.Error -> AddonResult.Error(r.message)
+            }
+        }
+    }
+
+    /** MeowTV — TMDB-id-based direct API with excellent TV-episode coverage.
+     *  Queries multiple upstream servers in parallel, decrypts, returns the
+     *  first playable URL. Strong for late-season episodes. */
+    private val meowTvAddon = object : Addon {
+        override val id = "meowtv"
+        override suspend fun resolve(req: ResolveRequest): AddonResult {
+            if (req.tmdbId <= 0) return AddonResult.Error("MeowTV: no tmdbId")
+            val r = MeowTvExtractor.extract(req.tmdbId, req.contentType, req.season, req.episode)
+            return when (r) {
+                is MeowTvExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "MeowTV" })
+                is MeowTvExtractor.Result.Error -> AddonResult.Error(r.message)
+            }
+        }
+    }
+
+    /** LordFlix — TMDB/IMDb-id-based multi-server provider. Queries 10 servers
+     *  in parallel, signs + fetches + decrypts, returns the first HLS URL.
+     *  Broad movie and TV coverage. */
+    private val lordFlixAddon = object : Addon {
+        override val id = "lordflix"
+        override suspend fun resolve(req: ResolveRequest): AddonResult {
+            if (req.tmdbId <= 0) return AddonResult.Error("LordFlix: no tmdbId")
+            val r = LordFlixExtractor.extract(req.tmdbId, req.contentType, req.season, req.episode)
+            return when (r) {
+                is LordFlixExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "LordFlix" })
+                is LordFlixExtractor.Result.Error -> AddonResult.Error(r.message)
+            }
+        }
+    }
+
     /** Addons consulted, in priority order. LookMovie first (the reference
      *  headless extractor and the engine's primary addon), then the
-     *  Stremio-style addons that need TMDB ids. */
+     *  TMDB-based direct-API addons (broad coverage, no debrid/trakt needed),
+     *  then the Stremio-style addons that need TMDB ids. */
     private val addons = mutableListOf<Addon>(
         lookmovieAddon,
+        kissKhAddon,
+        dahmerMoviesAddon,
+        meowTvAddon,
+        lordFlixAddon,
         smashStreamsAddon,
         nuvioStreamsAddon,
         annasCinemaAddon,
