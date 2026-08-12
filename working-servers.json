@@ -1,6 +1,6 @@
 {
   "version": 15,
-  "updated": "2026-08-11T06:41:43Z",
+  "updated": "2026-08-12T07:01:39Z",
   "description": "v15: HEADLESS-ONLY (no WebView). All extraction is pure OkHttp, matching the confirmed-working LookMovieHeadlessExtractor pattern. Disabled all Cloudflare-protected servers that require WebView JS-challenge solving (VidFast, CineSrc, Peachify, MultiEmbed, VidSrc.cc/to, VidZee, VidStorm, SmashyStream, Whvx, Hexa, VidSync, etc.) since pure OkHttp cannot solve CF challenges. Kept non-CF servers + enc-dec.app-backed extractors with dedicated headless code (VidLink, Videasy w/ 10 sub-servers, LordFlix w/ 10 sub-servers + hongkong host fix, KissKh). LookMovie fires first for TV shows. Removed dead false positives (vidsrc.net parking, embed.lol store).",
   "servers": [
     {
@@ -230,7 +230,7 @@
       "movieUrlTemplate": "{base}/playere.php?tmdb={id}",
       "tvUrlTemplate": "{base}/playere.php?tmdb={id}&season={season}&episode={episode}",
       "tier": 2,
-      "reliability": 76,
+      "reliability": 90,
       "cloudflare": true,
       "enabled": true
     },
@@ -406,7 +406,7 @@
       "movieUrlTemplate": "{base}/embed/movie/{id}",
       "tvUrlTemplate": "{base}/embed/tv/{id}/{season}/{episode}",
       "tier": 3,
-      "reliability": 86,
+      "reliability": 84,
       "cloudflare": false,
       "enabled": true
     },
@@ -516,7 +516,7 @@
       "movieUrlTemplate": "{base}/embed/movie/{id}",
       "tvUrlTemplate": "{base}/embed/tv/{id}/{season}/{episode}",
       "tier": 2,
-      "reliability": 96,
+      "reliability": 98,
       "cloudflare": true,
       "enabled": true
     },
