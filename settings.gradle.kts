@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "mariokart"
+rootProject.name = "TV Hub"
 include(":app")
