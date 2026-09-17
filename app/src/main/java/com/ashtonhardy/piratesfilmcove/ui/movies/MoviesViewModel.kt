@@ -13,13 +13,11 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 class MoviesViewModel : ViewModel() {
-
     private val repo = ContentRepository()
     private val loadMutex = Mutex()
 
     private val _popular = MutableStateFlow<List<TmdbItem>>(emptyList())
     val popular: StateFlow<List<TmdbItem>> = _popular
-
     private val _topRated = MutableStateFlow<List<TmdbItem>>(emptyList())
     val topRated: StateFlow<List<TmdbItem>> = _topRated
 
@@ -27,168 +25,66 @@ class MoviesViewModel : ViewModel() {
     private var topRatedPage = 1
     private val _isLoadingMore = MutableStateFlow(false)
     val isLoadingMore: StateFlow<Boolean> = _isLoadingMore
-
-    // -- canLoadMore flags -----------------------------------------------
-    // Each row exposes a flag that the UI uses to show/hide its Load More
-    // button.  TMDB returns ~20 items per page; when a loadMore() fetch
-    // returns fewer than `pageSize` items (or only duplicates), we flip
-    // the flag to false so the button disappears once the catalog is exhausted.
-    private val pageSize = 20
-
     private val _canLoadMorePopular = MutableStateFlow(true)
     val canLoadMorePopular: StateFlow<Boolean> = _canLoadMorePopular
-
     private val _canLoadMoreTopRated = MutableStateFlow(true)
     val canLoadMoreTopRated: StateFlow<Boolean> = _canLoadMoreTopRated
-
-    /** True while filtering a row down to only-streamable titles. */
     private val _filtering = MutableStateFlow(false)
     val filtering: StateFlow<Boolean> = _filtering
 
-    init { load() }
-
-    private fun load() {
-        viewModelScope.launch {
-            _popular.value = repo.getPopularMovies()
-            refineRow(_popular, _canLoadMorePopular)
-        }
-        viewModelScope.launch {
-            _topRated.value = repo.getTopRatedMovies()
-            refineRow(_topRated, _canLoadMoreTopRated)
-        }
+    init {
+        viewModelScope.launch { _popular.value = repo.getPopularMovies(); refine(_popular) }
+        viewModelScope.launch { _topRated.value = repo.getTopRatedMovies(); refine(_topRated) }
     }
 
-    /**
-     * Refines a row's StateFlow down to only-streamable titles. Shows the raw
-     * results immediately (already set by the caller) so the row isn't empty,
-     * then probes availability and replaces the list with the filtered subset.
-     * Titles with no playable source are hidden.
-     *
-     * If the filtered result is very short (fewer than 6 streamable titles)
-     * but TMDB still has more pages, auto-loads the next page so the row
-     * always has a reasonable number of cards and the Load More button is
-     * visible.
-     */
-    private suspend fun refineRow(
-        row: MutableStateFlow<List<TmdbItem>>,
-        canLoadMoreFlag: MutableStateFlow<Boolean>
-    ) {
-        val ctx = appContext() ?: return
-        val raw = row.value
-        if (raw.isEmpty()) return
+    private suspend fun refine(row: MutableStateFlow<List<TmdbItem>>) {
+        val ctx = AppContextHolder.context ?: return
+        if (row.value.isEmpty()) return
         _filtering.value = true
-        try {
-            val available = StreamAvailabilityChecker.filterAvailable(ctx, raw)
-            row.value = available
-            // If the first page filtered down to very few streamable titles
-            // but TMDB still has more pages, auto-load the next page so the
-            // user always sees a reasonable number of cards + the Load More
-            // button. This fixes the "no load more button" issue where
-            // aggressive availability filtering left rows with only a few
-            // cards and no button.
-            if (canLoadMoreFlag.value && available.size < 6) {
-                autoLoadNextPagePopular(row, canLoadMoreFlag)
-            }
-        } finally {
-            _filtering.value = false
-        }
+        try { row.value = StreamAvailabilityChecker.filterAvailable(ctx, row.value) }
+        finally { _filtering.value = false }
     }
 
-    /**
-     * Auto-loads the next page of a row and appends the streamable subset.
-     * Called when the first page filters down to too few items.
-     */
-    private suspend fun autoLoadNextPagePopular(
-        row: MutableStateFlow<List<TmdbItem>>,
-        canLoadMoreFlag: MutableStateFlow<Boolean>
-    ) {
-        try {
-            val ctx = appContext() ?: return
-            val isPopular = row === _popular
-            val nextPage = if (isPopular) popularPage + 1 else topRatedPage + 1
-            val raw = if (isPopular) {
-                repo.getPopularMovies(nextPage)
-            } else {
-                repo.getTopRatedMovies(nextPage)
-            }
-            if (raw.size < pageSize) {
-                canLoadMoreFlag.value = false
-            }
-            val existing = row.value.map { it.id }.toSet()
-            val fresh = raw.filter { it.id !in existing }
-            if (fresh.isEmpty()) {
-                canLoadMoreFlag.value = false
-                return
-            }
-            val availableMore = StreamAvailabilityChecker.filterAvailable(ctx, fresh)
-            if (isPopular) popularPage = nextPage else topRatedPage = nextPage
-            row.value = row.value + availableMore
-        } catch (e: Exception) {
-            canLoadMoreFlag.value = false
-        }
-    }
+    fun loadMore() = loadRow(true)
+    fun loadMoreTopRated() = loadRow(false)
 
-    fun loadMore() = viewModelScope.launch {
+    private fun loadRow(popular: Boolean) = viewModelScope.launch {
         loadMutex.withLock {
             if (_isLoadingMore.value) return@withLock
-            if (!_canLoadMorePopular.value) return@withLock
             _isLoadingMore.value = true
-            popularPage++
-            val existing = _popular.value.map { it.id }.toSet()
-            val more = repo.getPopularMovies(popularPage).filter { it.id !in existing }
-            // Filter the new batch for availability FIRST, then append
-            // in a SINGLE update. This avoids the double-update glitch
-            // (grow then shrink) that caused the LazyRow scroll position
-            // to jump and made the Load More button appear to vanish.
-            val ctx = appContext()
-            val availableMore = if (ctx != null) {
-                StreamAvailabilityChecker.filterAvailable(ctx, more)
-            } else {
-                more
-            }
-            _popular.value = _popular.value + availableMore
-            _isLoadingMore.value = false
-            // End-of-catalog: TMDB sent fewer than a full page (or every
-            // item was a duplicate), so there's nothing more to load.
-            if (more.size < pageSize) {
-                _canLoadMorePopular.value = false
+            try {
+                val next = if (popular) popularPage + 1 else topRatedPage + 1
+                val raw = if (popular) repo.getPopularMovies(next) else repo.getTopRatedMovies(next)
+                // Filtering and duplicate removal must never decide that the
+                // catalog is finished. Only an empty raw API page is final.
+                if (raw.isEmpty()) {
+                    if (popular) _canLoadMorePopular.value = false else _canLoadMoreTopRated.value = false
+                    return@withLock
+                }
+                val row = if (popular) _popular else _topRated
+                val existing = row.value.map { it.id }.toSet()
+                val fresh = raw.filter { it.id !in existing }
+                val ctx = AppContextHolder.context
+                val available = if (ctx != null) {
+                    StreamAvailabilityChecker.filterAvailable(ctx, fresh)
+                } else fresh
+                row.value = row.value + available
+                if (popular) {
+                    popularPage = next
+                    _canLoadMorePopular.value = true
+                } else {
+                    topRatedPage = next
+                    _canLoadMoreTopRated.value = true
+                }
+            } catch (_: Exception) {
+                // Retryable failure: preserve the affordance instead of
+                // permanently removing Load More from the row.
+                if (popular) _canLoadMorePopular.value = true else _canLoadMoreTopRated.value = true
+            } finally {
+                _isLoadingMore.value = false
             }
         }
     }
 
-    /**
-     * Loads the next page of top-rated movies and appends the new (deduped)
-     * titles to the Top Rated row, then filters the batch down to only
-     * streamable titles — mirroring [loadMore] for the Popular row.
-     */
-    fun loadMoreTopRated() = viewModelScope.launch {
-        loadMutex.withLock {
-            if (_isLoadingMore.value) return@withLock
-            if (!_canLoadMoreTopRated.value) return@withLock
-            _isLoadingMore.value = true
-            topRatedPage++
-            val existing = _topRated.value.map { it.id }.toSet()
-            val more = repo.getTopRatedMovies(topRatedPage).filter { it.id !in existing }
-            // Filter the new batch for availability FIRST, then append
-            // in a SINGLE update. This avoids the double-update glitch
-            // (grow then shrink) that caused the LazyRow scroll position
-            // to jump and made the Load More button appear to vanish.
-            val ctx = appContext()
-            val availableMore = if (ctx != null) {
-                StreamAvailabilityChecker.filterAvailable(ctx, more)
-            } else {
-                more
-            }
-            _topRated.value = _topRated.value + availableMore
-            _isLoadingMore.value = false
-            // End-of-catalog: TMDB sent fewer than a full page (or every
-            // item was a duplicate), so there's nothing more to load.
-            if (more.size < pageSize) {
-                _canLoadMoreTopRated.value = false
-            }
-        }
-    }
-
-    /** Best-effort application context for the availability probe. */
     private fun appContext(): android.content.Context? = AppContextHolder.context
 }
