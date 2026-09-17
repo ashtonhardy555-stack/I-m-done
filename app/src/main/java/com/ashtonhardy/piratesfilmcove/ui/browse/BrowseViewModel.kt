@@ -30,19 +30,14 @@ class BrowseViewModel : ViewModel() {
     val error: StateFlow<String?> = _error
 
     private val _filtering = MutableStateFlow(false)
-    /** True while filtering the grid down to only-streamable titles. */
     val filtering: StateFlow<Boolean> = _filtering
 
-    // -- canLoadMore flag ------------------------------------------------
-    // Controls the visibility of the "Show More" button.  TMDB returns ~20
-    // items per page; when a fetch returns fewer than `pageSize` items (or
-    // only duplicates), we flip the flag to false so the button disappears
-    // once the genre catalog is exhausted.
-    private val pageSize = 20
+    // Keep this flag about catalog paging, never stream availability. A page
+    // can contain many valid TMDB titles that the current providers cannot
+    // resolve; that must not hide the paging control.
     private val _canLoadMore = MutableStateFlow(true)
     val canLoadMore: StateFlow<Boolean> = _canLoadMore
 
-    /** True while a loadMore() is in flight (distinct from initial load). */
     private val _loadingMore = MutableStateFlow(false)
     val loadingMore: StateFlow<Boolean> = _loadingMore
 
@@ -65,29 +60,15 @@ class BrowseViewModel : ViewModel() {
                     genreId = genre?.id?.takeIf { it.isNotEmpty() },
                     page = 1
                 )
-                // Show the raw results immediately so the grid isn't empty
-                // while we probe availability, then refine to only-streamable
-                // titles. This keeps the UI responsive.
                 _items.value = raw
-                // End-of-catalog check on the first page.
-                if (raw.size < pageSize) {
-                    _canLoadMore.value = false
-                }
-                _filtering.value = true
+                // Do not infer exhaustion from a filtered or short first page.
+                // The next request is the authoritative end-of-catalog check.
+                _canLoadMore.value = raw.isNotEmpty()
+
                 val ctx = appContext()
-                if (ctx != null) {
-                    val available = StreamAvailabilityChecker.filterAvailable(ctx, raw)
-                    _items.value = available
-                    // If the first page filtered down to very few streamable
-                    // titles but TMDB still has more pages, auto-load the next
-                    // page so the user always sees a reasonable grid + the
-                    // "Show More" button. This fixes the "no load more button
-                    // at the end" issue where aggressive availability filtering
-                    // left the grid with only 2-3 cards and the user thought
-                    // there was nothing more to load.
-                    if (_canLoadMore.value && available.size < 6) {
-                        autoLoadNextPage()
-                    }
+                if (ctx != null && raw.isNotEmpty()) {
+                    _filtering.value = true
+                    _items.value = StreamAvailabilityChecker.filterAvailable(ctx, raw)
                 }
             } catch (e: Exception) {
                 _error.value = "Couldn't load content. Check your connection."
@@ -100,93 +81,59 @@ class BrowseViewModel : ViewModel() {
         }
     }
 
-    /**
-     * Auto-loads the next page of the current genre and appends the
-     * streamable subset. Called when the first page filters down to too few
-     * items so the user isn't left with a nearly-empty grid and no visible
-     * "Show More" button. Runs in the background without clobbering the
-     * existing results.
-     */
-    private suspend fun autoLoadNextPage() {
-        try {
-            val genre = _selectedGenre.value
-            val nextPage = 2
-            val raw = repo.discover(
-                type = genre?.type ?: "movie",
-                genreId = genre?.id?.takeIf { it.isNotEmpty() },
-                page = nextPage
-            )
-            if (raw.size < pageSize) {
-                _canLoadMore.value = false
-            }
-            val existing = _items.value.map { it.id }.toSet()
-            val fresh = raw.filter { it.id !in existing }
-            if (fresh.isEmpty()) {
-                _canLoadMore.value = false
-                return
-            }
-            val ctx = appContext() ?: return
-            val availableMore = StreamAvailabilityChecker.filterAvailable(ctx, fresh)
-            page = nextPage
-            _items.value = _items.value + availableMore
-        } catch (e: Exception) {
-            // Silently fail — the first page is still visible.
-            _canLoadMore.value = false
-        }
-    }
-
     fun loadMore() {
         viewModelScope.launch {
             loadMutex.withLock {
-                if (_isLoading.value || _loadingMore.value) return@withLock
-                if (!_canLoadMore.value) return@withLock
+                if (_isLoading.value || _loadingMore.value || !_canLoadMore.value) return@withLock
                 _loadingMore.value = true
-                var more: List<TmdbItem> = emptyList()
+                _filtering.value = true
                 try {
                     val genre = _selectedGenre.value
-                    page++
+                    val nextPage = page + 1
                     val existing = _items.value.map { it.id }.toSet()
-                    more = repo.discover(
+                    val rawPage = repo.discover(
                         type = genre?.type ?: "movie",
                         genreId = genre?.id?.takeIf { it.isNotEmpty() },
-                        page = page
-                    ).filter { it.id !in existing }
-                    // Filter the new batch for availability FIRST, then
-                    // append in a SINGLE update. This avoids the
-                    // double-update glitch (grow then shrink) that
-                    // caused scroll position jumps.
-                    _filtering.value = true
-                    val ctx = appContext()
-                    val availableMore = if (ctx != null) {
-                        StreamAvailabilityChecker.filterAvailable(ctx, more)
-                    } else {
-                        more
+                        page = nextPage
+                    )
+
+                    // Only an empty raw TMDB page proves that the catalog is
+                    // exhausted. Do not use the filtered count or deduped count:
+                    // both caused Load More to disappear prematurely.
+                    if (rawPage.isEmpty()) {
+                        _canLoadMore.value = false
+                        return@withLock
                     }
-                    _items.value = _items.value + availableMore
+
+                    val fresh = rawPage.filter { it.id !in existing }
+                    val ctx = appContext()
+                    val available = if (ctx != null) {
+                        StreamAvailabilityChecker.filterAvailable(ctx, fresh)
+                    } else {
+                        fresh
+                    }
+                    _items.value = _items.value + available
+                    page = nextPage
+                    // Keep the button present after short/filtered pages. The
+                    // following empty response ends paging without hiding
+                    // titles that are still available on later pages.
+                    _canLoadMore.value = true
                 } catch (e: Exception) {
                     _error.value = "Couldn't load more content."
+                    // A transient request failure must not permanently remove
+                    // the button; the user can retry on Android TV.
+                    _canLoadMore.value = true
                 } finally {
                     _loadingMore.value = false
                     _filtering.value = false
-                    // End-of-catalog: TMDB sent fewer than a full page (or
-                    // every item was a duplicate), so there's nothing more.
-                    if (more.size < pageSize) {
-                        _canLoadMore.value = false
-                    }
                 }
             }
         }
     }
 
-    /** Best-effort application context for the availability probe. */
     private fun appContext(): android.content.Context? = AppContextHolder.context
 }
 
-/**
- * Process-wide application context holder so ViewModels can access a Context
- * for the availability probe without needing an Activity-scoped reference.
- * Set once from [com.ashtonhardy.piratesfilmcove.PiratesfilmCoveApplication] / MainActivity.
- */
 object AppContextHolder {
     @Volatile
     var context: android.content.Context? = null
