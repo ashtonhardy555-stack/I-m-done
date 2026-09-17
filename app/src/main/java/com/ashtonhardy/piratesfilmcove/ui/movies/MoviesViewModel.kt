@@ -85,6 +85,4 @@ class MoviesViewModel : ViewModel() {
             }
         }
     }
-
-    private fun appContext(): android.content.Context? = AppContextHolder.context
 }
