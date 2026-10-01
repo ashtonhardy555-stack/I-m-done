@@ -71,21 +71,13 @@ import com.ashtonhardy.piratesfilmcove.data.server.VidStormExtractor
 import com.ashtonhardy.piratesfilmcove.data.server.VideasyExtractor
 import com.ashtonhardy.piratesfilmcove.data.server.VixSrcExtractor
 import com.ashtonhardy.piratesfilmcove.data.server.TwoEmbedExtractor
-import com.ashtonhardy.piratesfilmcove.data.server.VidCoreExtractor
-import com.ashtonhardy.piratesfilmcove.data.server.VidUpExtractor
-import com.ashtonhardy.piratesfilmcove.data.server.PeachifyExtractor
 import com.ashtonhardy.piratesfilmcove.ui.theme.NetflixTheme
 import kotlinx.coroutines.async
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import java.util.concurrent.TimeUnit
 
 /**
  * PlayerActivity — the on-device video player.
@@ -165,49 +157,12 @@ class PlayerActivity : ComponentActivity() {
          * Budget for the engine-first step: the time we're willing to wait
          * for the background Kodi-like engine to hand us a pre-resolved
          * LookMovie stream before falling back to the full parallel race.
-         * A cache hit returns in ~0 ms, so this only matters on a COLD resolve.
-         *
-         * IMPORTANT (load-time fix): this used to be 7 s, which BLOCKED the
-         * entire parallel race for up to 7 s on every cold start while we
-         * waited for LookMovie (a mid-tier, best-effort provider) -- the single
-         * biggest cause of "taking a long time to load". The full race already
-         * includes `tryLookMovie()`, so we only need to wait here long enough
-         * to catch an INSTANT cache hit or a near-instant resolve. 1.5 s keeps
-         * "LookMovie first when it's fast" without the 7 s cold-start penalty.
+         * A cache hit returns in ~0 ms; a cold resolve gets this long. Bumped
+         * to 7 s so LookMovie (SEARCH -> STORAGE -> SECURITY -> PLAY) completes
+         * BEFORE the parallel extractor race fires -- this is what makes LookMovie
+         * "always tried first". On a timeout we still fall through to the race,
          */
-        const val ENGINE_FIRST_TIMEOUT_MS = 1_500L
-
-        /**
-         * How long the parallel race waits for the FIRST candidate before it
-         * stops blocking on slow/hung extractors. Each extractor is already
-         * capped at [PROVIDER_TIMEOUT_MS] (6 s), so this covers that plus a
-         * little slack for one that ignores coroutine cancellation.
-         *
-         * (Load-time fix): the race previously `awaitAll`-ed EVERY extractor,
-         * so playback was gated on the SLOWEST extractor (up to 6-12 s) even
-         * when a working stream had resolved in ~300 ms. Now we start playback
-         * as soon as we have a candidate + a short grace window.
-         */
-        const val RACE_FIRST_RESULT_TIMEOUT_MS = 7_000L
-
-        /**
-         * After the FIRST candidate resolves, keep collecting for this long so
-         * the failover queue has a few backups (and an English/verified
-         * candidate has a chance to arrive) before we stop waiting on the rest.
-         */
-        const val RACE_GRACE_MS = 1_500L
-
-        /**
-         * Per-candidate pre-play verification timeout. A tiny ranged GET that
-         * confirms the URL actually returns real media (HLS `#EXTM3U`, an MP4
-         * `ftyp` box, or a `video/…` content-type) instead of a dead link /
-         * HTML error page. Run in PARALLEL across all candidates, so the added
-         * latency is ~the slowest single probe, capped here.
-         *
-         * (Correctness fix): this is what stops broken/empty streams from being
-         * played ahead of working ones -- verified streams are ranked first.
-         */
-        const val VERIFY_TIMEOUT_MS = 2_500L
+        const val ENGINE_FIRST_TIMEOUT_MS = 7_000L
 
         /**
          * Factory used by [com.ashtonhardy.piratesfilmcove.ui.MainActivity].
@@ -1215,65 +1170,6 @@ fun PlayerScreen(
                 }
             }
 
-            // -- VidCore headless engine (vidcore.io, no WebView) --
-            // TMDB-id provider: scrapes the embed seed, exchanges it via
-            // enc-dec.app (enc-vidcore), decrypts the server list, then the
-            // per-server stream, and returns the first playable HLS/MP4 URL.
-            // Same headless OkHttp pattern as Cinejoy/LookMovie. Cloudflare-
-            // protected -- passes from residential/mobile IPs and may 403 from
-            // datacenter IPs (fails fast, so it costs the race almost nothing).
-            suspend fun tryVidCore(): DirectWinner? {
-                if ("VidCore" in excluded) {
-                    Log.d("Player", "VidCore excluded this round")
-                    return null
-                }
-                Log.d("Player", "VidCore: extracting...")
-                val res = withTimeoutOrNull(PlayerActivity.PROVIDER_TIMEOUT_MS) {
-                    VidCoreExtractor.extract(tmdbId, contentType, currentSeason, currentEpisode)
-                }
-                return (res as? VidCoreExtractor.Result.Stream)?.let {
-                    Log.i("Player", "VidCore hit: ${it.url}")
-                    DirectWinner(it.url, it.headers, it.providerName.ifBlank { "VidCore" })
-                }
-            }
-
-            // -- VidUp headless engine (vidup.to, no WebView) --
-            // Same enc-dec.app flow as VidCore (enc-vidup/dec-vidup). Adds an
-            // independent TMDB-id source with its own upstream server pool.
-            suspend fun tryVidUp(): DirectWinner? {
-                if ("VidUp" in excluded) {
-                    Log.d("Player", "VidUp excluded this round")
-                    return null
-                }
-                Log.d("Player", "VidUp: extracting...")
-                val res = withTimeoutOrNull(PlayerActivity.PROVIDER_TIMEOUT_MS) {
-                    VidUpExtractor.extract(tmdbId, contentType, currentSeason, currentEpisode)
-                }
-                return (res as? VidUpExtractor.Result.Stream)?.let {
-                    Log.i("Player", "VidUp hit: ${it.url}")
-                    DirectWinner(it.url, it.headers, it.providerName.ifBlank { "VidUp" })
-                }
-            }
-
-            // -- Peachify headless engine (eat-peach.sbs, no WebView) --
-            // TMDB-id provider fronting FIVE upstream servers (Multi, Horizon,
-            // Spider, Wolf, Iron). Simple GET -> dec-peachify flow. Adds a broad
-            // independent catalogue for titles the other sources miss.
-            suspend fun tryPeachify(): DirectWinner? {
-                if ("Peachify" in excluded) {
-                    Log.d("Player", "Peachify excluded this round")
-                    return null
-                }
-                Log.d("Player", "Peachify: extracting...")
-                val res = withTimeoutOrNull(PlayerActivity.PROVIDER_TIMEOUT_MS) {
-                    PeachifyExtractor.extract(tmdbId, contentType, currentSeason, currentEpisode)
-                }
-                return (res as? PeachifyExtractor.Result.Stream)?.let {
-                    Log.i("Player", "Peachify hit: ${it.url}")
-                    DirectWinner(it.url, it.headers, it.providerName.ifBlank { "Peachify" })
-                }
-            }
-
             // ── ALL-SERVERS PARALLEL RACE (single unified lane) ──
             //
             // Per the user's explicit requests:
@@ -1324,15 +1220,6 @@ fun PlayerScreen(
 
             Log.d("Player", "🏁 ALL-SERVERS PARALLEL RACE: firing every direct extractor at once")
             val raceCandidates = try {
-                val collected = java.util.Collections.synchronizedList(mutableListOf<DirectWinner>())
-                // Completes the instant the FIRST extractor yields a candidate.
-                // Used to stop blocking on slow/hung extractors (the old
-                // awaitAll waited for the SLOWEST one, not the fastest).
-                val firstResult = CompletableDeferred<Unit>()
-                fun record(w: DirectWinner) {
-                    collected.add(w)
-                    firstResult.complete(Unit)
-                }
                 withTimeoutOrNull(PlayerActivity.RACE_TIMEOUT_MS) {
                     coroutineScope {
                         // EVERY extractor fires simultaneously. Previously-
@@ -1352,60 +1239,39 @@ fun PlayerScreen(
                         // first gate (above) already runs LookMovie alone
                         // before this race even starts.
                         val deferreds = listOf(
-                            async { safe { tryLookMovie() }?.also { record(it) } },
-                            async { safe { tryNoTorrent() }?.also { record(it) } },
-                            async { safe { trySmashStreams() }?.also { record(it) } },
-                            async { safe { tryNuvioStreams() }?.also { record(it) } },
-                            async { safe { tryAnnasCinema() }?.also { record(it) } },
-                            async { safe { tryNovaStream() }?.also { record(it) } },
-                            async { safe { tryVidStorm() }?.also { record(it) } },
-                            async { safe { tryVidSrc() }?.also { record(it) } },
-                            async { safe { tryVidSrcMe() }?.also { record(it) } },
-                            async { safe { tryVidSrcPro() }?.also { record(it) } },
-                            async { safe { tryVidSrcNet() }?.also { record(it) } },
-                            async { safe { tryVidLink() }?.also { record(it) } },
-                            async { safe { tryVixSrc() }?.also { record(it) } },
-                            async { safe { tryMeowTv() }?.also { record(it) } },
-                            async { safe { tryVideasy() }?.also { record(it) } },
-                            async { safe { tryKissKh() }?.also { record(it) } },
-                            async { safe { tryVidSync() }?.also { record(it) } },
-                            async { safe { tryLordFlix() }?.also { record(it) } },
-                            async { safe { tryDahmer() }?.also { record(it) } },
-                            async { safe { tryTwoEmbed() }?.also { record(it) } },
-                            async { safe { trySuperEmbed() }?.also { record(it) } },
-                            async { safe { tryCinejoy() }?.also { record(it) } },
-                            async { safe { tryVidFast() }?.also { record(it) } },
-                            async { safe { tryVidCore() }?.also { record(it) } },
-                            async { safe { tryVidUp() }?.also { record(it) } },
-                            async { safe { tryPeachify() }?.also { record(it) } }
+                            async { safe { tryLookMovie() } },
+                            async { safe { tryNoTorrent() } },
+                            async { safe { trySmashStreams() } },
+                            async { safe { tryNuvioStreams() } },
+                            async { safe { tryAnnasCinema() } },
+                            async { safe { tryNovaStream() } },
+                            async { safe { tryVidStorm() } },
+                            async { safe { tryVidSrc() } },
+                            async { safe { tryVidSrcMe() } },
+                            async { safe { tryVidSrcPro() } },
+                            async { safe { tryVidSrcNet() } },
+                            async { safe { tryVidLink() } },
+                            async { safe { tryVixSrc() } },
+                            async { safe { tryMeowTv() } },
+                            async { safe { tryVideasy() } },
+                            async { safe { tryKissKh() } },
+                            async { safe { tryVidSync() } },
+                            async { safe { tryLordFlix() } },
+                            async { safe { tryDahmer() } },
+                            async { safe { tryTwoEmbed() } },
+                            async { safe { trySuperEmbed() } },
+                            async { safe { tryCinejoy() } },
+                            async { safe { tryVidFast() } }
                         )
 
-                        // ── EARLY EXIT (load-time fix) ──
-                        // Wait for the FIRST candidate, but never longer than
-                        // RACE_FIRST_RESULT_TIMEOUT_MS. Previously we awaited
-                        // ALL extractors, so a single slow/hung one (VidSrcPro's
-                        // ~12 s pipeline, a hung CDN, a slow DNS) delayed
-                        // playback to the SLOWEST extractor instead of the
-                        // fastest. Now: as soon as one candidate lands we wait
-                        // only RACE_GRACE_MS more (to build the failover queue
-                        // and let an English/verified candidate arrive), then
-                        // cancel the stragglers and start playback.
-                        val gotFirst = withTimeoutOrNull(
-                            PlayerActivity.RACE_FIRST_RESULT_TIMEOUT_MS
-                        ) {
-                            firstResult.await()
-                            true
-                        } ?: false
-                        if (gotFirst) {
-                            kotlinx.coroutines.delay(PlayerActivity.RACE_GRACE_MS)
-                        }
-                        // Stop waiting on anything still running. safe() swallows
-                        // cancellation, so these complete cleanly and we keep
-                        // every candidate that already resolved.
-                        deferreds.forEach { it.cancel() }
+                        // awaitAll so we collect EVERY resolved candidate,
+                        // not just the first. safe() guarantees no async
+                        // throws, so awaitAll completes cleanly.
+                        deferreds.map { d ->
+                            try { d.await() } catch (e: Exception) { null }
+                        }.filterNotNull()
                     }
-                }
-                collected.toList()
+                } ?: emptyList()
             } catch (e: Exception) {
                 Log.w("Player", "Parallel race error: ${e.message}")
                 emptyList()
@@ -1427,64 +1293,20 @@ fun PlayerScreen(
             // reliability tier), so the headless LookMovie extractor's stream
             // is always played first when it resolves. English-audio and
             // reliability only break ties among the non-LookMovie providers.
-            // ── PRE-PLAY VERIFICATION (correctness fix) ──
-            // Probe every collected candidate IN PARALLEL with a tiny ranged
-            // GET and mark it verified / broken / unknown. This is what stops
-            // a broken or empty URL (a dead CDN node, an HTML error page, a
-            // "00:00" zero-duration stream, a NoTorrent "unverified" fallback)
-            // from being played ahead of a working stream: verified candidates
-            // rank FIRST, and confirmed-broken ones sink to the bottom (still
-            // kept as a last-resort so we never regress to "no stream").
-            // Because the probes run concurrently the added latency is ~the
-            // slowest single probe, capped at VERIFY_TIMEOUT_MS.
-            val verifyFlags: List<Boolean?> = withTimeoutOrNull(
-                PlayerActivity.VERIFY_TIMEOUT_MS + 1_000L
-            ) {
-                coroutineScope {
-                    raceCandidates
-                        .map { c -> async { verifyStreamPlayable(c.url, c.headers) } }
-                        .map { it.await() }
-                }
-            } ?: List(raceCandidates.size) { null }
-            Log.i(
-                "Player",
-                "🔎 Verified ${verifyFlags.count { it == true }}/${raceCandidates.size} " +
-                    "candidate(s) as playable (broken=${verifyFlags.count { it == false }})"
-            )
-
-            // ── Ranking ──
-            // 1) verified (true) before unknown (null) before confirmed-broken
-            //    (false) — a working stream always beats a broken/empty one;
-            // 2) explicit "unverified" providers sink below real ones;
-            // 3) LookMovie-first (only now that broken LookMovie URLs are
-            //    filtered out, so a DEAD LookMovie no longer wins);
-            // 4) English-audio;
-            // 5) provider reliability.
             val ranked = raceCandidates
-                .mapIndexed { i, c ->
-                    RankedCandidate(
-                        winner = c,
-                        english = isEnglishStream(c, contentType),
-                        verified = verifyFlags.getOrNull(i)
-                    )
-                }
+                .map { RankedCandidate(it, isEnglishStream(it, contentType)) }
                 .sortedWith(
-                    compareByDescending<RankedCandidate> { verifiedScore(it.verified) }
-                        .thenByDescending {
-                            !it.winner.providerName.contains("unverified", ignoreCase = true)
-                        }
-                        .thenByDescending {
-                            it.winner.providerName.contains("LookMovie", ignoreCase = true)
-                        }
-                        .thenByDescending { it.english }
-                        .thenByDescending { providerReliability(it.winner.providerName) }
+                    compareByDescending<RankedCandidate> {
+                        it.winner.providerName.contains("LookMovie", ignoreCase = true)
+                    }.thenByDescending { it.english }
+                     .thenByDescending { providerReliability(it.winner.providerName) }
                 )
 
             if (ranked.isNotEmpty()) {
                 val best = ranked.first()
                 val rest = ranked.drop(1)
                 candidateQueue = rest
-                Log.i("Player", "🏁 Direct-API winner: ${best.winner.providerName} (english=${best.english}, verified=${best.verified}, ${rest.size} backup candidates queued)")
+                Log.i("Player", "🏁 Direct-API winner: ${best.winner.providerName} (english=${best.english}, ${rest.size} backup candidates queued)")
                 streamUrl = best.winner.url
                 streamHeaders = best.winner.headers.ifEmpty {
                     mapOf("User-Agent" to DEFAULT_UA)
@@ -1549,17 +1371,16 @@ fun PlayerScreen(
                     progressBackdropPath = backdropUrl?.let { extractTmdbPath(it) },
                     onPlayingChange = { playing -> isPlaying = playing },
                     onPlaybackStart = {
-                        // ── Record playback SUCCESS (correctness fix) ──
-                        // Fired the instant ExoPlayer reaches STATE_READY (the
-                        // first frame renders). Previously the persistent
-                        // per-title cache was ONLY ever written on FAILURE
-                        // (recordFailure), so it monotonically accumulated
-                        // "bad" providers and then EXCLUDED them on the next
-                        // open — even providers that actually work. That is a
-                        // direct cause of "skipping working streams". Recording
-                        // the success here both (a) marks this provider as the
-                        // known-good one to lead with next time and (b) clears
-                        // any stale "bad" mark for it.
+                        // ── Record playback SUCCESS ──
+                        // Fired the instant ExoPlayer reaches STATE_READY.
+                        // build104 only ever wrote FAILURES to the per-title
+                        // cache (recordFailure), so it monotonically
+                        // accumulated "bad" providers and then EXCLUDED them on
+                        // the next open — even providers that actually work.
+                        // That is itself a cause of "skipping working streams".
+                        // Recording the success here both (a) marks this
+                        // provider as the known-good one to lead with next time
+                        // and (b) clears any stale "bad" mark for it.
                         deliveringServerName?.let { provider ->
                             StreamAvailabilityCache.recordSuccess(
                                 tmdbId = tmdbId,
@@ -2200,6 +2021,17 @@ private fun ExoPlayerView(
     // time": previously any PlaybackException immediately switched servers.
     var transientRetryCount by remember { mutableStateOf(0) }
 
+    // ── PROVEN-WORKING GUARD (the "never skip a stream that plays" rule) ──
+    // provenRetryCount: how many times we've recovered IN PLACE (same server,
+    //   seek back to where we were) after the stream had already proven itself
+    //   by advancing past 00:00. Bounded by MAX_PROVEN_RETRIES.
+    // hasStartedPlaying: flips true the instant the ExoPlayer clock advances to
+    //   00:01 (PROVEN_PLAYING_POSITION_MS). Once true, this stream is proven
+    //   WORKING and must NEVER be auto-skipped/failed-over — only in-place
+    //   recovery is allowed, no matter what error arrives afterwards.
+    var provenRetryCount by remember { mutableStateOf(0) }
+    val hasStartedPlaying = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
+
     // Capture the error callback in a lambda we can invoke from the
     // AndroidView factory (which runs outside of the Composition).
     val errorHandler = rememberUpdatedState(onPlayerError)
@@ -2252,6 +2084,60 @@ private fun ExoPlayerView(
         }
     }
 
+    // ── "Did it actually start playing?" watchdog (USER RULE) ──────────────
+    // Polls the live player every 500 ms and does exactly two things:
+    //
+    //   1. PROVE the stream works. The moment the clock advances past
+    //      PROVEN_PLAYING_POSITION_MS (00:01) we flip hasStartedPlaying → the
+    //      stream is locked in and will NEVER be auto-skipped (see the guard in
+    //      onPlayerError). This is the user's rule: "as soon as 00:00 goes to
+    //      00:01 that shows the stream works".
+    //
+    //   2. KILL a dead stream. If the player reaches STATE_READY (the manifest
+    //      loaded) but the clock is STILL at 00:00 after STALL_TIMEOUT_MS, the
+    //      stream is a dead/empty "00:00" stream → surface a fatal error so
+    //      PlayerScreen fails over to the next working candidate. This is the
+    //      ONLY case in which a stream is skipped.
+    LaunchedEffect(player) {
+        val p = player ?: return@LaunchedEffect
+        var readyAtMs = 0L
+        while (true) {
+            kotlinx.coroutines.delay(500L)
+            if (hasStartedPlaying.get()) return@LaunchedEffect  // proven → stop watching
+            try {
+                // Only accumulate "stall" time while the player is actually
+                // trying to play (READY + playWhenReady). A user-paused player
+                // must never be mistaken for a dead one.
+                if (p.playbackState == Player.STATE_READY && p.playWhenReady) {
+                    if (readyAtMs == 0L) {
+                        readyAtMs = android.os.SystemClock.elapsedRealtime()
+                    }
+                    if (p.currentPosition >= PROVEN_PLAYING_POSITION_MS) {
+                        hasStartedPlaying.set(true)
+                        Log.i(
+                            "ExoPlayer",
+                            "▶️ Stream PROVEN working (position=${p.currentPosition}ms ≥ 00:01) — this stream will NOT be skipped."
+                        )
+                        return@LaunchedEffect
+                    }
+                    if (android.os.SystemClock.elapsedRealtime() - readyAtMs > STALL_TIMEOUT_MS) {
+                        Log.w(
+                            "ExoPlayer",
+                            "⏱️ Stream READY but stuck at 00:00 for ${STALL_TIMEOUT_MS}ms — treating as dead/empty, failing over."
+                        )
+                        errorHandler.value.invoke(true)
+                        return@LaunchedEffect
+                    }
+                } else {
+                    // Not READY yet, or the user paused → don't count stall time.
+                    readyAtMs = 0L
+                }
+            } catch (_: Exception) {
+                // Player released mid-poll — ignore.
+            }
+        }
+    }
+
     // ── Reset ready + retry state whenever the URL changes (server switch) ──
     // When the player falls through to the next server, a NEW url arrives.
     // The old player has been released (onRelease), so we must clear the
@@ -2263,6 +2149,10 @@ private fun ExoPlayerView(
     LaunchedEffect(url) {
         isReady = false
         transientRetryCount = 0
+        provenRetryCount = 0
+        // New source → not yet proven to play. It must advance past 00:00
+        // before it is locked in (see the watchdog below).
+        hasStartedPlaying.set(false)
         availableQualities = emptyList()
         selectedQuality = "Auto"
     }
@@ -2527,6 +2417,37 @@ private fun ExoPlayerView(
 
                             override fun onPlayerError(error: PlaybackException) {
                                 Log.e("ExoPlayer", "Error: ${error.errorCodeName} - ${error.message}")
+                                // ── PROVEN-WORKING GUARD (USER RULE) ──
+                                // If this stream already started playing (the
+                                // clock advanced past 00:00), it is a WORKING
+                                // stream and must NOT be skipped. Recover it in
+                                // place by re-preparing the SAME source from
+                                // where it left off — never surface a fatal
+                                // error that would switch servers. Bounded by a
+                                // generous budget so a truly dead stream can't
+                                // loop forever.
+                                if (hasStartedPlaying.get()) {
+                                    if (provenRetryCount < MAX_PROVEN_RETRIES) {
+                                        provenRetryCount++
+                                        val resumeAt = try {
+                                            this@apply.currentPosition.coerceAtLeast(0L)
+                                        } catch (_: Exception) { 0L }
+                                        Log.w("ExoPlayer", "🛡️ Stream already played — recovering in place ($provenRetryCount/$MAX_PROVEN_RETRIES) from ${resumeAt}ms, NOT skipping.")
+                                        val provenItem = mediaItem
+                                        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                                            try {
+                                                this@apply.setMediaItem(provenItem)
+                                                this@apply.prepare()
+                                                if (resumeAt > 0L) this@apply.seekTo(resumeAt)
+                                                this@apply.playWhenReady = true
+                                            } catch (e: Exception) {
+                                                Log.e("ExoPlayer", "Proven-source re-prepare failed", e)
+                                            }
+                                        }, 1_000L)
+                                        return
+                                    }
+                                    Log.w("ExoPlayer", "🛡️ Proven stream exhausted in-place retries — allowing failover as a last resort.")
+                                }
                                 // ── Classify the error ──
                                 // Transient errors are recovered in-player by
                                 // re-preparing the same media item (up to
@@ -2747,102 +2668,8 @@ private val RACE_PROVIDER_BASES = setOf(
  */
 private data class RankedCandidate(
     val winner: DirectWinner,
-    val english: Boolean,
-    /**
-     * Pre-play verification result for [winner]:
-     *  - `true`  → the URL returned real media (play it first);
-     *  - `null`  → the probe was inconclusive (timeout/connection error) —
-     *              we can't prove it's broken, so it is NOT demoted below
-     *              verified streams but sits above confirmed-broken ones;
-     *  - `false` → the URL returned a definitive non-media response (HTML /
-     *              4xx / 5xx / empty) — a broken/empty stream, ranked last.
-     */
-    val verified: Boolean? = null
+    val english: Boolean
 )
-
-/**
- * Collapses the tri-state [RankedCandidate.verified] flag into a sortable
- * score so the comparator can rank verified > unknown > broken in one step.
- */
-private fun verifiedScore(v: Boolean?): Int = when (v) {
-    true -> 2
-    null -> 1
-    false -> 0
-}
-
-/**
- * Fast pre-play verification: a tiny ranged GET that confirms [url] actually
- * serves real media rather than a dead link / HTML error page.
- *
- * This is the core of the "load WORKING streams, not broken/empty ones" fix.
- * It is intentionally cheap (a single ranged request, run in parallel across
- * all candidates) so it never meaningfully delays playback.
- *
- * @return `true`  the URL returned real media (HLS `#EXTM3U`, an MP4 `ftyp`
- *                 box, or a `video/…` content-type);
- *         `false` the URL returned a definitive non-media response (HTML,
- *                 4xx/5xx, or an empty body) — a broken/empty stream;
- *         `null`  the probe was inconclusive (timeout / connection error) —
- *                 we can't prove it's broken, so it is not demoted.
- */
-private suspend fun verifyStreamPlayable(
-    url: String,
-    headers: Map<String, String>
-): Boolean? = withContext(Dispatchers.IO) {
-    if (!url.startsWith("http")) return@withContext false
-    try {
-        val builder = Request.Builder().url(url)
-        headers.forEach { (k, v) -> if (k.isNotBlank() && v.isNotBlank()) builder.header(k, v) }
-        if (headers.keys.none { it.equals("Range", ignoreCase = true) }) {
-            builder.header("Range", "bytes=0-2047")
-        }
-        builder.get()
-        verifyClient.newCall(builder.build()).execute().use { resp ->
-            if (resp.code != 200 && resp.code != 206) {
-                Log.d("Player", "verify: HTTP ${resp.code} for ${url.take(70)}")
-                return@withContext false
-            }
-            val ct = resp.header("Content-Type").orEmpty().lowercase()
-            // HLS manifests identify themselves via content-type.
-            if (ct.contains("mpegurl")) return@withContext true
-            // Read the first bytes once. Use bytes() so binary MP4 magic
-            // (ftyp box) survives intact — decoding as String can corrupt
-            // null bytes in the box-size field.
-            val raw = resp.body?.bytes() ?: ByteArray(0)
-            if (raw.size >= 8 && String(raw, 4, 4, Charsets.US_ASCII) == "ftyp") {
-                return@withContext true
-            }
-            if (ct.contains("video/")) return@withContext true
-            val head = String(raw, Charsets.US_ASCII)
-            if (head.contains("#EXTM3U")) return@withContext true
-            if (ct.contains("text/html") || head.contains("<!DOCTYPE") ||
-                head.contains("<html") || head.contains("<HTML")
-            ) {
-                Log.d("Player", "verify: HTML body (not media) for ${url.take(70)}")
-                return@withContext false
-            }
-            // A 2xx with an empty body is a dead/empty stream.
-            if (raw.isEmpty()) return@withContext false
-            // Unknown binary/other content-type: can't prove broken → unknown.
-            null
-        }
-    } catch (e: Exception) {
-        Log.d("Player", "verify: inconclusive (${e.message}) for ${url.take(70)}")
-        null
-    }
-}
-
-/**
- * Shared OkHttp client for pre-play verification. Short timeouts keep the
- * parallel verification pass from ever becoming the load-time bottleneck.
- */
-private val verifyClient: OkHttpClient by lazy {
-    OkHttpClient.Builder()
-        .connectTimeout(PlayerActivity.VERIFY_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-        .readTimeout(PlayerActivity.VERIFY_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-        .followRedirects(true)
-        .build()
-}
 
 /**
  * Heuristic English-audio detection for a resolved stream.
@@ -2952,8 +2779,6 @@ private fun providerReliability(providerName: String): Int {
         n.startsWith("vidnest") -> 48
         n.startsWith("vidrock") -> 47
         n.startsWith("vidcore") -> 46
-        n.startsWith("vidup") -> 46
-        n.startsWith("peachify") -> 44
         n.startsWith("tvembed") -> 45
         n.startsWith("vidking") -> 44
         n.startsWith("smashystream") -> 42
@@ -3123,6 +2948,28 @@ private const val DEFAULT_UA =
 private const val MAX_PLAYER_RETRIES = 3
 
 /**
+ * In-place recovery budget for a stream that has ALREADY been proven to play
+ * (the clock advanced past 00:00). Per the user's rule a proven stream is
+ * never skipped, so this is deliberately generous — it only exists so a
+ * stream that dies for good can't loop forever.
+ */
+private const val MAX_PROVEN_RETRIES = 8
+
+/**
+ * The position (ms) at which a stream is considered PROVEN to be playing:
+ * 00:01. The user's rule — "as soon as 00:00 goes to 00:01 that shows the
+ * stream works" — so crossing this locks the stream in and disables failover.
+ */
+private const val PROVEN_PLAYING_POSITION_MS = 1_000L
+
+/**
+ * How long a stream may sit in STATE_READY (manifest loaded) with the clock
+ * still at 00:00 before we treat it as a dead/empty "00:00" stream and fail
+ * over. This is the ONLY case in which a not-yet-playing stream is skipped.
+ */
+private const val STALL_TIMEOUT_MS = 10_000L
+
+/**
  * Classifies an ExoPlayer [PlaybackException] as transient (recoverable by
  * re-preparing the same source) vs fatal (the source is genuinely dead and we
  * should move to the next server).
@@ -3156,26 +3003,13 @@ private fun isTransientPlaybackError(error: PlaybackException): Boolean {
 
     // Inspect the error code for known transient categories.
     val code = error.errorCode
-
-    // ── Dead/empty stream → FATAL (fail over immediately) ──
-    // A 404 (ERROR_CODE_IO_FILE_NOT_FOUND) or a response whose content-type
-    // isn't media (ERROR_CODE_IO_INVALID_HTTP_CONTENT_TYPE — e.g. an HTML
-    // error page where the video should be) means THIS URL is genuinely
-    // broken/empty. Retrying the same URL only delays failover to a working
-    // queued candidate — the exact "keeps broken/empty streams, skips working
-    // ones" symptom. Treat them as fatal so onPlayerError pops the next
-    // (verified) candidate at once.
-    if (code == androidx.media3.common.PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND ||
-        code == androidx.media3.common.PlaybackException.ERROR_CODE_IO_INVALID_HTTP_CONTENT_TYPE
-    ) {
-        return false
-    }
-
     when (code) {
-        // Load errors (5xx, timeout, connection reset) — retryable.
+        // Load errors (HTTP 5xx, timeout, connection reset) — retryable.
         androidx.media3.common.PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
         androidx.media3.common.PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT,
+        androidx.media3.common.PlaybackException.ERROR_CODE_IO_INVALID_HTTP_CONTENT_TYPE,
         androidx.media3.common.PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS,
+        androidx.media3.common.PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND,
         androidx.media3.common.PlaybackException.ERROR_CODE_IO_UNSPECIFIED,
         // Renderer/decoder init that can recover on re-prepare.
         androidx.media3.common.PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
@@ -3189,12 +3023,11 @@ private fun isTransientPlaybackError(error: PlaybackException): Boolean {
         else -> Unit
     }
 
-    // A 403 / 404 / hard "ACCESS DENIED" on the actual media is fatal for THIS
-    // source (geo/CDN block, dead link) — move on to the next candidate.
+    // A 403 / hard "ACCESS DENIED" on the actual media is fatal for THIS
+    // source (geo/CDN block) — move on. ERROR_CODE_IO_BAD_HTTP_STATUS is
+    // ambiguous, so only treat an explicit 403 message as fatal here.
     val msg = error.message?.lowercase() ?: ""
-    if (msg.contains("403") || msg.contains("404") || msg.contains("not found") ||
-        msg.contains("access denied") || msg.contains("forbidden")
-    ) {
+    if (msg.contains("403") || msg.contains("access denied") || msg.contains("forbidden")) {
         return false
     }
 
