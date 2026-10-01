@@ -75,6 +75,7 @@ import com.ashtonhardy.piratesfilmcove.ui.theme.NetflixTheme
 import kotlinx.coroutines.async
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
@@ -711,7 +712,10 @@ fun PlayerScreen(
             currentStage = PlayerActivity.STAGE_VIDSTORM
             infoMessage = "Finding best stream\u2026"
 
-            val excluded = excludedRaceProviders
+            // Mutable so the bounded retry round (below) can clear it and
+            // give every extractor another shot before we ever declare
+            // "no stream". The tryX helpers close over this var.
+            var excluded = excludedRaceProviders
 
             // \u2500\u2500 ENGINE-FIRST: ask the background Kodi-like engine \u2500\u2500 //
             // The KodiEngine runs the LookMovieTomb addon flow in the
@@ -1219,9 +1223,20 @@ fun PlayerScreen(
                 }
 
             Log.d("Player", "🏁 ALL-SERVERS PARALLEL RACE: firing every direct extractor at once")
-            val raceCandidates = try {
-                withTimeoutOrNull(PlayerActivity.RACE_TIMEOUT_MS) {
-                    coroutineScope {
+
+            // ── One race round (result-preserving) ── //
+            // Every extractor fires simultaneously and writes its result into
+            // a shared thread-safe list the instant it resolves. This is the
+            // "servers are passing but not passed to the player" fix: even if
+            // the outer timeout fires (a blocking OkHttp call that ignores
+            // coroutine cancellation, a hung CDN, a slow DNS), every candidate
+            // that ALREADY resolved is preserved and handed to the player
+            // instead of being discarded wholesale by `withTimeoutOrNull`.
+            suspend fun runRaceOnce(): List<DirectWinner> {
+                val collected = java.util.Collections.synchronizedList(mutableListOf<DirectWinner>())
+                try {
+                    withTimeoutOrNull(PlayerActivity.RACE_TIMEOUT_MS) {
+                        coroutineScope {
                         // EVERY extractor fires simultaneously. Previously-
                         // excluded extractors (VidSrcPro, SuperEmbed,
                         // VidSrcNet) are now INCLUDED — they race with the
@@ -1239,42 +1254,95 @@ fun PlayerScreen(
                         // first gate (above) already runs LookMovie alone
                         // before this race even starts.
                         val deferreds = listOf(
-                            async { safe { tryLookMovie() } },
-                            async { safe { tryNoTorrent() } },
-                            async { safe { trySmashStreams() } },
-                            async { safe { tryNuvioStreams() } },
-                            async { safe { tryAnnasCinema() } },
-                            async { safe { tryNovaStream() } },
-                            async { safe { tryVidStorm() } },
-                            async { safe { tryVidSrc() } },
-                            async { safe { tryVidSrcMe() } },
-                            async { safe { tryVidSrcPro() } },
-                            async { safe { tryVidSrcNet() } },
-                            async { safe { tryVidLink() } },
-                            async { safe { tryVixSrc() } },
-                            async { safe { tryMeowTv() } },
-                            async { safe { tryVideasy() } },
-                            async { safe { tryKissKh() } },
-                            async { safe { tryVidSync() } },
-                            async { safe { tryLordFlix() } },
-                            async { safe { tryDahmer() } },
-                            async { safe { tryTwoEmbed() } },
-                            async { safe { trySuperEmbed() } },
-                            async { safe { tryCinejoy() } },
-                            async { safe { tryVidFast() } }
+                            async { safe { tryLookMovie() }?.also { collected.add(it) } },
+                            async { safe { tryNoTorrent() }?.also { collected.add(it) } },
+                            async { safe { trySmashStreams() }?.also { collected.add(it) } },
+                            async { safe { tryNuvioStreams() }?.also { collected.add(it) } },
+                            async { safe { tryAnnasCinema() }?.also { collected.add(it) } },
+                            async { safe { tryNovaStream() }?.also { collected.add(it) } },
+                            async { safe { tryVidStorm() }?.also { collected.add(it) } },
+                            async { safe { tryVidSrc() }?.also { collected.add(it) } },
+                            async { safe { tryVidSrcMe() }?.also { collected.add(it) } },
+                            async { safe { tryVidSrcPro() }?.also { collected.add(it) } },
+                            async { safe { tryVidSrcNet() }?.also { collected.add(it) } },
+                            async { safe { tryVidLink() }?.also { collected.add(it) } },
+                            async { safe { tryVixSrc() }?.also { collected.add(it) } },
+                            async { safe { tryMeowTv() }?.also { collected.add(it) } },
+                            async { safe { tryVideasy() }?.also { collected.add(it) } },
+                            async { safe { tryKissKh() }?.also { collected.add(it) } },
+                            async { safe { tryVidSync() }?.also { collected.add(it) } },
+                            async { safe { tryLordFlix() }?.also { collected.add(it) } },
+                            async { safe { tryDahmer() }?.also { collected.add(it) } },
+                            async { safe { tryTwoEmbed() }?.also { collected.add(it) } },
+                            async { safe { trySuperEmbed() }?.also { collected.add(it) } },
+                            async { safe { tryCinejoy() }?.also { collected.add(it) } },
+                            async { safe { tryVidFast() }?.also { collected.add(it) } }
                         )
 
-                        // awaitAll so we collect EVERY resolved candidate,
-                        // not just the first. safe() guarantees no async
-                        // throws, so awaitAll completes cleanly.
-                        deferreds.map { d ->
-                            try { d.await() } catch (e: Exception) { null }
-                        }.filterNotNull()
+                            // awaitAll so we collect EVERY resolved candidate,
+                            // not just the first. safe() guarantees no async
+                            // throws, so awaitAll completes cleanly. Each async
+                            // already pushed its result into `collected`.
+                            deferreds.map { d ->
+                                try { d.await() } catch (e: Exception) { null }
+                            }
+                        }
                     }
-                } ?: emptyList()
-            } catch (e: Exception) {
-                Log.w("Player", "Parallel race error: ${e.message}")
-                emptyList()
+                } catch (e: Exception) {
+                    Log.w("Player", "Parallel race error: ${e.message}")
+                }
+                // Whatever resolved before the deadline — even on timeout —
+                // is returned. Never discarded.
+                return collected.toList()
+            }
+
+            // ── Bounded multi-round race (never say "no stream" too early) ── //
+            // Round 1 fires every extractor. If NOTHING resolves we do NOT
+            // immediately surface "no stream" — we run a SECOND round (with
+            // exclusions cleared and a fresh engine check) so a provider that
+            // failed transiently, or was skipped, gets another shot. Only
+            // after both rounds come back empty do we show the error. This is
+            // the "if one server fails it tests the next before saying there's
+            // no stream" fix.
+            val maxRaceRounds = 2
+            var raceCandidates: List<DirectWinner> = emptyList()
+            var raceRound = 0
+            while (raceRound < maxRaceRounds) {
+                if (raceRound > 0) {
+                    // Retry round: clear exclusions for maximum coverage and
+                    // give transient failures a brief moment to recover.
+                    excluded = emptySet()
+                    delay(300)
+                    // Re-ask the engine — its background pre-resolve may have
+                    // finished by now (it performs a deeper LookMovie resolve).
+                    runCatching {
+                        val engine = KodiEngine.get()
+                        val req = KodiEngine.ResolveRequest(
+                            title = title,
+                            year = year,
+                            isMovie = contentType.equals("movie", ignoreCase = true),
+                            season = currentSeason,
+                            episode = currentEpisode,
+                            tmdbId = tmdbId
+                        )
+                        val resolved = engine.awaitResolve(req, PlayerActivity.ENGINE_FIRST_TIMEOUT_MS)
+                        if (resolved != null) {
+                            Log.i("Player", "⚡ Engine-first hit on retry round: ${resolved.providerName} → ${resolved.url}")
+                            candidateQueue = emptyList()
+                            streamUrl = resolved.url
+                            streamHeaders = resolved.headers.ifEmpty {
+                                mapOf("User-Agent" to DEFAULT_UA)
+                            }
+                            deliveringServerName = resolved.providerName
+                            isLoading = false
+                            return@LaunchedEffect
+                        }
+                    }
+                    Log.i("Player", "🔁 Race round ${raceRound + 1}: retrying every extractor before declaring no stream…")
+                }
+                raceCandidates = runRaceOnce()
+                if (raceCandidates.isNotEmpty()) break
+                raceRound++
             }
 
             // ── Rank: English-audio first, then by provider reliability ──
@@ -1316,7 +1384,7 @@ fun PlayerScreen(
                 return@LaunchedEffect
             } else {
                 candidateQueue = emptyList()
-                Log.w("Player", "All direct extractors yielded nothing on first race; a second race attempt follows if needed.")
+                Log.w("Player", "All direct extractors yielded nothing after $maxRaceRounds race round(s) \u2014 surfacing no-stream.")
             }
         }
 
