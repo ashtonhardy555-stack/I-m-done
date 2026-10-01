@@ -198,7 +198,7 @@ class PlayerActivity : ComponentActivity() {
         /**
          * Per-candidate pre-play verification timeout. A tiny ranged GET that
          * confirms the URL actually returns real media (HLS `#EXTM3U`, an MP4
-         * `ftyp` box, or a `video/*` content-type) instead of a dead link /
+         * `ftyp` box, or a `video/` MIME type) instead of a dead link /
          * HTML error page. Run in PARALLEL across all candidates, so the added
          * latency is ~the slowest single probe, capped here.
          *
@@ -2828,7 +2828,7 @@ private fun verifiedScore(v: Boolean?): Int = when (v) {
  * all candidates) so it never meaningfully delays playback.
  *
  * @return `true`  the URL returned real media (HLS `#EXTM3U`, an MP4 `ftyp`
- *                 box, or a `video/*` content-type);
+ *                 box, or a `video/` MIME type);
  *         `false` the URL returned a definitive non-media response (HTML,
  *                 4xx/5xx, or an empty body) — a broken/empty stream;
  *         `null`  the probe was inconclusive (timeout / connection error) —
