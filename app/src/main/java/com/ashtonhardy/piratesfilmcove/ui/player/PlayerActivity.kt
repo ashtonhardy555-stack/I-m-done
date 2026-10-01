@@ -71,6 +71,9 @@ import com.ashtonhardy.piratesfilmcove.data.server.VidStormExtractor
 import com.ashtonhardy.piratesfilmcove.data.server.VideasyExtractor
 import com.ashtonhardy.piratesfilmcove.data.server.VixSrcExtractor
 import com.ashtonhardy.piratesfilmcove.data.server.TwoEmbedExtractor
+import com.ashtonhardy.piratesfilmcove.data.server.VidCoreExtractor
+import com.ashtonhardy.piratesfilmcove.data.server.VidUpExtractor
+import com.ashtonhardy.piratesfilmcove.data.server.PeachifyExtractor
 import com.ashtonhardy.piratesfilmcove.ui.theme.NetflixTheme
 import kotlinx.coroutines.async
 import kotlinx.coroutines.CompletableDeferred
@@ -1170,6 +1173,65 @@ fun PlayerScreen(
                 }
             }
 
+            // -- VidCore headless engine (vidcore.io, no WebView) --
+            // TMDB-id provider: scrapes the embed seed, exchanges it via
+            // enc-dec.app (enc-vidcore), decrypts the server list, then the
+            // per-server stream, and returns the first playable HLS/MP4 URL.
+            // Same headless OkHttp pattern as Cinejoy/LookMovie. Cloudflare-
+            // protected -- passes from residential/mobile IPs and may 403 from
+            // datacenter IPs (fails fast, so it costs the race almost nothing).
+            suspend fun tryVidCore(): DirectWinner? {
+                if ("VidCore" in excluded) {
+                    Log.d("Player", "VidCore excluded this round")
+                    return null
+                }
+                Log.d("Player", "VidCore: extracting...")
+                val res = withTimeoutOrNull(PlayerActivity.PROVIDER_TIMEOUT_MS) {
+                    VidCoreExtractor.extract(tmdbId, contentType, currentSeason, currentEpisode)
+                }
+                return (res as? VidCoreExtractor.Result.Stream)?.let {
+                    Log.i("Player", "VidCore hit: ${it.url}")
+                    DirectWinner(it.url, it.headers, it.providerName.ifBlank { "VidCore" })
+                }
+            }
+
+            // -- VidUp headless engine (vidup.to, no WebView) --
+            // Same enc-dec.app flow as VidCore (enc-vidup/dec-vidup). Adds an
+            // independent TMDB-id source with its own upstream server pool.
+            suspend fun tryVidUp(): DirectWinner? {
+                if ("VidUp" in excluded) {
+                    Log.d("Player", "VidUp excluded this round")
+                    return null
+                }
+                Log.d("Player", "VidUp: extracting...")
+                val res = withTimeoutOrNull(PlayerActivity.PROVIDER_TIMEOUT_MS) {
+                    VidUpExtractor.extract(tmdbId, contentType, currentSeason, currentEpisode)
+                }
+                return (res as? VidUpExtractor.Result.Stream)?.let {
+                    Log.i("Player", "VidUp hit: ${it.url}")
+                    DirectWinner(it.url, it.headers, it.providerName.ifBlank { "VidUp" })
+                }
+            }
+
+            // -- Peachify headless engine (eat-peach.sbs, no WebView) --
+            // TMDB-id provider fronting FIVE upstream servers (Multi, Horizon,
+            // Spider, Wolf, Iron). Simple GET -> dec-peachify flow. Adds a broad
+            // independent catalogue for titles the other sources miss.
+            suspend fun tryPeachify(): DirectWinner? {
+                if ("Peachify" in excluded) {
+                    Log.d("Player", "Peachify excluded this round")
+                    return null
+                }
+                Log.d("Player", "Peachify: extracting...")
+                val res = withTimeoutOrNull(PlayerActivity.PROVIDER_TIMEOUT_MS) {
+                    PeachifyExtractor.extract(tmdbId, contentType, currentSeason, currentEpisode)
+                }
+                return (res as? PeachifyExtractor.Result.Stream)?.let {
+                    Log.i("Player", "Peachify hit: ${it.url}")
+                    DirectWinner(it.url, it.headers, it.providerName.ifBlank { "Peachify" })
+                }
+            }
+
             // ── ALL-SERVERS PARALLEL RACE (single unified lane) ──
             //
             // Per the user's explicit requests:
@@ -1261,7 +1323,10 @@ fun PlayerScreen(
                             async { safe { tryTwoEmbed() } },
                             async { safe { trySuperEmbed() } },
                             async { safe { tryCinejoy() } },
-                            async { safe { tryVidFast() } }
+                            async { safe { tryVidFast() } },
+                            async { safe { tryVidCore() } },
+                            async { safe { tryVidUp() } },
+                            async { safe { tryPeachify() } }
                         )
 
                         // awaitAll so we collect EVERY resolved candidate,
@@ -2659,6 +2724,8 @@ private fun providerReliability(providerName: String): Int {
         n.startsWith("vidnest") -> 48
         n.startsWith("vidrock") -> 47
         n.startsWith("vidcore") -> 46
+        n.startsWith("vidup") -> 46
+        n.startsWith("peachify") -> 44
         n.startsWith("tvembed") -> 45
         n.startsWith("vidking") -> 44
         n.startsWith("smashystream") -> 42
