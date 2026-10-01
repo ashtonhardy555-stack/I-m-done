@@ -17,7 +17,8 @@ import java.util.concurrent.TimeUnit
 
 /**
  * VideasyExtractor — resolves **direct playable** stream URLs from the
- * Videasy provider (`videasy.net`), a 10-server aggregator that mirrors
+ * Videasy provider (`api.speedracelight.com`, the successor to the retired
+ * `api.videasy.net`), a multi-server aggregator that mirrors
  * content from MyFlixerz, MovieBox, PrimeWire, OnionPlay, M4UHD, 1Movies,
  * HDMovie, SuperFlix and more.
  *
@@ -32,29 +33,32 @@ import java.util.concurrent.TimeUnit
  * another often does. Running all 10 concurrently means the *first* server
  * that returns a stream wins the race, typically in 1–2 HTTP round-trips.
  *
- * ## How it works (reverse-engineered from the live `api.videasy.net` API)
+ * ## How it works (reverse-engineered from the live `api.speedracelight.com` API)
  *
  *  1. **TMDB lookup** — resolve the title, year, and IMDb id for the given
  *     TMDB id. We do this with a single plain-HTTP call to TMDB's
  *     `movie/{id}` or `tv/{id}` endpoint with `append_to_response=external_ids`,
  *     exactly like the reference Videasy provider implementation.
  *
- *  2. **Server query (parallel)** — for each of the 10 Videasy servers,
- *     `GET https://api.videasy.net/{server}/sources-with-title?title=…&mediaType=…&year=…&tmdbId=…&imdbId=…[&seasonId=…&episodeId=…]`
- *     returns an **encrypted** blob (a long base64-ish string).
+ *  2. **Seed** — `GET https://api.speedracelight.com/seed?mediaId={tmdbId}`
+ *     returns `{ "seed": "…" }`, a per-title token the backend now requires.
  *
- *  3. **Decrypt** — `POST https://enc-dec.app/api/dec-videasy`
- *     with `{ "text": <encrypted>, "id": <tmdbId> }` returns
+ *  3. **Server query (parallel)** — for each Videasy server,
+ *     `GET https://api.speedracelight.com/{server}/sources-with-title?title=…&mediaType=…&year=…&tmdbId=…&imdbId=…&enc=2&seed=…[&seasonId=…&episodeId=…]`
+ *     (title double-URL-encoded) returns an **encrypted** blob.
+ *
+ *  4. **Decrypt** — `POST https://enc-dec.app/api/dec-videasy`
+ *     with `{ "text": <encrypted>, "id": <tmdbId>, "seed": <seed> }` returns
  *     `{ "result": { "sources": [{ "url": "https://…m3u8", "quality": "1080" }, …] } }`.
  *
- *  4. **Pick** the first source URL from the first server that decrypts
+ *  5. **Pick** the first source URL from the first server that decrypts
  *     successfully and return it to ExoPlayer with the correct Referer/Origin
- *     headers (`https://player.videasy.net/`).
+ *     headers (`https://player.videasy.to/`).
  *
- * All 10 servers are queried concurrently via `async{}; awaitAll()`. The
+ * All servers are queried concurrently via `async{}; awaitAll()`. The
  * first non-null, non-blank decrypted stream URL wins and the rest are
  * cancelled. This makes Videasy both **fast** (parallel, no sequential
- * probing) and **broad** (10 independent upstream CDNs).
+ * probing) and **broad** (independent upstream CDNs).
  *
  * Verification is advisory: a 403/401 OkHttp probe does NOT drop the URL
  * (ExoPlayer sends proper Referer/User-Agent/Range headers that CDNs accept).
@@ -66,17 +70,24 @@ object VideasyExtractor {
 
     private const val DECRYPT_URL = "https://enc-dec.app/api/dec-videasy"
 
-    private const val REFERER = "https://player.videasy.net/"
-    private const val ORIGIN = "https://player.videasy.net"
+    /** New Videasy backend (migrated from the dead `api.videasy.net`). */
+    private const val BASE = "https://api.speedracelight.com"
+    private const val SEED_URL = "$BASE/seed"
+
+    /** Algorithm version expected by the new backend. */
+    private const val ENC_VERSION = "2"
+
+    private const val REFERER = "https://player.videasy.to/"
+    private const val ORIGIN = "https://player.videasy.to"
 
     private const val USER_AGENT =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
             "(KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
 
     /**
-     * The 10 Videasy upstream servers. Each is an independent CDN/source.
-     * `moviesOnly` servers are skipped for TV content (the API doesn't index
-     * episodes for those upstreams).
+     * The Videasy upstream servers (English/original-language first). Each is
+     * an independent CDN/source. `moviesOnly` servers are skipped for TV
+     * content (the API doesn't index episodes for those upstreams).
      *
      * Order matters only for tie-breaking when two servers return at the
      * same time; since they run in parallel the fastest server wins
@@ -85,16 +96,12 @@ object VideasyExtractor {
     private data class Server(val key: String, val url: String, val moviesOnly: Boolean = false)
 
     private val SERVERS = listOf(
-        Server("Neon", "https://api.videasy.net/myflixerzupcloud/sources-with-title"),
-        Server("Cypher", "https://api.videasy.net/moviebox/sources-with-title"),
-        Server("Reyna", "https://api.videasy.net/primewire/sources-with-title"),
-        Server("Omen", "https://api.videasy.net/onionplay/sources-with-title"),
-        Server("Breach", "https://api.videasy.net/m4uhd/sources-with-title"),
-        Server("Ghost", "https://api.videasy.net/primesrcme/sources-with-title"),
-        Server("Sage", "https://api.videasy.net/1movies/sources-with-title"),
-        Server("Vyse", "https://api.videasy.net/hdmovie/sources-with-title"),
-        Server("Raze", "https://api.videasy.net/superflix/sources-with-title"),
-        Server("Yoru", "https://api.videasy.net/cdn/sources-with-title", moviesOnly = true)
+        Server("Neon", "$BASE/vsrc/sources-with-title"),
+        Server("Breach", "$BASE/m4uhd/sources-with-title"),
+        Server("Yoru", "$BASE/cdn/sources-with-title", moviesOnly = true),
+        Server("Vyse", "$BASE/hdmovie/sources-with-title"),
+        Server("Raze", "$BASE/superflix/sources-with-title"),
+        Server("Omen", "$BASE/lamovie/sources-with-title")
     )
 
     private val client by lazy {
@@ -164,7 +171,19 @@ object VideasyExtractor {
         }
         Log.d(TAG, "🔍 Videasy TMDB info: \"${info.title}\" (${info.year}) imdb=${info.imdbId}")
 
-        // Step 2: Query all eligible servers in parallel, decrypt, and return
+        // Step 2: Fetch the per-title seed (required by the new backend).
+        val seed = try {
+            fetchSeed(tmdbId)
+        } catch (e: Exception) {
+            Log.w(TAG, "Videasy seed fetch failed: ${e.message}")
+            return@withContext Result.Error("Videasy: no seed")
+        }
+        if (seed.isBlank()) {
+            Log.w(TAG, "Videasy empty seed for $tmdbId")
+            return@withContext Result.Error("Videasy: empty seed")
+        }
+
+        // Step 3: Query all eligible servers in parallel, decrypt, and return
         // the first stream URL found.
         val eligibleServers = SERVERS.filter { !(it.moviesOnly && isTv) }
 
@@ -172,7 +191,7 @@ object VideasyExtractor {
             eligibleServers.map { server ->
                 async {
                     try {
-                        queryServer(server, info, tmdbId, type, season, episode)
+                        queryServer(server, info, tmdbId, type, season, episode, seed)
                     } catch (e: Exception) {
                         Log.d(TAG, "Videasy[${server.key}] error: ${e.message}")
                         null
@@ -215,10 +234,13 @@ object VideasyExtractor {
         tmdbId: Int,
         type: String,
         season: Int,
-        episode: Int
+        episode: Int,
+        seed: String
     ): Pair<String, String>? {
+        // The title must be DOUBLE URL-encoded (per the official sample).
+        val encTitle = URLEncoder.encode(URLEncoder.encode(info.title, "UTF-8"), "UTF-8")
         val apiUrl = StringBuilder(server.url).apply {
-            append("?title=").append(URLEncoder.encode(info.title, "UTF-8"))
+            append("?title=").append(encTitle)
             append("&mediaType=").append(type)
             append("&year=").append(URLEncoder.encode(info.year, "UTF-8"))
             append("&tmdbId=").append(tmdbId)
@@ -227,6 +249,8 @@ object VideasyExtractor {
                 append("&seasonId=").append(season)
                 append("&episodeId=").append(episode)
             }
+            append("&enc=").append(ENC_VERSION)
+            append("&seed=").append(URLEncoder.encode(seed, "UTF-8"))
         }.toString()
 
         // Fetch the encrypted blob.
@@ -244,7 +268,7 @@ object VideasyExtractor {
         }
 
         // Decrypt via enc-dec.app.
-        val decryptedUrl = decryptStream(encrypted, tmdbId) ?: run {
+        val decryptedUrl = decryptStream(encrypted, tmdbId, seed) ?: run {
             Log.d(TAG, "Videasy[${server.key}] decrypt yielded no URL")
             return null
         }
@@ -259,10 +283,11 @@ object VideasyExtractor {
      * POST the encrypted blob to enc-dec.app and extract the first source URL
      * from the decrypted JSON.
      */
-    private fun decryptStream(encryptedText: String, tmdbId: Int): String? {
+    private fun decryptStream(encryptedText: String, tmdbId: Int, seed: String): String? {
         val jsonBody = JSONObject().apply {
             put("text", encryptedText)
             put("id", tmdbId.toString())
+            put("seed", seed)
         }.toString()
 
         val req = Request.Builder()
@@ -335,6 +360,29 @@ object VideasyExtractor {
     // ══════════════════════════════════════════════════════════════════════════════════════════════════════//
     //  HTTP helpers                                                                                         //
     // ══════════════════════════════════════════════════════════════════════════════════════════════════════//
+
+    /**
+     * Fetch the per-title seed token required by the new backend. A single
+     * `GET https://api.speedracelight.com/seed?mediaId={tmdbId}` returns
+     * `{ "seed": "..." }`, which is then echoed back on every source query
+     * and on the decrypt call.
+     */
+    private fun fetchSeed(tmdbId: Int): String {
+        val url = "$SEED_URL?mediaId=$tmdbId"
+        val req = Request.Builder()
+            .url(url)
+            .header("User-Agent", USER_AGENT)
+            .header("Accept", "application/json, text/plain, */*")
+            .header("Referer", REFERER)
+            .header("Origin", ORIGIN)
+            .get()
+            .build()
+        return client.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) throw java.io.IOException("seed HTTP ${resp.code}")
+            val body = resp.body?.string() ?: throw java.io.IOException("empty seed body")
+            JSONObject(body).optString("seed")
+        }
+    }
 
     private fun fetchText(url: String): String {
         val req = Request.Builder()

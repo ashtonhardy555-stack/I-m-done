@@ -1,7 +1,7 @@
 {
-  "version": 15,
+  "version": 16,
   "updated": "2026-09-30T11:26:04Z",
-  "description": "v15: HEADLESS-ONLY (no WebView). All extraction is pure OkHttp, matching the confirmed-working LookMovieHeadlessExtractor pattern. Disabled all Cloudflare-protected servers that require WebView JS-challenge solving (VidFast, CineSrc, Peachify, MultiEmbed, VidSrc.cc/to, VidZee, VidStorm, SmashyStream, Whvx, Hexa, VidSync, etc.) since pure OkHttp cannot solve CF challenges. Kept non-CF servers + enc-dec.app-backed extractors with dedicated headless code (VidLink, Videasy w/ 10 sub-servers, LordFlix w/ 10 sub-servers + hongkong host fix, KissKh). LookMovie fires first for TV shows. Removed dead false positives (vidsrc.net parking, embed.lol store).",
+  "description": "v16: HEADLESS-ONLY (no WebView). All extraction is pure OkHttp, matching the confirmed-working LookMovieHeadlessExtractor pattern. Added Cinejoy (api.wing.st, TMDB-id direct API, verified full-length up to 4K via enc-dec.app) and MeowTV (api.meowtv.ru, single-use ticket flow, verified full-length). Fixed Videasy to the new api.speedracelight.com seed-based backend. Disabled all Cloudflare-protected servers that require WebView JS-challenge solving (VidFast, CineSrc, Peachify, MultiEmbed, VidSrc.cc/to, VidZee, VidStorm, SmashyStream, Whvx, Hexa, VidSync, etc.) since pure OkHttp cannot solve CF challenges. Kept non-CF servers + enc-dec.app-backed extractors with dedicated headless code (VidLink, Videasy, LordFlix, KissKh). LookMovie fires first for TV shows.",
   "servers": [
     {
       "id": "notorrent",
@@ -55,6 +55,28 @@
       "tvUrlTemplate": "{base}/tv/{id}/{season}/{episode}",
       "tier": 1,
       "reliability": 100,
+      "cloudflare": false,
+      "enabled": true
+    },
+    {
+      "id": "cinejoy",
+      "name": "Cinejoy",
+      "baseUrl": "https://api.wing.st",
+      "movieUrlTemplate": "{base}/?tmdb={id}",
+      "tvUrlTemplate": "{base}/?tmdb={id}&season={season}&episode={episode}",
+      "tier": 1,
+      "reliability": 93,
+      "cloudflare": false,
+      "enabled": true
+    },
+    {
+      "id": "meowtv",
+      "name": "MeowTV",
+      "baseUrl": "https://api.meowtv.ru",
+      "movieUrlTemplate": "{base}/streams?tmdb={id}",
+      "tvUrlTemplate": "{base}/streams?tmdb={id}&season={season}&episode={episode}",
+      "tier": 1,
+      "reliability": 92,
       "cloudflare": false,
       "enabled": true
     },

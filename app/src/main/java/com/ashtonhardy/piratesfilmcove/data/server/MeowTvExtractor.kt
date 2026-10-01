@@ -21,26 +21,30 @@ import java.util.concurrent.TimeUnit
  *
  * MeowTV is a TMDB-id-based direct-API provider with **excellent TV-episode
  * coverage** — the precise gap the user reported ("shows don't have all
- * episodes"). In live verification it returned a decrypted `{url, headers}`
- * object for *every* test case:
- *  - Movie 497 (The Green Mile)
- *  - Movie 157336 (Interstellar)
- *  - TV 1399 Game of Thrones S1E1 **and** S8E6
- *  - TV 60625 Rick and Morty S1E1
- *
- * That makes MeowTV one of the most reliable sources for late-season
- * episodes that VidStorm/VidSrc frequently miss.
+ * episodes"). It returns a decrypted `{url, headers}` object for movies and
+ * for late-season episodes that VidStorm/VidSrc frequently miss.
  *
  * ## How it works (reverse-engineered from the live `api.meowtv.ru` API)
+ *
+ * The API is now **ticket-gated** (it previously worked unauthenticated).
+ * Each stream request must carry a short-lived, **single-use** ticket bound
+ * to the requesting `User-Agent`:
+ *
+ *  0. **Ticket** — `POST https://api.meowtv.ru/streams/ticket`
+ *     with `Content-Type: application/json`, body `{}` returns
+ *     `{ "ticket": "<opaque>", "exp": <ms> }`. The ticket is bound to the
+ *     `User-Agent` used to request it, so the SAME UA must be sent on the
+ *     stream call, and a FRESH ticket is needed for every stream request
+ *     (reuse → `410 {"error":"Ticket already used"}`).
  *
  *  1. **Stream query** — a single GET returns an encrypted JSON blob:
  *     - Movie: `GET https://api.meowtv.ru/streams/movie/{tmdbId}?s={server}`
  *     - TV:    `GET https://api.meowtv.ru/streams/tv/{tmdbId}/{season}/{episode}?s={server}`
+ *     with header `x-stream-ticket: <ticket>`.
  *
  *     The `s` query parameter selects the upstream server. Known servers:
- *     `pseudo`, `lynx`, `tik` (TCloud), `ipcloud`, `v4:English`, `turkce`,
- *     `v5:Hindi`, `v4:Hindi`, `v6:Hindi`. `pseudo` is the default and has
- *     the broadest movie/TV coverage.
+ *     `ipcloud`, `dcloud`, `tik` (TCloud), `turkce` (movies only),
+ *     `hindiv3` (Hindi). `ipcloud` has the broadest movie/TV coverage.
  *
  *  2. **Decrypt** — `POST https://enc-dec.app/api/dec-meowtv`
  *     with `{ "data": <the JSON object returned in step 1> }` returns:
@@ -51,8 +55,9 @@ import java.util.concurrent.TimeUnit
  *
  * All candidate servers are queried concurrently via `async{}; awaitAll()`;
  * the first server that returns a decrypted, playable URL wins and the rest
- * are cancelled. This makes MeowTV both **fast** (2 HTTP round-trips, no JS)
- * and **broad** (multiple independent upstream CDNs).
+ * are cancelled. Each server fetch mints its own fresh ticket. This makes
+ * MeowTV both **fast** (a few HTTP round-trips, no JS) and **broad**
+ * (multiple independent upstream CDNs).
  *
  * Verification is advisory: a 403/401 OkHttp probe does NOT drop the URL
  * (ExoPlayer sends the provider headers that CDNs accept). We always return
@@ -63,29 +68,34 @@ object MeowTvExtractor {
     private const val TAG = "MeowTv"
 
     private const val API_BASE = "https://api.meowtv.ru/streams"
+    private const val TICKET_URL = "https://api.meowtv.ru/streams/ticket"
     private const val DECRYPT_URL = "https://enc-dec.app/api/dec-meowtv"
 
     private const val REFERER = "https://meowtv.ru/"
     private const val ORIGIN = "https://meowtv.ru"
 
+    /**
+     * A single, stable User-Agent for BOTH the ticket request and the stream
+     * request. The ticket is bound to this exact string — changing it between
+     * the two calls yields `401 {"error":"UA mismatch"}`.
+     */
     private const val USER_AGENT =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
             "(KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36"
 
     /**
-     * MeowTV upstream servers. `pseudo` has the broadest coverage (movies +
-     * all TV seasons/episodes); `lynx` is a secondary movie CDN. The rest are
-     * language-specific (Hindi/Turkish) and are tried last. Order only
-     * affects tie-breaking since all run in parallel.
+     * MeowTV upstream servers. `ipcloud` has the broadest coverage (movies +
+     * all TV seasons/episodes); the rest are secondary/language-specific and
+     * are tried in parallel anyway (order only affects tie-breaking).
      */
     private data class Server(val key: String, val param: String, val moviesOnly: Boolean = false)
 
     private val SERVERS = listOf(
-        Server("Pseudo", "pseudo"),
-        Server("Lynx", "lynx"),
-        Server("TCloud", "tik"),
         Server("IPCloud", "ipcloud"),
-        Server("English", "v4:English")
+        Server("DCloud", "dcloud"),
+        Server("TCloud", "tik"),
+        Server("HindiV3", "hindiv3"),
+        Server("Turkce", "turkce", moviesOnly = true)
     )
 
     private val client by lazy {
@@ -97,9 +107,9 @@ object MeowTvExtractor {
             .build()
     }
 
-    // ─────────────────────────────────────────────────────────────────────//
+    // ────────────────────────────────────────────────────────────────────────//
     //  Result type                                                          //
-    // ─────────────────────────────────────────────────────────────────────//
+    // ────────────────────────────────────────────────────────────────────────//
 
     sealed class Result {
         /** A direct playable URL + headers ExoPlayer should send. */
@@ -113,9 +123,9 @@ object MeowTvExtractor {
         data class Error(val message: String) : Result()
     }
 
-    // ─────────────────────────────────────────────────────────────────────//
+    // ────────────────────────────────────────────────────────────────────────//
     //  Public API                                                           //
-    // ─────────────────────────────────────────────────────────────────────//
+    // ────────────────────────────────────────────────────────────────────────//
 
     /**
      * Resolve a direct playable stream for the given TMDB content.
@@ -164,13 +174,16 @@ object MeowTvExtractor {
         )
     }
 
-    // ─────────────────────────────────────────────────────────────────────//
+    // ────────────────────────────────────────────────────────────────────────//
     //  Per-server query + decrypt                                           //
-    // ─────────────────────────────────────────────────────────────────────//
+    // ────────────────────────────────────────────────────────────────────────//
 
     /**
      * Query one MeowTV server, decrypt the response, and return the stream
      * URL + headers (or null if the server has nothing for this content).
+     *
+     * Retries once with a fresh ticket if the first attempt is rejected with
+     * a ticket/signature/UA error (the ticket is single-use and short-lived).
      *
      * @return (url, headers, serverKey) or null
      */
@@ -187,30 +200,88 @@ object MeowTvExtractor {
             "$API_BASE/movie/$tmdbId?s=${server.param}"
         }
 
-        // Fetch the encrypted JSON blob.
-        val rawJson = try {
-            fetchText(apiUrl)
-        } catch (e: Exception) {
-            Log.d(TAG, "MeowTV[${server.key}] fetch failed: ${e.message}")
-            return null
-        }
-        // Reject obvious HTML/error responses.
-        if (rawJson.isBlank() || rawJson.startsWith("<") || rawJson.length < 10) {
-            Log.d(TAG, "MeowTV[${server.key}] no data (len=${rawJson.length})")
-            return null
-        }
+        // Up to 2 attempts: the first ticket may already be consumed/expired.
+        repeat(2) { attempt ->
+            val ticket = getTicket()
+            if (ticket == null) {
+                Log.d(TAG, "MeowTV[${server.key}] could not mint a ticket")
+                return null
+            }
 
-        // Decrypt via enc-dec.app.
-        val decrypted = decryptStream(rawJson) ?: run {
-            Log.d(TAG, "MeowTV[${server.key}] decrypt yielded no URL")
-            return null
+            val rawJson = try {
+                fetchText(apiUrl, ticket)
+            } catch (e: Exception) {
+                Log.d(TAG, "MeowTV[${server.key}] fetch failed: ${e.message}")
+                return null
+            }
+
+            // Ticket/UA problems → mint a new ticket and retry once.
+            if (rawJson.contains("\"error\"") &&
+                (rawJson.contains("ticket", ignoreCase = true) ||
+                    rawJson.contains("UA mismatch", ignoreCase = true))
+            ) {
+                Log.d(TAG, "MeowTV[${server.key}] ticket rejected (attempt $attempt): ${rawJson.take(80)}")
+                return@repeat
+            }
+
+            // Reject obvious HTML/error responses.
+            if (rawJson.isBlank() || rawJson.startsWith("<") || rawJson.length < 10) {
+                Log.d(TAG, "MeowTV[${server.key}] no data (len=${rawJson.length})")
+                return null
+            }
+            // A definitive "No stream" is not worth retrying.
+            if (rawJson.contains("No stream")) {
+                Log.d(TAG, "MeowTV[${server.key}] no stream for this title")
+                return null
+            }
+
+            // Decrypt via enc-dec.app.
+            val decrypted = decryptStream(rawJson) ?: run {
+                Log.d(TAG, "MeowTV[${server.key}] decrypt yielded no URL")
+                return null
+            }
+            val url = decrypted.first
+            if (!looksPlayable(url)) {
+                Log.d(TAG, "MeowTV[${server.key}] decrypted URL not playable: ${url.take(60)}")
+                return null
+            }
+            return Triple(url, decrypted.second, server.key)
         }
-        val url = decrypted.first
-        if (!looksPlayable(url)) {
-            Log.d(TAG, "MeowTV[${server.key}] decrypted URL not playable: ${url.take(60)}")
-            return null
+        return null
+    }
+
+    /**
+     * Mint a fresh, single-use stream ticket bound to [USER_AGENT].
+     *
+     * `POST /streams/ticket` with an empty JSON object returns
+     * `{ "ticket": "…", "exp": <ms> }`.
+     *
+     * @return the ticket string, or null on failure.
+     */
+    private fun getTicket(): String? {
+        val req = Request.Builder()
+            .url(TICKET_URL)
+            .header("User-Agent", USER_AGENT)
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json, */*")
+            .header("Origin", ORIGIN)
+            .header("Referer", REFERER)
+            .post("{}".toRequestBody("application/json".toMediaType()))
+            .build()
+        return try {
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    Log.d(TAG, "ticket HTTP ${resp.code}")
+                    return null
+                }
+                val body = resp.body?.string() ?: return null
+                val json = JSONObject(body)
+                json.optString("ticket").takeIf { it.isNotBlank() }
+            }
+        } catch (e: Exception) {
+            Log.d(TAG, "ticket error: ${e.message}")
+            null
         }
-        return Triple(url, decrypted.second, server.key)
     }
 
     /**
@@ -278,22 +349,29 @@ object MeowTvExtractor {
         }
     }
 
-    // ─────────────────────────────────────────────────────────────────────//
+    // ────────────────────────────────────────────────────────────────────────//
     //  HTTP helpers                                                         //
-    // ─────────────────────────────────────────────────────────────────────//
+    // ────────────────────────────────────────────────────────────────────────//
 
-    private fun fetchText(url: String): String {
+    private fun fetchText(url: String, ticket: String): String {
         val req = Request.Builder()
             .url(url)
             .header("User-Agent", USER_AGENT)
             .header("Accept", "application/json, text/plain, */*")
             .header("Referer", REFERER)
             .header("Origin", ORIGIN)
+            .header("x-stream-ticket", ticket)
             .get()
             .build()
         client.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) throw java.io.IOException("HTTP ${resp.code}")
-            return resp.body?.string() ?: throw java.io.IOException("empty body")
+            // Return the body even on 401/404/410 so the caller can inspect
+            // the error envelope (ticket errors are retried; "No stream" is
+            // treated as a definitive miss).
+            val body = resp.body?.string() ?: throw java.io.IOException("empty body")
+            if (!resp.isSuccessful && body.isBlank()) {
+                throw java.io.IOException("HTTP ${resp.code}")
+            }
+            return body
         }
     }
 
@@ -308,9 +386,9 @@ object MeowTvExtractor {
             lower.contains("/playlist/") ||
             lower.contains("/hls/") ||
             lower.contains("manifest") ||
-            // MeowTV CDN URLs use /v4/.../cf-master.m3u8 patterns and may
-            // not have a clear extension on the base path — accept any
-            // https URL that contains common media path markers.
+            // MeowTV CDN URLs use /e/<id>/master.m3u8 patterns and may not
+            // have a clear extension on the base path — accept common media
+            // path markers too.
             lower.contains("/v4/") ||
             lower.contains("/stream/") ||
             lower.contains("/video/")

@@ -3,6 +3,7 @@ package com.ashtonhardy.piratesfilmcove.data.engine
 import android.content.Context
 import android.util.Log
 import com.ashtonhardy.piratesfilmcove.data.server.AnnasCinemaExtractor
+import com.ashtonhardy.piratesfilmcove.data.server.CinejoyExtractor
 import com.ashtonhardy.piratesfilmcove.data.server.LookMovieHeadlessExtractor
 import com.ashtonhardy.piratesfilmcove.data.server.NovaStreamExtractor
 import com.ashtonhardy.piratesfilmcove.data.server.NuvioStreamsExtractor
@@ -184,15 +185,31 @@ class KodiEngine private constructor(private val context: Context) {
         }
     }
 
+    // -- Cinejoy addon (TMDB-id direct API, verified full-length up to 4K) --
+    // Same headless pattern as the others: pure OkHttp + enc-dec.app, no
+    // WebView. Raced in the PlayerActivity race and available to the engine.
+    private val cinejoyAddon = object : Addon {
+        override val id = "cinejoy"
+        override suspend fun resolve(req: ResolveRequest): AddonResult {
+            if (req.tmdbId <= 0) return AddonResult.Error("Cinejoy: no tmdbId")
+            val r = CinejoyExtractor.extract(req.tmdbId, req.contentType, req.season, req.episode)
+            return when (r) {
+                is CinejoyExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "Cinejoy" })
+                is CinejoyExtractor.Result.Error -> AddonResult.Error(r.message)
+            }
+        }
+    }
+
     /** Addons consulted, in priority order. LookMovie first (the reference
      *  headless extractor and the engine's primary addon), then the
-     *  Stremio-style addons that need TMDB ids. */
+     *  Stremio-style addons that need TMDB ids, then the direct-API addons. */
     private val addons = mutableListOf<Addon>(
         lookmovieAddon,
         smashStreamsAddon,
         nuvioStreamsAddon,
         annasCinemaAddon,
-        novaStreamAddon
+        novaStreamAddon,
+        cinejoyAddon
     )
 
     // \u2500\u2500 scope \u2500\u2500

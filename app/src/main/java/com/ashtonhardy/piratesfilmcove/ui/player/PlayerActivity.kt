@@ -46,6 +46,7 @@ import com.ashtonhardy.piratesfilmcove.data.model.WatchProgress
 import com.ashtonhardy.piratesfilmcove.data.repository.ContentRepository
 import com.ashtonhardy.piratesfilmcove.data.repository.WatchProgressStore
 import com.ashtonhardy.piratesfilmcove.data.server.DahmerMoviesExtractor
+import com.ashtonhardy.piratesfilmcove.data.server.CinejoyExtractor
 import com.ashtonhardy.piratesfilmcove.data.server.LordFlixExtractor
 import com.ashtonhardy.piratesfilmcove.data.server.MeowTvExtractor
 import com.ashtonhardy.piratesfilmcove.data.server.KissKhExtractor
@@ -61,6 +62,7 @@ import com.ashtonhardy.piratesfilmcove.data.server.ServerManager
 import com.ashtonhardy.piratesfilmcove.data.server.StreamProviders
 import com.ashtonhardy.piratesfilmcove.data.server.SuperEmbedExtractor
 import com.ashtonhardy.piratesfilmcove.data.server.VidLinkExtractor
+import com.ashtonhardy.piratesfilmcove.data.server.VidFastExtractor
 import com.ashtonhardy.piratesfilmcove.data.server.VidSrcExtractor
 import com.ashtonhardy.piratesfilmcove.data.server.VidSrcMeResolver
 import com.ashtonhardy.piratesfilmcove.data.server.VidSrcNetExtractor
@@ -1126,6 +1128,48 @@ fun PlayerScreen(
                 }
             }
 
+            // ── Cinejoy headless engine (api.wing.st, no WebView) ──
+            // TMDB-id direct API provider (verified full-length up to 4K).
+            // Same headless OkHttp pattern as LookMovie/MeowTV: resolve TMDB
+            // info → enc-cinejoy → api.wing.st/g → dec-cinejoy → validated
+            // HLS. Multiple upstream servers are raced and the anti-scrape
+            // (Nebula) loop is skipped by validating candidates.
+            suspend fun tryCinejoy(): DirectWinner? {
+                if ("Cinejoy" in excluded) {
+                    Log.d("Player", "\u23ed\ufe0f Cinejoy excluded this round")
+                    return null
+                }
+                Log.d("Player", "\ud83c\udfc7 Cinejoy: extracting\u2026")
+                val res = withTimeoutOrNull(PlayerActivity.PROVIDER_TIMEOUT_MS) {
+                    CinejoyExtractor.extract(tmdbId, contentType, currentSeason, currentEpisode)
+                }
+                return (res as? CinejoyExtractor.Result.Stream)?.let {
+                    Log.i("Player", "\u2705 Cinejoy hit: ${it.url}")
+                    DirectWinner(it.url, it.headers, it.providerName.ifBlank { "Cinejoy" })
+                }
+            }
+
+            // \u2500\u2500 VidFast headless engine (vidfast.vc, no WebView) \u2500\u2500
+            // TMDB-id provider: scrapes the RSC token, exchanges it via
+            // enc-dec.app, then resolves a full-length HLS master playlist.
+            // Cloudflare-protected \u2014 passes from residential/mobile IPs and
+            // may 403 from datacenter IPs (fails fast, so it costs the race
+            // almost nothing).
+            suspend fun tryVidFast(): DirectWinner? {
+                if ("VidFast" in excluded) {
+                    Log.d("Player", "\u23ed\ufe0f VidFast excluded this round")
+                    return null
+                }
+                Log.d("Player", "\ud83c\udfc7 VidFast: extracting\u2026")
+                val res = withTimeoutOrNull(PlayerActivity.PROVIDER_TIMEOUT_MS) {
+                    VidFastExtractor.extract(tmdbId, contentType, currentSeason, currentEpisode)
+                }
+                return (res as? VidFastExtractor.Result.Stream)?.let {
+                    Log.i("Player", "\u2705 VidFast hit: ${it.url}")
+                    DirectWinner(it.url, it.headers, it.providerName.ifBlank { "VidFast" })
+                }
+            }
+
             // ── ALL-SERVERS PARALLEL RACE (single unified lane) ──
             //
             // Per the user's explicit requests:
@@ -1215,7 +1259,9 @@ fun PlayerScreen(
                             async { safe { tryLordFlix() } },
                             async { safe { tryDahmer() } },
                             async { safe { tryTwoEmbed() } },
-                            async { safe { trySuperEmbed() } }
+                            async { safe { trySuperEmbed() } },
+                            async { safe { tryCinejoy() } },
+                            async { safe { tryVidFast() } }
                         )
 
                         // awaitAll so we collect EVERY resolved candidate,
