@@ -2,19 +2,12 @@ package com.ashtonhardy.piratesfilmcove.data.engine
 
 import android.content.Context
 import android.util.Log
+import com.ashtonhardy.piratesfilmcove.data.server.AnnasCinemaExtractor
 import com.ashtonhardy.piratesfilmcove.data.server.CinejoyExtractor
-import com.ashtonhardy.piratesfilmcove.data.server.KissKhExtractor
 import com.ashtonhardy.piratesfilmcove.data.server.LookMovieHeadlessExtractor
-import com.ashtonhardy.piratesfilmcove.data.server.MeowTvExtractor
-import com.ashtonhardy.piratesfilmcove.data.server.NoTorrentExtractor
-import com.ashtonhardy.piratesfilmcove.data.server.VidFastExtractor
-import com.ashtonhardy.piratesfilmcove.data.server.VidLinkExtractor
-import com.ashtonhardy.piratesfilmcove.data.server.VidStormExtractor
-import com.ashtonhardy.piratesfilmcove.data.server.VidSyncExtractor
-import com.ashtonhardy.piratesfilmcove.data.server.VidSrcExtractor
-import com.ashtonhardy.piratesfilmcove.data.server.VideasyExtractor
-import com.ashtonhardy.piratesfilmcove.data.server.VixSrcExtractor
-import kotlinx.coroutines.CompletableDeferred
+import com.ashtonhardy.piratesfilmcove.data.server.NovaStreamExtractor
+import com.ashtonhardy.piratesfilmcove.data.server.NuvioStreamsExtractor
+import com.ashtonhardy.piratesfilmcove.data.server.SmashStreamsExtractor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -22,7 +15,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -80,12 +72,11 @@ class KodiEngine private constructor(private val context: Context) {
         val isMovie: Boolean,
         val season: Int,
         val episode: Int,
-        /** TMDB id — needed by the TMDB-keyed headless addons (VidLink,
-         *  VidFast, Cinejoy, MeowTV, Videasy, VixSrc, VidSync, VidStorm,
-         *  KissKH, NoTorrent) to build their request URLs. May be 0 if the
-         *  caller only has title/year (e.g. a pre-resolve from a browse
-         *  screen that doesn't have the TMDB id handy). LookMovieTomb (the
-         *  primary addon) resolves by title and doesn't need it. */
+        /** TMDB id — needed by Stremio-style addons (NoTorrent, SmashStreams,
+         *  NuvioStreams, AnnasCinema, NovaStream) to resolve IMDb ids. May be
+         *  0 if the caller only has title/year (e.g. a pre-resolve from a
+         *  browse screen that doesn't have the TMDB id handy). LookMovie
+         *  (the primary addon) doesn't need it. */
         val tmdbId: Int = 0
     ) {
         /** Convenience: "movie" or "tv" for Stremio addon calls. */
@@ -140,131 +131,85 @@ class KodiEngine private constructor(private val context: Context) {
         }
     }
 
-    // -- Generic TMDB-id addon adapter --------------------------------------
-    // Every headless extractor in data/server shares the exact same shape:
-    //   suspend fun extract(tmdbId, contentType, season, episode): Result
-    // with Result.Stream(url, headers, providerName) / Result.Error(message).
-    // This adapter turns ANY such extractor into a KodiEngine [Addon], so we
-    // can register as many working sources as we like -- each one runs the
-    // source's own site/API headlessly (pure OkHttp, no WebView, no Kodi
-    // runtime), exactly like the reference LookMovieTomb addon.
-    private fun tmdbAddon(
-        addonId: String,
-        label: String,
-        fn: suspend (tmdbId: Int, contentType: String, season: Int, episode: Int) -> AddonResult
-    ): Addon = object : Addon {
-        override val id: String = addonId
+    // -- Stremio-style addon adapters --
+    // These use the TMDB id (from ResolveRequest.tmdbId) to resolve a direct
+    // playable stream URL via their respective Stremio addon APIs. They are
+    // headless (pure OkHttp, no WebView) -- the same approach as
+    // LookMovieHeadlessExtractor. They only run when tmdbId is available.
+
+    private val smashStreamsAddon = object : Addon {
+        override val id = "smashstreams"
         override suspend fun resolve(req: ResolveRequest): AddonResult {
-            if (req.tmdbId <= 0) return AddonResult.Error("$label: no tmdbId")
-            return try {
-                fn(req.tmdbId, req.contentType, req.season, req.episode)
-            } catch (e: Exception) {
-                AddonResult.Error("$label: ${e.message}")
+            if (req.tmdbId <= 0) return AddonResult.Error("SmashStreams: no tmdbId")
+            val r = SmashStreamsExtractor.extract(req.tmdbId, req.contentType, req.season, req.episode)
+            return when (r) {
+                is SmashStreamsExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "SmashStreams" })
+                is SmashStreamsExtractor.Result.Error -> AddonResult.Error(r.message)
             }
         }
     }
 
-    // ── Working headless addons (each pulls from its own source, no WebView) ──
-    // These are the live sources that resolve real, playable streams. They are
-    // consulted in the order listed in `addons` below.
-
-    private val vidLinkAddon = tmdbAddon("vidlink", "VidLink") { id, ct, s, e ->
-        when (val r = VidLinkExtractor.extract(id, ct, s, e)) {
-            is VidLinkExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "VidLink" })
-            is VidLinkExtractor.Result.Error -> AddonResult.Error(r.message)
+    private val nuvioStreamsAddon = object : Addon {
+        override val id = "nuviostreams"
+        override suspend fun resolve(req: ResolveRequest): AddonResult {
+            if (req.tmdbId <= 0) return AddonResult.Error("NuvioStreams: no tmdbId")
+            val r = NuvioStreamsExtractor.extract(req.tmdbId, req.contentType, req.season, req.episode)
+            return when (r) {
+                is NuvioStreamsExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "NuvioStreams" })
+                is NuvioStreamsExtractor.Result.Error -> AddonResult.Error(r.message)
+            }
         }
     }
 
-    private val vidFastAddon = tmdbAddon("vidfast", "VidFast") { id, ct, s, e ->
-        when (val r = VidFastExtractor.extract(id, ct, s, e)) {
-            is VidFastExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "VidFast" })
-            is VidFastExtractor.Result.Error -> AddonResult.Error(r.message)
+    private val annasCinemaAddon = object : Addon {
+        override val id = "annascinema"
+        override suspend fun resolve(req: ResolveRequest): AddonResult {
+            if (req.tmdbId <= 0) return AddonResult.Error("AnnasCinema: no tmdbId")
+            val r = AnnasCinemaExtractor.extract(req.tmdbId, req.contentType, req.season, req.episode)
+            return when (r) {
+                is AnnasCinemaExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "AnnasCinema" })
+                is AnnasCinemaExtractor.Result.Error -> AddonResult.Error(r.message)
+            }
         }
     }
 
-    private val meowTvAddon = tmdbAddon("meowtv", "MeowTV") { id, ct, s, e ->
-        when (val r = MeowTvExtractor.extract(id, ct, s, e)) {
-            is MeowTvExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "MeowTV" })
-            is MeowTvExtractor.Result.Error -> AddonResult.Error(r.message)
-        }
-    }
-
-    private val videasyAddon = tmdbAddon("videasy", "Videasy") { id, ct, s, e ->
-        when (val r = VideasyExtractor.extract(id, ct, s, e)) {
-            is VideasyExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "Videasy" })
-            is VideasyExtractor.Result.Error -> AddonResult.Error(r.message)
-        }
-    }
-
-    private val vixSrcAddon = tmdbAddon("vixsrc", "VixSrc") { id, ct, s, e ->
-        when (val r = VixSrcExtractor.extract(id, ct, s, e)) {
-            is VixSrcExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "VixSrc" })
-            is VixSrcExtractor.Result.Error -> AddonResult.Error(r.message)
-        }
-    }
-
-    private val vidSyncAddon = tmdbAddon("vidsync", "VidSync") { id, ct, s, e ->
-        when (val r = VidSyncExtractor.extract(id, ct, s, e)) {
-            is VidSyncExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "VidSync" })
-            is VidSyncExtractor.Result.Error -> AddonResult.Error(r.message)
-        }
-    }
-
-    private val vidStormAddon = tmdbAddon("vidstorm", "VidStorm") { id, ct, s, e ->
-        when (val r = VidStormExtractor.extract(id, ct, s, e)) {
-            is VidStormExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "VidStorm" })
-            is VidStormExtractor.Result.Error -> AddonResult.Error(r.message)
-        }
-    }
-
-    private val kissKhAddon = tmdbAddon("kisskh", "KissKH") { id, ct, s, e ->
-        when (val r = KissKhExtractor.extract(id, ct, s, e)) {
-            is KissKhExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "KissKH" })
-            is KissKhExtractor.Result.Error -> AddonResult.Error(r.message)
-        }
-    }
-
-    private val noTorrentAddon = tmdbAddon("notorrent", "NoTorrent") { id, ct, s, e ->
-        when (val r = NoTorrentExtractor.extract(id, ct, s, e)) {
-            is NoTorrentExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "NoTorrent" })
-            is NoTorrentExtractor.Result.Error -> AddonResult.Error(r.message)
+    private val novaStreamAddon = object : Addon {
+        override val id = "novastream"
+        override suspend fun resolve(req: ResolveRequest): AddonResult {
+            if (req.tmdbId <= 0) return AddonResult.Error("NovaStream: no tmdbId")
+            val r = NovaStreamExtractor.extract(req.tmdbId, req.contentType, req.season, req.episode)
+            return when (r) {
+                is NovaStreamExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "NovaStream" })
+                is NovaStreamExtractor.Result.Error -> AddonResult.Error(r.message)
+            }
         }
     }
 
     // -- Cinejoy addon (TMDB-id direct API, verified full-length up to 4K) --
-    private val cinejoyAddon = tmdbAddon("cinejoy", "Cinejoy") { id, ct, s, e ->
-        when (val r = CinejoyExtractor.extract(id, ct, s, e)) {
-            is CinejoyExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "Cinejoy" })
-            is CinejoyExtractor.Result.Error -> AddonResult.Error(r.message)
+    // Same headless pattern as the others: pure OkHttp + enc-dec.app, no
+    // WebView. Raced in the PlayerActivity race and available to the engine.
+    private val cinejoyAddon = object : Addon {
+        override val id = "cinejoy"
+        override suspend fun resolve(req: ResolveRequest): AddonResult {
+            if (req.tmdbId <= 0) return AddonResult.Error("Cinejoy: no tmdbId")
+            val r = CinejoyExtractor.extract(req.tmdbId, req.contentType, req.season, req.episode)
+            return when (r) {
+                is CinejoyExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "Cinejoy" })
+                is CinejoyExtractor.Result.Error -> AddonResult.Error(r.message)
+            }
         }
     }
 
-    // VidSrc (vidsrc.me) -- a classic website-scraper addon: it loads the
-    // site's /embed page headlessly and pulls the stream out of the markup,
-    // exactly the same "run the site in the engine" approach as LookMovieTomb.
-    private val vidSrcAddon = tmdbAddon("vidsrc", "VidSrc") { id, ct, s, e ->
-        when (val r = VidSrcExtractor.extract(id, ct, s, e)) {
-            is VidSrcExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "VidSrc" })
-            is VidSrcExtractor.Result.Error -> AddonResult.Error(r.message)
-        }
-    }
-
-    /** Addons consulted, in priority order. LookMovieTomb first (the reference
-     *  headless addon), then the other working headless sources. Every one of
-     *  these runs in-process with pure OkHttp -- no WebView, no Kodi runtime. */
+    /** Addons consulted, in priority order. LookMovie first (the reference
+     *  headless extractor and the engine's primary addon), then the
+     *  Stremio-style addons that need TMDB ids, then the direct-API addons. */
     private val addons = mutableListOf<Addon>(
         lookmovieAddon,
-        vidLinkAddon,
-        vidFastAddon,
-        cinejoyAddon,
-        meowTvAddon,
-        videasyAddon,
-        vixSrcAddon,
-        vidSyncAddon,
-        vidStormAddon,
-        kissKhAddon,
-        noTorrentAddon,
-        vidSrcAddon
+        smashStreamsAddon,
+        nuvioStreamsAddon,
+        annasCinemaAddon,
+        novaStreamAddon,
+        cinejoyAddon
     )
 
     // \u2500\u2500 scope \u2500\u2500
@@ -401,30 +346,39 @@ class KodiEngine private constructor(private val context: Context) {
         inFlight[k]?.let { if (it.isActive) return it }
         val job = scope.launch {
             try {
-                Log.d(TAG, "background resolve (racing ${addons.size} headless addons): '${req.title}' S${req.season}E${req.episode} (movie=${req.isMovie})")
-                // Race every addon in parallel; the FIRST playable Stream wins
-                // and the rest are cancelled. This is the "addon runs headlessly
-                // in the engine" behaviour, but it never waits on a slow addon
-                // before a fast one can answer -- so playback starts quickly.
-                val winner = raceAddons(req)
-                if (winner != null) {
-                    cache.put(
-                        title = req.title,
-                        isMovie = req.isMovie,
-                        season = req.season,
-                        episode = req.episode,
-                        url = winner.url,
-                        headers = winner.headers,
-                        providerName = winner.providerName
-                    )
-                    Log.i(TAG, "\u2705 resolved '${req.title}' via ${winner.providerName}: ${winner.url}")
-                    if (emitOnComplete) {
-                        _resolved.tryEmit(
-                            ResolvedStream(winner.url, winner.headers, winner.providerName, fromCache = false)
-                        )
+                Log.d(TAG, "background resolve: '${req.title}' S${req.season}E${req.episode} (movie=${req.isMovie})")
+                // Run addons in order; first Stream wins. LookMovie is first
+                // (the primary headless addon), then the Stremio-style addons.
+                var lastErr: String? = null
+                for (addon in addons) {
+                    val r = addon.resolve(req)
+                    when (r) {
+                        is AddonResult.Stream -> {
+                            cache.put(
+                                title = req.title,
+                                isMovie = req.isMovie,
+                                season = req.season,
+                                episode = req.episode,
+                                url = r.url,
+                                headers = r.headers,
+                                providerName = r.providerName
+                            )
+                            Log.i(TAG, "\u2705 resolved '${req.title}' via ${addon.id}: ${r.url}")
+                            if (emitOnComplete) {
+                                _resolved.tryEmit(
+                                    ResolvedStream(r.url, r.headers, r.providerName, fromCache = false)
+                                )
+                            }
+                            return@launch
+                        }
+                        is AddonResult.Error -> {
+                            lastErr = r.message
+                            Log.d(TAG, "addon ${addon.id} miss for '${req.title}': ${r.message}")
+                        }
                     }
-                } else {
-                    Log.d(TAG, "all addons missed for '${req.title}'")
+                }
+                if (lastErr != null) {
+                    Log.d(TAG, "all addons missed for '${req.title}': $lastErr")
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "resolve failed for '${req.title}': ${e.message}")
@@ -436,43 +390,9 @@ class KodiEngine private constructor(private val context: Context) {
         return job
     }
 
-    /**
-     * Run every addon concurrently and return the first [AddonResult.Stream].
-     * Losers are cancelled the moment a winner is found. Returns null if no
-     * addon produced a stream within [RACE_TIMEOUT_MS].
-     *
-     * This is what makes the engine fast: instead of trying addons one-by-one
-     * (waiting on each timeout), all working sources are queried at once and
-     * the fastest one wins.
-     */
-    private suspend fun raceAddons(req: ResolveRequest): AddonResult.Stream? = coroutineScope {
-        val first = CompletableDeferred<AddonResult.Stream>()
-        val jobs = addons.map { addon ->
-            launch {
-                val r = try {
-                    addon.resolve(req)
-                } catch (e: Exception) {
-                    AddonResult.Error("${addon.id}: ${e.message}")
-                }
-                when (r) {
-                    is AddonResult.Stream -> first.complete(r)
-                    is AddonResult.Error -> Log.d(TAG, "addon ${addon.id} miss for '${req.title}': ${r.message}")
-                }
-            }
-        }
-        try {
-            withTimeoutOrNull(RACE_TIMEOUT_MS) { first.await() }
-        } finally {
-            jobs.forEach { runCatching { it.cancel() } }
-        }
-    }
-
     companion object {
         /** Max concurrent background pre-resolves. Keeps the engine polite. */
         private const val MAX_CONCURRENT_PRE = 3
-
-        /** How long the addon race may run before giving up (no winner). */
-        private const val RACE_TIMEOUT_MS = 12_000L
 
         @Volatile private var INSTANCE: KodiEngine? = null
 
