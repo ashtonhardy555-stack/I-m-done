@@ -1,6 +1,6 @@
 {
   "version": 16,
-  "updated": "2026-09-30T11:26:04Z",
+  "updated": "2026-10-01T11:53:59Z",
   "description": "v16: HEADLESS-ONLY (no WebView). All extraction is pure OkHttp, matching the confirmed-working LookMovieHeadlessExtractor pattern. Added Cinejoy (api.wing.st, TMDB-id direct API, verified full-length up to 4K via enc-dec.app) and MeowTV (api.meowtv.ru, single-use ticket flow, verified full-length). Fixed Videasy to the new api.speedracelight.com seed-based backend. Disabled all Cloudflare-protected servers that require WebView JS-challenge solving (VidFast, CineSrc, Peachify, MultiEmbed, VidSrc.cc/to, VidZee, VidStorm, SmashyStream, Whvx, Hexa, VidSync, etc.) since pure OkHttp cannot solve CF challenges. Kept non-CF servers + enc-dec.app-backed extractors with dedicated headless code (VidLink, Videasy, LordFlix, KissKh). LookMovie fires first for TV shows.",
   "servers": [
     {
@@ -65,7 +65,7 @@
       "movieUrlTemplate": "{base}/?tmdb={id}",
       "tvUrlTemplate": "{base}/?tmdb={id}&season={season}&episode={episode}",
       "tier": 1,
-      "reliability": 93,
+      "reliability": 97,
       "cloudflare": false,
       "enabled": true
     },
@@ -76,7 +76,7 @@
       "movieUrlTemplate": "{base}/streams?tmdb={id}",
       "tvUrlTemplate": "{base}/streams?tmdb={id}&season={season}&episode={episode}",
       "tier": 1,
-      "reliability": 92,
+      "reliability": 37,
       "cloudflare": false,
       "enabled": true
     },
@@ -164,7 +164,7 @@
       "movieUrlTemplate": "{base}/player.php?tmdb={id}",
       "tvUrlTemplate": "{base}/player.php?type=series&tmdb={id}&season={season}&episode={episode}",
       "tier": 2,
-      "reliability": 100,
+      "reliability": 40,
       "cloudflare": false,
       "enabled": true
     },
@@ -230,7 +230,7 @@
       "movieUrlTemplate": "{base}/embed/movie/{id}",
       "tvUrlTemplate": "{base}/embed/tv/{id}/{season}/{episode}",
       "tier": 2,
-      "reliability": 89,
+      "reliability": 96,
       "cloudflare": false,
       "enabled": true
     },
@@ -252,7 +252,7 @@
       "movieUrlTemplate": "{base}/playere.php?tmdb={id}",
       "tvUrlTemplate": "{base}/playere.php?tmdb={id}&season={season}&episode={episode}",
       "tier": 2,
-      "reliability": 94,
+      "reliability": 98,
       "cloudflare": true,
       "enabled": true
     },
@@ -362,7 +362,7 @@
       "movieUrlTemplate": "{base}/embed/movie/{id}",
       "tvUrlTemplate": "{base}/embed/tv/{id}/{season}/{episode}",
       "tier": 2,
-      "reliability": 75,
+      "reliability": 90,
       "cloudflare": false,
       "enabled": true
     },
@@ -428,7 +428,7 @@
       "movieUrlTemplate": "{base}/embed/movie/{id}",
       "tvUrlTemplate": "{base}/embed/tv/{id}/{season}/{episode}",
       "tier": 3,
-      "reliability": 89,
+      "reliability": 96,
       "cloudflare": false,
       "enabled": true
     },
