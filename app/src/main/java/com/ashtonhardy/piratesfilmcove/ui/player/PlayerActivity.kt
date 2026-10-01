@@ -2055,8 +2055,16 @@ private fun ExoPlayerView(
     var selectedQuality by remember { mutableStateOf("Auto") }
     var showQualityMenu by remember { mutableStateOf(false) }
 
-    // Track when the first frame has rendered so we can hide the thumbnail.
-    var isReady by remember { mutableStateOf(false) }
+    // Track WHICH url has actually rendered its first frame. Keying on the
+    // url (rather than a plain boolean) makes "is this source ready?" reset
+    // SYNCHRONOUSLY the instant the source changes — there is no
+    // LaunchedEffect timing gap where a stale `true` would briefly reveal the
+    // black player surface (the "black screen with 00:00" seen while a dead
+    // source is failing over). The poster/loading overlay is driven by
+    // `!isReady`, so it stays up across every failed candidate until a stream
+    // actually renders.
+    var readyUrl by remember { mutableStateOf<String?>(null) }
+    val isReady = readyUrl == url
 
     // ── Live playing/paused state (quality selector is pause-gated) ──
     var isPlaying by remember { mutableStateOf(true) }
@@ -2130,7 +2138,6 @@ private fun ExoPlayerView(
     // retry counter could carry over and prematurely exhaust retries on the
     // new source.
     LaunchedEffect(url) {
-        isReady = false
         transientRetryCount = 0
         availableQualities = emptyList()
         selectedQuality = "Auto"
@@ -2154,25 +2161,6 @@ private fun ExoPlayerView(
     }
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-
-        // Thumbnail/poster shown behind the player until STATE_READY.
-        if (!isReady) {
-            if (!backdropUrl.isNullOrBlank()) {
-                AsyncImage(
-                    model = backdropUrl,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
-            } else if (!posterUrl.isNullOrBlank()) {
-                AsyncImage(
-                    model = posterUrl,
-                    contentDescription = null,
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
-        }
 
         // ── Key the AndroidView on the url so the player is FULLY recreated
         // when the source changes (server switch). Without this key the
@@ -2271,7 +2259,17 @@ private fun ExoPlayerView(
                             override fun onPlaybackStateChanged(state: Int) {
                                 Log.d("ExoPlayer", "State: $state")
                                 if (state == Player.STATE_READY) {
-                                    isReady = true
+                                    // Reveal is driven by onRenderedFirstFrame
+                                    // (below) so the loading artwork stays up
+                                    // until there is genuinely a picture. This
+                                    // is only a safety net for the rare case
+                                    // where no frame event arrives (audio-only
+                                    // track / unusual decoder): after 800 ms we
+                                    // reveal anyway so the user is never stuck
+                                    // behind the overlay.
+                                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                                        if (readyUrl != url) readyUrl = url
+                                    }, 800L)
                                     // Playback of the selected show/movie has
                                     // started → stop all ads so nothing ever
                                     // overlays the playing video. This both
@@ -2369,6 +2367,15 @@ private fun ExoPlayerView(
                                     Log.d("ExoPlayer", "Playback ended → onEpisodeEnded")
                                     episodeEndedHandler.value.invoke()
                                 }
+                            }
+
+                            // Fired the instant the very first video frame is
+                            // rendered. This — not STATE_READY — is what hides
+                            // the loading overlay, so the user never sees a
+                            // black frame: the artwork/spinner stays up until
+                            // there is actually a picture on screen.
+                            override fun onRenderedFirstFrame() {
+                                readyUrl = url
                             }
 
                             override fun onIsPlayingChanged(isPlayingChanged: Boolean) {
@@ -2472,6 +2479,49 @@ private fun ExoPlayerView(
             modifier = Modifier.fillMaxSize()
         )
         } // end key(url)
+
+        // ── Loading overlay (drawn ON TOP of the player surface) ──
+        // While the current source has not rendered its first frame we cover
+        // the black ExoPlayer surface (and its 00:00 controller) with the
+        // backdrop/poster + a spinner. This is the fix for "some servers show
+        // a black screen with 00:00 before skipping past": the user now sees
+        // artwork + a loading spinner through every failed candidate and only
+        // sees the video once it genuinely plays. Because this overlay is
+        // drawn AFTER the AndroidView it sits above the PlayerView's surface
+        // and controller; because it is driven by `!isReady` (which resets the
+        // instant the url changes) it stays up seamlessly across server
+        // switches — no black flash between candidates.
+        if (!isReady) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black),
+                contentAlignment = Alignment.Center
+            ) {
+                if (!backdropUrl.isNullOrBlank()) {
+                    AsyncImage(
+                        model = backdropUrl,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else if (!posterUrl.isNullOrBlank()) {
+                    AsyncImage(
+                        model = posterUrl,
+                        contentDescription = null,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+                // Subtle scrim so the spinner is readable over any artwork.
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color(0x66000000))
+                )
+                CircularProgressIndicator(color = Color.White)
+            }
+        }
 
         // ── Quality picker overlay — only while the video is PAUSED ──
         // The quality selector must not appear over active playback; it only
