@@ -239,6 +239,16 @@ class KodiEngine private constructor(private val context: Context) {
         }
     }
 
+    // VidSrc (vidsrc.me) -- a classic website-scraper addon: it loads the
+    // site's /embed page headlessly and pulls the stream out of the markup,
+    // exactly the same "run the site in the engine" approach as LookMovieTomb.
+    private val vidSrcAddon = tmdbAddon("vidsrc", "VidSrc") { id, ct, s, e ->
+        when (val r = VidSrcExtractor.extract(id, ct, s, e)) {
+            is VidSrcExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "VidSrc" })
+            is VidSrcExtractor.Result.Error -> AddonResult.Error(r.message)
+        }
+    }
+
     /** Addons consulted, in priority order. LookMovieTomb first (the reference
      *  headless addon), then the other working headless sources. Every one of
      *  these runs in-process with pure OkHttp -- no WebView, no Kodi runtime. */
