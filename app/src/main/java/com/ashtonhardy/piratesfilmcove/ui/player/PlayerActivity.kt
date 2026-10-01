@@ -173,7 +173,11 @@ class PlayerActivity : ComponentActivity() {
          * to catch an INSTANT cache hit or a near-instant resolve. 1.5 s keeps
          * "LookMovie first when it's fast" without the 7 s cold-start penalty.
          */
-        const val ENGINE_FIRST_TIMEOUT_MS = 1_500L
+        // Budget for the engine's fast path. The engine races all its headless
+        // addons in parallel, so a working source usually answers within ~1-2 s
+        // (VidLink: enc-dec.app + API). 2.5 s gives it a real chance to hit
+        // before we fall through to the full extractor race.
+        const val ENGINE_FIRST_TIMEOUT_MS = 2_500L
 
         /**
          * How long the parallel race waits for the FIRST candidate before it
@@ -775,7 +779,13 @@ fun PlayerScreen(
             // We also kick a background pre-resolve here so the engine keeps
             // working ahead for the next title while the race (if needed)
             // runs.
-            if (start <= PlayerActivity.STAGE_VIDSRC && "LookMovie" !in excluded) {
+            // The engine now races MANY headless addons (LookMovieTomb, VidLink,
+            // VidFast, Cinejoy, MeowTV, Videasy, VixSrc, VidSync, VidStorm,
+            // KissKH, NoTorrent, VidSrc) -- so we always give it the fast path.
+            // Previously this was gated on `"LookMovie" !in excluded`, which
+            // disabled the whole engine when LookMovie alone was marked bad,
+            // starving every other engine addon.
+            if (start <= PlayerActivity.STAGE_VIDSRC) {
                 runCatching {
                     val engine = KodiEngine.get()
                     val req = KodiEngine.ResolveRequest(
