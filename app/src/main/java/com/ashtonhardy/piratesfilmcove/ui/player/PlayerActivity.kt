@@ -64,6 +64,8 @@ import com.ashtonhardy.piratesfilmcove.data.server.StreamProviders
 import com.ashtonhardy.piratesfilmcove.data.server.SuperEmbedExtractor
 import com.ashtonhardy.piratesfilmcove.data.server.VidLinkExtractor
 import com.ashtonhardy.piratesfilmcove.data.server.VidFastExtractor
+import com.ashtonhardy.piratesfilmcove.data.server.VidUpExtractor
+import com.ashtonhardy.piratesfilmcove.data.server.VidCoreExtractor
 import com.ashtonhardy.piratesfilmcove.data.server.VidSrcExtractor
 import com.ashtonhardy.piratesfilmcove.data.server.VidSrcMeResolver
 import com.ashtonhardy.piratesfilmcove.data.server.VidSrcNetExtractor
@@ -1171,6 +1173,45 @@ fun PlayerScreen(
                 }
             }
 
+            // ── VidUp headless engine (vidup.to, no WebView) ──
+            // TMDB-id provider: scrapes the RSC token, exchanges it via
+            // enc-dec.app (enc-vidup/dec-vidup), then resolves a full-length
+            // HLS playlist. Verified: GoT S1E1, Breaking Bad S1E1, Stranger
+            // Things S1E1, The Last of Us S1E1 -> HTTP 200 HLS.
+            suspend fun tryVidUp(): DirectWinner? {
+                if ("VidUp" in excluded) {
+                    Log.d("Player", "\u23ed\ufe0f VidUp excluded this round")
+                    return null
+                }
+                Log.d("Player", "\ud83c\udfc7 VidUp: extracting\u2026")
+                val res = withTimeoutOrNull(PlayerActivity.PROVIDER_TIMEOUT_MS) {
+                    VidUpExtractor.extract(tmdbId, contentType, currentSeason, currentEpisode)
+                }
+                return (res as? VidUpExtractor.Result.Stream)?.let {
+                    Log.i("Player", "\u2705 VidUp hit: ${it.url}")
+                    DirectWinner(it.url, it.headers, it.providerName.ifBlank { "VidUp" })
+                }
+            }
+
+            // ── VidCore headless engine (vidcore.io, no WebView) ──
+            // Same TMDB-id token flow as VidUp, via enc-dec.app
+            // (enc-vidcore/dec-vidcore). Verified: GoT S1E1, Breaking Bad
+            // S1E1, Stranger Things S1E1, The Last of Us S1E1 -> HTTP 200 HLS.
+            suspend fun tryVidCore(): DirectWinner? {
+                if ("VidCore" in excluded) {
+                    Log.d("Player", "\u23ed\ufe0f VidCore excluded this round")
+                    return null
+                }
+                Log.d("Player", "\ud83c\udfc7 VidCore: extracting\u2026")
+                val res = withTimeoutOrNull(PlayerActivity.PROVIDER_TIMEOUT_MS) {
+                    VidCoreExtractor.extract(tmdbId, contentType, currentSeason, currentEpisode)
+                }
+                return (res as? VidCoreExtractor.Result.Stream)?.let {
+                    Log.i("Player", "\u2705 VidCore hit: ${it.url}")
+                    DirectWinner(it.url, it.headers, it.providerName.ifBlank { "VidCore" })
+                }
+            }
+
             // ── ALL-SERVERS PARALLEL RACE (single unified lane) ──
             //
             // Per the user's explicit requests:
@@ -1262,7 +1303,9 @@ fun PlayerScreen(
                             async { safe { tryTwoEmbed() } },
                             async { safe { trySuperEmbed() } },
                             async { safe { tryCinejoy() } },
-                            async { safe { tryVidFast() } }
+                            async { safe { tryVidFast() } },
+                            async { safe { tryVidUp() } },
+                            async { safe { tryVidCore() } }
                         )
 
                         // awaitAll so we collect EVERY resolved candidate,
@@ -2754,7 +2797,7 @@ private fun isEnglishStream(winner: DirectWinner, contentType: String): Boolean 
         "vidlink", "vidsrc", "vidstorm", "notorrent", "twoembed",
         "superembed", "vidsrcpro", "vidsrcnet", "vixsrc", "vidsync",
         "lordflix", "dahmermovies", "meowtv", "vidspark", "autoembed",
-        "vidnest", "vidrock", "vidcore", "tvembed", "vidsrcme",
+        "vidnest", "vidrock", "vidcore", "vidup", "tvembed", "vidsrcme",
         "vidking", "curtstream", "databasegdriveplayer", "vidsrcpro",
         "vcr", "vesy", "xps", "smashystream", "hexa", "flixer", "lookmovie",
         "smashstreams", "nuviostreams", "annascinema", "novastream"
@@ -2809,6 +2852,7 @@ private fun providerReliability(providerName: String): Int {
         n.startsWith("kisskh") -> 50
         n.startsWith("vidnest") -> 48
         n.startsWith("vidrock") -> 47
+        n.startsWith("vidup") -> 47
         n.startsWith("vidcore") -> 46
         n.startsWith("tvembed") -> 45
         n.startsWith("vidking") -> 44
