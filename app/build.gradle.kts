@@ -40,6 +40,16 @@ android {
         versionName = "1.4.0"
 
         buildConfigField("String", "TMDB_API_KEY", "\"a15c24c2a5c00487b179f5d4b53b72b0\"")
+
+        // ── Playback debug logging → GitHub ──
+        // The token is injected at build time from the GH_LOG_TOKEN CI
+        // secret (never hard-coded in source). It only needs "Issues: read
+        // and write" on this one repo. When blank, the app logs to Logcat
+        // only and never breaks.
+        val ghLogToken = System.getenv("GH_LOG_TOKEN") ?: ""
+        buildConfigField("String", "GH_LOG_TOKEN", "\"$ghLogToken\"")
+        buildConfigField("String", "GH_LOG_REPO", "\"ashtonhardy555-stack/I-m-done\"")
+        buildConfigField("int", "GH_LOG_ISSUE", "70")
     }
 
     signingConfigs {

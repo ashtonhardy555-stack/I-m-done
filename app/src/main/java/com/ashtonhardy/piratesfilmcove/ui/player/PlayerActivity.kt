@@ -41,6 +41,7 @@ import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import com.ashtonhardy.piratesfilmcove.data.cache.StreamAvailabilityCache
+import com.ashtonhardy.piratesfilmcove.data.log.PlaybackLogger
 import com.ashtonhardy.piratesfilmcove.data.engine.KodiEngine
 import com.ashtonhardy.piratesfilmcove.data.model.WatchProgress
 import com.ashtonhardy.piratesfilmcove.data.repository.ContentRepository
@@ -1510,6 +1511,17 @@ fun PlayerScreen(
                                     provider = fp
                                 )
                             }
+                            PlaybackLogger.logSkipped(
+                                title = title,
+                                tmdbId = tmdbId,
+                                contentType = contentType,
+                                season = currentSeason,
+                                episode = currentEpisode,
+                                server = failedProvider ?: "",
+                                nextServer = nextCandidate.winner.providerName,
+                                reason = "couldn't play - moved to next candidate",
+                                positionMs = 0L
+                            )
                             streamUrl = nextCandidate.winner.url
                             streamHeaders = nextCandidate.winner.headers
                                 .ifEmpty { mapOf("User-Agent" to DEFAULT_UA) }
@@ -1554,6 +1566,17 @@ fun PlayerScreen(
                             }
                         }
                         Log.i("Player", "Candidate queue empty — re-firing the all-servers race.")
+                        PlaybackLogger.logSkipped(
+                            title = title,
+                            tmdbId = tmdbId,
+                            contentType = contentType,
+                            season = currentSeason,
+                            episode = currentEpisode,
+                            server = failedProvider ?: "",
+                            nextServer = "",
+                            reason = "couldn't play - re-running all-servers race",
+                            positionMs = 0L
+                        )
                         startStage = PlayerActivity.STAGE_VIDSTORM
                         isLoading = true
                         attempt++
@@ -2020,8 +2043,16 @@ private fun ExoPlayerView(
     //   hasStartedPlaying: flips true the instant ExoPlayer reports it is really
     //     playing -- the proof the stream works and must not be skipped.
     var cinejoySkipCount by remember { mutableStateOf(0) }
+    // Remembers how far forward we have skipped past dead Cinejoy segments.
+    // ExoPlayer reports currentPosition == 0 after an error, so without this
+    // the seek target would never advance and we would loop forever on the
+    // SAME dead segment (the "stops at 10s and never gets past it" symptom).
+    var cinejoyResumeMs by remember { mutableStateOf(0L) }
     val hasStartedPlaying = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
     val providerNameState = rememberUpdatedState(providerName)
+    // Logs the PLAYED event to GitHub exactly once per source (the first time
+    // the player reports it is really playing). Reset whenever the URL changes.
+    val playedLogged = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
 
     // Capture the error callback in a lambda we can invoke from the
     // AndroidView factory (which runs outside of the Composition).
@@ -2087,9 +2118,11 @@ private fun ExoPlayerView(
         isReady = false
         transientRetryCount = 0
         cinejoySkipCount = 0
+        cinejoyResumeMs = 0L
         // New source -> not yet proven to play. It must actually start playing
         // before the Cinejoy dead-segment guard is allowed to keep it alive.
         hasStartedPlaying.set(false)
+        playedLogged.set(false)
         availableQualities = emptyList()
         selectedQuality = "Auto"
     }
@@ -2341,6 +2374,19 @@ private fun ExoPlayerView(
                                 // lock it in so the Cinejoy dead-segment guard in
                                 // onPlayerError is allowed to keep it alive.
                                 if (isPlayingChanged) hasStartedPlaying.set(true)
+                                // -- Log PLAYED to GitHub (once per source) --
+                                if (isPlayingChanged && playedLogged.compareAndSet(false, true)) {
+                                    PlaybackLogger.logPlayed(
+                                        title = progressTitle,
+                                        tmdbId = progressTmdbId,
+                                        contentType = progressContentType,
+                                        season = progressSeason,
+                                        episode = progressEpisode,
+                                        server = providerNameState.value,
+                                        url = url,
+                                        positionMs = try { this@apply.currentPosition } catch (_: Exception) { 0L }
+                                    )
+                                }
                             }
 
                             override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
@@ -2371,14 +2417,43 @@ private fun ExoPlayerView(
                                     cinejoySkipCount++
                                     if (cinejoySkipCount > MAX_CINEJOY_SKIPS) {
                                         Log.w("ExoPlayer", "Cinejoy: too many dead-segment skips - CDN unusable, surfacing error.")
+                                        PlaybackLogger.logFailed(
+                                            title = progressTitle,
+                                            tmdbId = progressTmdbId,
+                                            contentType = progressContentType,
+                                            season = progressSeason,
+                                            episode = progressEpisode,
+                                            server = providerNameState.value,
+                                            error = "Cinejoy CDN unusable (too many dead segments)",
+                                            positionMs = try { this@apply.currentPosition } catch (_: Exception) { 0L }
+                                        )
                                         errorHandler.value.invoke(true)
                                         return
                                     }
-                                    val resumeAt = try {
+                                    // Whichever is further ahead: the live
+                                    // player position or the last position we
+                                    // skipped to. currentPosition resets to 0
+                                    // after an error, so without this the seek
+                                    // target never advances and we loop on the
+                                    // same dead segment forever.
+                                    val livePos = try {
                                         this@apply.currentPosition.coerceAtLeast(0L)
                                     } catch (_: Exception) { 0L }
+                                    val resumeAt = maxOf(livePos, cinejoyResumeMs)
                                     val seekTo = resumeAt + DEAD_SEGMENT_SKIP_MS
+                                    cinejoyResumeMs = seekTo
                                     Log.w("ExoPlayer", "Cinejoy dead segment at ${resumeAt}ms - jumping forward ${DEAD_SEGMENT_SKIP_MS}ms (skip #$cinejoySkipCount), NOT skipping the stream.")
+                                    PlaybackLogger.logSkipped(
+                                        title = progressTitle,
+                                        tmdbId = progressTmdbId,
+                                        contentType = progressContentType,
+                                        season = progressSeason,
+                                        episode = progressEpisode,
+                                        server = providerNameState.value,
+                                        nextServer = providerNameState.value,
+                                        reason = "dead-segment (jumped forward ${DEAD_SEGMENT_SKIP_MS / 1000}s)",
+                                        positionMs = resumeAt
+                                    )
                                     val item = mediaItem
                                     android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                                         try {
@@ -2428,6 +2503,18 @@ private fun ExoPlayerView(
                                 val fatal = !isTransientPlaybackError(error) ||
                                     transientRetryCount >= MAX_PLAYER_RETRIES
                                 Log.w("ExoPlayer", if (fatal) "❌ Fatal/unrecoverable error — surfacing to switch server." else "⚠️ surfacing error")
+                                if (fatal) {
+                                    PlaybackLogger.logFailed(
+                                        title = progressTitle,
+                                        tmdbId = progressTmdbId,
+                                        contentType = progressContentType,
+                                        season = progressSeason,
+                                        episode = progressEpisode,
+                                        server = providerNameState.value,
+                                        error = "${error.errorCodeName}: ${error.message}",
+                                        positionMs = try { this@apply.currentPosition } catch (_: Exception) { 0L }
+                                    )
+                                }
                                 errorHandler.value.invoke(fatal)
                             }
                         })
@@ -2906,7 +2993,7 @@ private const val DEAD_SEGMENT_SKIP_MS = 12_000L
  * unusable for the whole title, so we stop skipping and surface the error
  * (last resort) rather than fast-forwarding through the entire video.
  */
-private const val MAX_CINEJOY_SKIPS = 20
+private const val MAX_CINEJOY_SKIPS = 40
 
 /**
  * Classifies an ExoPlayer [PlaybackException] as transient (recoverable by
