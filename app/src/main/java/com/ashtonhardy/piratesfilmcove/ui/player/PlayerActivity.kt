@@ -2024,7 +2024,7 @@ private fun ExoPlayerView(
     // ── PROVEN-WORKING GUARD (the "never skip a stream that plays" rule) ──
     // provenRetryCount: how many times we've recovered IN PLACE (same server,
     //   seek back to where we were) after the stream had already proven itself
-    //   by advancing past 00:00. Bounded by MAX_PROVEN_RETRIES.
+    //   by advancing past 00:00, or the player reporting isPlaying. There is
     // hasStartedPlaying: flips true the instant the ExoPlayer clock advances to
     //   00:01 (PROVEN_PLAYING_POSITION_MS). Once true, this stream is proven
     //   WORKING and must NEVER be auto-skipped/failed-over — only in-place
@@ -2105,20 +2105,22 @@ private fun ExoPlayerView(
             kotlinx.coroutines.delay(500L)
             if (hasStartedPlaying.get()) return@LaunchedEffect  // proven → stop watching
             try {
-                // Only accumulate "stall" time while the player is actually
-                // trying to play (READY + playWhenReady). A user-paused player
-                // must never be mistaken for a dead one.
+                // ── PROVE it (USER RULE) ──
+                // The instant the player reports it is actually playing OR the
+                // clock has advanced past 00:00, the stream is PROVEN working.
+                // Lock it in and stop watching (it will NEVER be skipped).
+                if (p.isPlaying || p.currentPosition >= PROVEN_PLAYING_POSITION_MS) {
+                    hasStartedPlaying.set(true)
+                    Log.i("ExoPlayer", "▶️ Stream PROVEN working (isPlaying=${p.isPlaying}, position=${p.currentPosition}ms) — this stream will NOT be skipped.")
+                    return@LaunchedEffect
+                }
+                // Only accumulate "stall" time while the player is genuinely
+                // trying to play but has produced NO frame yet (READY +
+                // playWhenReady + still at 00:00). A user-paused player, or one
+                // still buffering, must never be mistaken for a dead one.
                 if (p.playbackState == Player.STATE_READY && p.playWhenReady) {
                     if (readyAtMs == 0L) {
                         readyAtMs = android.os.SystemClock.elapsedRealtime()
-                    }
-                    if (p.currentPosition >= PROVEN_PLAYING_POSITION_MS) {
-                        hasStartedPlaying.set(true)
-                        Log.i(
-                            "ExoPlayer",
-                            "▶️ Stream PROVEN working (position=${p.currentPosition}ms ≥ 00:01) — this stream will NOT be skipped."
-                        )
-                        return@LaunchedEffect
                     }
                     if (android.os.SystemClock.elapsedRealtime() - readyAtMs > STALL_TIMEOUT_MS) {
                         Log.w(
@@ -2397,6 +2399,16 @@ private fun ExoPlayerView(
                                 // the stream & quality selectors on PAUSE.
                                 isPlaying = isPlayingChanged
                                 playChangeHandler.value.invoke(isPlayingChanged)
+                                // ── PROVEN-WORKING signal (USER RULE) ──
+                                // The instant the player reports it is ACTUALLY
+                                // playing, this stream has demonstrably started →
+                                // lock it in so it is NEVER auto-skipped. This is
+                                // the belt-and-suspenders companion to the
+                                // watchdog's 00:01 position check: even if the
+                                // position poll happens to sample at a moment
+                                // when playbackState isn't exactly STATE_READY,
+                                // the isPlaying signal still proves the stream.
+                                if (isPlayingChanged) hasStartedPlaying.set(true)
                                 // If playback resumed, auto-close the quality
                                 // menu so it never lingers over playing video.
                                 if (isPlayingChanged) showQualityMenu = false
@@ -2419,34 +2431,32 @@ private fun ExoPlayerView(
                                 Log.e("ExoPlayer", "Error: ${error.errorCodeName} - ${error.message}")
                                 // ── PROVEN-WORKING GUARD (USER RULE) ──
                                 // If this stream already started playing (the
-                                // clock advanced past 00:00), it is a WORKING
-                                // stream and must NOT be skipped. Recover it in
-                                // place by re-preparing the SAME source from
-                                // where it left off — never surface a fatal
-                                // error that would switch servers. Bounded by a
-                                // generous budget so a truly dead stream can't
-                                // loop forever.
+                                // clock advanced past 00:00, OR the player
+                                // reported isPlaying), it is a WORKING stream
+                                // and must NEVER be skipped. Recover it IN PLACE
+                                // by re-preparing the SAME source, rewinding ~3s
+                                // so we don't land straight back on a bad
+                                // segment. There is NO cap: a proven stream is
+                                // never failed over.
                                 if (hasStartedPlaying.get()) {
-                                    if (provenRetryCount < MAX_PROVEN_RETRIES) {
-                                        provenRetryCount++
-                                        val resumeAt = try {
-                                            this@apply.currentPosition.coerceAtLeast(0L)
-                                        } catch (_: Exception) { 0L }
-                                        Log.w("ExoPlayer", "🛡️ Stream already played — recovering in place ($provenRetryCount/$MAX_PROVEN_RETRIES) from ${resumeAt}ms, NOT skipping.")
-                                        val provenItem = mediaItem
-                                        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                                            try {
-                                                this@apply.setMediaItem(provenItem)
-                                                this@apply.prepare()
-                                                if (resumeAt > 0L) this@apply.seekTo(resumeAt)
-                                                this@apply.playWhenReady = true
-                                            } catch (e: Exception) {
-                                                Log.e("ExoPlayer", "Proven-source re-prepare failed", e)
-                                            }
-                                        }, 1_000L)
-                                        return
-                                    }
-                                    Log.w("ExoPlayer", "🛡️ Proven stream exhausted in-place retries — allowing failover as a last resort.")
+                                    provenRetryCount++
+                                    val resumeAt = try {
+                                        this@apply.currentPosition.coerceAtLeast(0L)
+                                    } catch (_: Exception) { 0L }
+                                    val rewindTo = (resumeAt - 3_000L).coerceAtLeast(0L)
+                                    Log.w("ExoPlayer", "🛡️ Stream already played — recovering in place (attempt $provenRetryCount) from ${rewindTo}ms, NOT skipping.")
+                                    val provenItem = mediaItem
+                                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                                        try {
+                                            this@apply.setMediaItem(provenItem)
+                                            this@apply.prepare()
+                                            if (rewindTo > 0L) this@apply.seekTo(rewindTo)
+                                            this@apply.playWhenReady = true
+                                        } catch (e: Exception) {
+                                            Log.e("ExoPlayer", "Proven-source re-prepare failed", e)
+                                        }
+                                    }, 1_000L)
+                                    return
                                 }
                                 // ── Classify the error ──
                                 // Transient errors are recovered in-player by
@@ -2946,14 +2956,6 @@ private const val DEFAULT_UA =
  * network blip no longer abandons a working URL.
  */
 private const val MAX_PLAYER_RETRIES = 3
-
-/**
- * In-place recovery budget for a stream that has ALREADY been proven to play
- * (the clock advanced past 00:00). Per the user's rule a proven stream is
- * never skipped, so this is deliberately generous — it only exists so a
- * stream that dies for good can't loop forever.
- */
-private const val MAX_PROVEN_RETRIES = 8
 
 /**
  * The position (ms) at which a stream is considered PROVEN to be playing:
