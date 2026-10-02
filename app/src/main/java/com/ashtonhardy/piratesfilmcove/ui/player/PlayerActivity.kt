@@ -2022,9 +2022,10 @@ private fun ExoPlayerView(
     var transientRetryCount by remember { mutableStateOf(0) }
 
     // ── PROVEN-WORKING GUARD (the "never skip a stream that plays" rule) ──
-    // provenRetryCount: how many times we've recovered IN PLACE (same server,
-    //   seek back to where we were) after the stream had already proven itself
-    //   by advancing past 00:00, or the player reporting isPlaying. There is
+    // provenRetryCount: how many times we've recovered IN PLACE (same server)
+    //   after the stream had already proven itself by advancing past 00:00, or
+    //   the player reporting isPlaying. Used to cap dead-segment skips
+    //   (MAX_PROVEN_SKIPS) so a fully-dead CDN can't be fast-forwarded forever.
     // hasStartedPlaying: flips true the instant the ExoPlayer clock advances to
     //   00:01 (PROVEN_PLAYING_POSITION_MS). Once true, this stream is proven
     //   WORKING and must NEVER be auto-skipped/failed-over — only in-place
@@ -2434,23 +2435,45 @@ private fun ExoPlayerView(
                                 // clock advanced past 00:00, OR the player
                                 // reported isPlaying), it is a WORKING stream
                                 // and must NEVER be skipped. Recover it IN PLACE
-                                // by re-preparing the SAME source, rewinding ~3s
-                                // so we don't land straight back on a bad
-                                // segment. There is NO cap: a proven stream is
-                                // never failed over.
+                                // by re-preparing the SAME source. If the CDN has a
+                                // PERMANENTLY dead segment (HTTP 502) we jump FORWARD
+                                // past it so playback CONTINUES. A proven stream is
+                                // never failed over unless the CDN is unusable for
+                                // the whole title (see MAX_PROVEN_SKIPS).
                                 if (hasStartedPlaying.get()) {
                                     provenRetryCount++
                                     val resumeAt = try {
                                         this@apply.currentPosition.coerceAtLeast(0L)
                                     } catch (_: Exception) { 0L }
-                                    val rewindTo = (resumeAt - 3_000L).coerceAtLeast(0L)
-                                    Log.w("ExoPlayer", "🛡️ Stream already played — recovering in place (attempt $provenRetryCount) from ${rewindTo}ms, NOT skipping.")
+                                    // ── Dead-segment recovery (KEEP PLAYING) ──
+                                    // This stream already PROVED it plays (the clock
+                                    // advanced past 00:00), so per the user's rule it
+                                    // is NEVER failed over to another server. But the
+                                    // CDN can have PERMANENTLY dead segments (HTTP 502
+                                    // "origin unavailable") — e.g. Steven Universe
+                                    // Future's Cinejoy stream dies at segment 1 (10.4s).
+                                    // Replaying that segment would loop forever, so we
+                                    // jump FORWARD past it (≈ one HLS segment) and keep
+                                    // playing. We ALWAYS skip forward (never rewind) so
+                                    // we can never loop back into the dead region.
+                                    if (provenRetryCount > MAX_PROVEN_SKIPS) {
+                                        // Skipped far too many segments → the CDN is
+                                        // unusable for this title. As a last resort
+                                        // surface the error so the parent can try the
+                                        // next candidate (a fully-dead stream cannot be
+                                        // played at all).
+                                        Log.w("ExoPlayer", "🛡️ Proven stream hit $provenRetryCount dead-segment skips — CDN unusable, surfacing error as a last resort.")
+                                        errorHandler.value.invoke(true)
+                                        return
+                                    }
+                                    val seekTo = resumeAt + DEAD_SEGMENT_SKIP_MS
+                                    Log.w("ExoPlayer", "🛡️ Dead segment at ${resumeAt}ms — jumping forward ${DEAD_SEGMENT_SKIP_MS}ms to KEEP PLAYING (skip #$provenRetryCount), NOT skipping the stream.")
                                     val provenItem = mediaItem
                                     android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                                         try {
                                             this@apply.setMediaItem(provenItem)
                                             this@apply.prepare()
-                                            if (rewindTo > 0L) this@apply.seekTo(rewindTo)
+                                            if (seekTo > 0L) this@apply.seekTo(seekTo)
                                             this@apply.playWhenReady = true
                                         } catch (e: Exception) {
                                             Log.e("ExoPlayer", "Proven-source re-prepare failed", e)
@@ -2970,6 +2993,23 @@ private const val PROVEN_PLAYING_POSITION_MS = 1_000L
  * over. This is the ONLY case in which a not-yet-playing stream is skipped.
  */
 private const val STALL_TIMEOUT_MS = 10_000L
+
+/**
+ * How far to jump FORWARD when a PROVEN stream keeps erroring at ~the same
+ * position — i.e. the CDN segment there is permanently dead. One HLS segment
+ * is ~10.4s, so ~12s clears the dead segment and lands in the next one, letting
+ * playback CONTINUE instead of stopping/looping at the same timestamp. The
+ * stream itself is still never failed-over (per the user's rule).
+ */
+private const val DEAD_SEGMENT_SKIP_MS = 12_000L
+
+/**
+ * Safety cap on dead-segment skips for a single proven stream. A normal
+ * title has only a handful of dead segments; hitting this many means the CDN
+ * is unusable for the whole title, so we stop skipping and surface the error
+ * (last resort) rather than fast-forwarding through the entire video.
+ */
+private const val MAX_PROVEN_SKIPS = 20
 
 /**
  * Classifies an ExoPlayer [PlaybackException] as transient (recoverable by
