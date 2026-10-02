@@ -4,10 +4,16 @@ import android.content.Context
 import android.util.Log
 import com.ashtonhardy.piratesfilmcove.data.server.AnnasCinemaExtractor
 import com.ashtonhardy.piratesfilmcove.data.server.CinejoyExtractor
+import com.ashtonhardy.piratesfilmcove.data.server.KissKhExtractor
 import com.ashtonhardy.piratesfilmcove.data.server.LookMovieHeadlessExtractor
+import com.ashtonhardy.piratesfilmcove.data.server.MeowTvExtractor
 import com.ashtonhardy.piratesfilmcove.data.server.NovaStreamExtractor
 import com.ashtonhardy.piratesfilmcove.data.server.NuvioStreamsExtractor
 import com.ashtonhardy.piratesfilmcove.data.server.SmashStreamsExtractor
+import com.ashtonhardy.piratesfilmcove.data.server.VidCoreExtractor
+import com.ashtonhardy.piratesfilmcove.data.server.VidFastExtractor
+import com.ashtonhardy.piratesfilmcove.data.server.VidLinkExtractor
+import com.ashtonhardy.piratesfilmcove.data.server.VidUpExtractor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -200,16 +206,115 @@ class KodiEngine private constructor(private val context: Context) {
         }
     }
 
-    /** Addons consulted, in priority order. LookMovie first (the reference
-     *  headless extractor and the engine's primary addon), then the
-     *  Stremio-style addons that need TMDB ids, then the direct-API addons. */
+    // -- Verified-working direct-API addons (benchmarked against LookMovie) --
+    //
+    // These four were empirically verified to return *playable* streams from a
+    // clean network path (see the provider audit): MeowTV (movies + TV),
+    // VidFast (HLS master), VidLink (direct mp4 qualities) and KissKH (Asian
+    // dramas). They are pure-OkHttp, TMDB-id based, and require no WebView.
+    // They are placed ABOVE the legacy Stremio addons because those hosts are
+    // now dead (SmashStreams/NuvioStreams/AnnasCinema/NovaStream: NXDOMAIN or
+    // "deprecated"), so trying them first only wastes time before a real hit.
+
+    private val meowTvAddon = object : Addon {
+        override val id = "meowtv"
+        override suspend fun resolve(req: ResolveRequest): AddonResult {
+            if (req.tmdbId <= 0) return AddonResult.Error("MeowTV: no tmdbId")
+            val r = MeowTvExtractor.extract(req.tmdbId, req.contentType, req.season, req.episode)
+            return when (r) {
+                is MeowTvExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "MeowTV" })
+                is MeowTvExtractor.Result.Error -> AddonResult.Error(r.message)
+            }
+        }
+    }
+
+    private val vidFastAddon = object : Addon {
+        override val id = "vidfast"
+        override suspend fun resolve(req: ResolveRequest): AddonResult {
+            if (req.tmdbId <= 0) return AddonResult.Error("VidFast: no tmdbId")
+            val r = VidFastExtractor.extract(req.tmdbId, req.contentType, req.season, req.episode)
+            return when (r) {
+                is VidFastExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "VidFast" })
+                is VidFastExtractor.Result.Error -> AddonResult.Error(r.message)
+            }
+        }
+    }
+
+    private val vidLinkAddon = object : Addon {
+        override val id = "vidlink"
+        override suspend fun resolve(req: ResolveRequest): AddonResult {
+            if (req.tmdbId <= 0) return AddonResult.Error("VidLink: no tmdbId")
+            val r = VidLinkExtractor.extract(req.tmdbId, req.contentType, req.season, req.episode)
+            return when (r) {
+                is VidLinkExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "VidLink" })
+                is VidLinkExtractor.Result.Error -> AddonResult.Error(r.message)
+            }
+        }
+    }
+
+    private val kissKhAddon = object : Addon {
+        override val id = "kisskh"
+        override suspend fun resolve(req: ResolveRequest): AddonResult {
+            if (req.tmdbId <= 0) return AddonResult.Error("KissKH: no tmdbId")
+            val r = KissKhExtractor.extract(req.tmdbId, req.contentType, req.season, req.episode)
+            return when (r) {
+                is KissKhExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "KissKH" })
+                is KissKhExtractor.Result.Error -> AddonResult.Error(r.message)
+            }
+        }
+    }
+
+    private val vidUpAddon = object : Addon {
+        override val id = "vidup"
+        override suspend fun resolve(req: ResolveRequest): AddonResult {
+            if (req.tmdbId <= 0) return AddonResult.Error("VidUp: no tmdbId")
+            val r = VidUpExtractor.extract(req.tmdbId, req.contentType, req.season, req.episode)
+            return when (r) {
+                is VidUpExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "VidUp" })
+                is VidUpExtractor.Result.Error -> AddonResult.Error(r.message)
+            }
+        }
+    }
+
+    private val vidCoreAddon = object : Addon {
+        override val id = "vidcore"
+        override suspend fun resolve(req: ResolveRequest): AddonResult {
+            if (req.tmdbId <= 0) return AddonResult.Error("VidCore: no tmdbId")
+            val r = VidCoreExtractor.extract(req.tmdbId, req.contentType, req.season, req.episode)
+            return when (r) {
+                is VidCoreExtractor.Result.Stream -> AddonResult.Stream(r.url, r.headers, r.providerName.ifBlank { "VidCore" })
+                is VidCoreExtractor.Result.Error -> AddonResult.Error(r.message)
+            }
+        }
+    }
+
+    /** Addons consulted, in priority order.
+     *
+     *  Order rationale (benchmarked against the LookMovie reference addon):
+     *   1. lookmovieAddon  \u2014 the reference headless addon (title-based).
+     *   2. meowTvAddon     \u2014 verified: movies (turkce) + TV (ipcloud) HLS.
+     *   3. vidFastAddon    \u2014 verified: HLS master via enc-dec.app bridge.
+     *   4. vidLinkAddon    \u2014 verified: direct mp4 qualities (proxied CDN).
+     *   5. kissKhAddon     \u2014 verified: Asian-drama HLS.
+     *   6. vidUpAddon      \u2014 verified HLS (token flow, enc-dec.app bridge).
+     *   7. vidCoreAddon    \u2014 verified HLS (token flow, enc-dec.app bridge).
+     *   8. cinejoyAddon    \u2014 TMDB-id direct API (Lisbon et al.).
+     *   9. Legacy Stremio addons (kept last as best-effort fallbacks; their
+     *      hosts are currently dead but may return).
+     */
     private val addons = mutableListOf<Addon>(
         lookmovieAddon,
+        meowTvAddon,
+        vidFastAddon,
+        vidLinkAddon,
+        kissKhAddon,
+        vidUpAddon,
+        vidCoreAddon,
+        cinejoyAddon,
         smashStreamsAddon,
         nuvioStreamsAddon,
         annasCinemaAddon,
-        novaStreamAddon,
-        cinejoyAddon
+        novaStreamAddon
     )
 
     // \u2500\u2500 scope \u2500\u2500

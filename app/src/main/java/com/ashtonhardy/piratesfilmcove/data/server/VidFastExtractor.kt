@@ -274,7 +274,10 @@ object VidFastExtractor {
             .header("Origin", ORIGIN)
             .header("X-Requested-With", "XMLHttpRequest")
             .apply { if (csrf.isNotBlank()) header("X-CSRF-Token", csrf) }
-            .post("".toRequestBody("application/json".toMediaType()))
+            // The VidFast endpoint rejects an EMPTY JSON body with
+            // 400 {"code":"FST_ERR_CTP_EMPTY_JSON_BODY"}. It must be a valid
+            // (even if empty) JSON object: "{}".
+            .post("{}".toRequestBody("application/json".toMediaType()))
             .build()
         client.newCall(req).execute().use { resp ->
             if (!resp.isSuccessful) throw java.io.IOException("HTTP ${resp.code}")
