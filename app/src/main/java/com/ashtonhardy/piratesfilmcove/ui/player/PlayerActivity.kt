@@ -1353,6 +1353,7 @@ fun PlayerScreen(
                 ExoPlayerView(
                     url = streamUrl!!,
                     headers = streamHeaders,
+                    providerName = deliveringServerName ?: "",
                     posterUrl = posterUrl,
                     backdropUrl = backdropUrl,
                     resumePositionMs = resumePositionMs,
@@ -1370,27 +1371,7 @@ fun PlayerScreen(
                     progressPosterPath = posterUrl?.let { extractTmdbPath(it) },
                     progressBackdropPath = backdropUrl?.let { extractTmdbPath(it) },
                     onPlayingChange = { playing -> isPlaying = playing },
-                    onPlaybackStart = {
-                        // ── Record playback SUCCESS ──
-                        // Fired the instant ExoPlayer reaches STATE_READY.
-                        // build104 only ever wrote FAILURES to the per-title
-                        // cache (recordFailure), so it monotonically
-                        // accumulated "bad" providers and then EXCLUDED them on
-                        // the next open — even providers that actually work.
-                        // That is itself a cause of "skipping working streams".
-                        // Recording the success here both (a) marks this
-                        // provider as the known-good one to lead with next time
-                        // and (b) clears any stale "bad" mark for it.
-                        deliveringServerName?.let { provider ->
-                            StreamAvailabilityCache.recordSuccess(
-                                tmdbId = tmdbId,
-                                contentType = contentType,
-                                season = currentSeason,
-                                episode = currentEpisode,
-                                provider = provider
-                            )
-                        }
-                    },
+                    onPlaybackStart = { },
                     onEpisodeEnded = {
                         // ── Next-episode auto-play (TV shows only) ────────── //
                         // Fired by ExoPlayerView when playback reaches
@@ -1980,6 +1961,10 @@ private fun ErrorScreen(
 private fun ExoPlayerView(
     url: String,
     headers: Map<String, String>,
+    // Name of the provider that delivered this stream (e.g. "Cinejoy-Lisbon").
+    // Used ONLY by the Cinejoy dead-segment guard below, so that guard can be
+    // scoped to Cinejoy without touching any other provider's behaviour.
+    providerName: String = "",
     posterUrl: String? = null,
     backdropUrl: String? = null,
     resumePositionMs: Long = 0L,
@@ -2021,17 +2006,22 @@ private fun ExoPlayerView(
     // time": previously any PlaybackException immediately switched servers.
     var transientRetryCount by remember { mutableStateOf(0) }
 
-    // ── PROVEN-WORKING GUARD (the "never skip a stream that plays" rule) ──
-    // provenRetryCount: how many times we've recovered IN PLACE (same server)
-    //   after the stream had already proven itself by advancing past 00:00, or
-    //   the player reporting isPlaying. Used to cap dead-segment skips
-    //   (MAX_PROVEN_SKIPS) so a fully-dead CDN can't be fast-forwarded forever.
-    // hasStartedPlaying: flips true the instant the ExoPlayer clock advances to
-    //   00:01 (PROVEN_PLAYING_POSITION_MS). Once true, this stream is proven
-    //   WORKING and must NEVER be auto-skipped/failed-over — only in-place
-    //   recovery is allowed, no matter what error arrives afterwards.
-    var provenRetryCount by remember { mutableStateOf(0) }
+    // -- Cinejoy dead-segment guard (the "never skip a stream that plays" rule) --
+    // Cinejoy's CDN (the same backend that serves "Steven Universe Future")
+    // ships some PERMANENTLY dead HLS segments (HTTP 502 "origin unavailable").
+    // build104 retried the dead segment MAX_PLAYER_RETRIES times and then failed
+    // over -- the stream "plays ~10 seconds then tries other servers". Per the
+    // user's rule, once a stream has ACTUALLY STARTED PLAYING we must not
+    // abandon it, so for a proven-playing Cinejoy stream we jump FORWARD past
+    // the dead segment and keep playing. This guard is deliberately scoped to
+    // Cinejoy so every other provider behaves EXACTLY like build104.
+    //   cinejoySkipCount: how many dead-segment skips we've done (capped by
+    //     MAX_CINEJOY_SKIPS so a fully-dead CDN can't be fast-forwarded forever).
+    //   hasStartedPlaying: flips true the instant ExoPlayer reports it is really
+    //     playing -- the proof the stream works and must not be skipped.
+    var cinejoySkipCount by remember { mutableStateOf(0) }
     val hasStartedPlaying = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
+    val providerNameState = rememberUpdatedState(providerName)
 
     // Capture the error callback in a lambda we can invoke from the
     // AndroidView factory (which runs outside of the Composition).
@@ -2085,62 +2075,6 @@ private fun ExoPlayerView(
         }
     }
 
-    // ── "Did it actually start playing?" watchdog (USER RULE) ──────────────
-    // Polls the live player every 500 ms and does exactly two things:
-    //
-    //   1. PROVE the stream works. The moment the clock advances past
-    //      PROVEN_PLAYING_POSITION_MS (00:01) we flip hasStartedPlaying → the
-    //      stream is locked in and will NEVER be auto-skipped (see the guard in
-    //      onPlayerError). This is the user's rule: "as soon as 00:00 goes to
-    //      00:01 that shows the stream works".
-    //
-    //   2. KILL a dead stream. If the player reaches STATE_READY (the manifest
-    //      loaded) but the clock is STILL at 00:00 after STALL_TIMEOUT_MS, the
-    //      stream is a dead/empty "00:00" stream → surface a fatal error so
-    //      PlayerScreen fails over to the next working candidate. This is the
-    //      ONLY case in which a stream is skipped.
-    LaunchedEffect(player) {
-        val p = player ?: return@LaunchedEffect
-        var readyAtMs = 0L
-        while (true) {
-            kotlinx.coroutines.delay(500L)
-            if (hasStartedPlaying.get()) return@LaunchedEffect  // proven → stop watching
-            try {
-                // ── PROVE it (USER RULE) ──
-                // The instant the player reports it is actually playing OR the
-                // clock has advanced past 00:00, the stream is PROVEN working.
-                // Lock it in and stop watching (it will NEVER be skipped).
-                if (p.isPlaying || p.currentPosition >= PROVEN_PLAYING_POSITION_MS) {
-                    hasStartedPlaying.set(true)
-                    Log.i("ExoPlayer", "▶️ Stream PROVEN working (isPlaying=${p.isPlaying}, position=${p.currentPosition}ms) — this stream will NOT be skipped.")
-                    return@LaunchedEffect
-                }
-                // Only accumulate "stall" time while the player is genuinely
-                // trying to play but has produced NO frame yet (READY +
-                // playWhenReady + still at 00:00). A user-paused player, or one
-                // still buffering, must never be mistaken for a dead one.
-                if (p.playbackState == Player.STATE_READY && p.playWhenReady) {
-                    if (readyAtMs == 0L) {
-                        readyAtMs = android.os.SystemClock.elapsedRealtime()
-                    }
-                    if (android.os.SystemClock.elapsedRealtime() - readyAtMs > STALL_TIMEOUT_MS) {
-                        Log.w(
-                            "ExoPlayer",
-                            "⏱️ Stream READY but stuck at 00:00 for ${STALL_TIMEOUT_MS}ms — treating as dead/empty, failing over."
-                        )
-                        errorHandler.value.invoke(true)
-                        return@LaunchedEffect
-                    }
-                } else {
-                    // Not READY yet, or the user paused → don't count stall time.
-                    readyAtMs = 0L
-                }
-            } catch (_: Exception) {
-                // Player released mid-poll — ignore.
-            }
-        }
-    }
-
     // ── Reset ready + retry state whenever the URL changes (server switch) ──
     // When the player falls through to the next server, a NEW url arrives.
     // The old player has been released (onRelease), so we must clear the
@@ -2152,9 +2086,9 @@ private fun ExoPlayerView(
     LaunchedEffect(url) {
         isReady = false
         transientRetryCount = 0
-        provenRetryCount = 0
-        // New source → not yet proven to play. It must advance past 00:00
-        // before it is locked in (see the watchdog below).
+        cinejoySkipCount = 0
+        // New source -> not yet proven to play. It must actually start playing
+        // before the Cinejoy dead-segment guard is allowed to keep it alive.
         hasStartedPlaying.set(false)
         availableQualities = emptyList()
         selectedQuality = "Auto"
@@ -2400,19 +2334,13 @@ private fun ExoPlayerView(
                                 // the stream & quality selectors on PAUSE.
                                 isPlaying = isPlayingChanged
                                 playChangeHandler.value.invoke(isPlayingChanged)
-                                // ── PROVEN-WORKING signal (USER RULE) ──
-                                // The instant the player reports it is ACTUALLY
-                                // playing, this stream has demonstrably started →
-                                // lock it in so it is NEVER auto-skipped. This is
-                                // the belt-and-suspenders companion to the
-                                // watchdog's 00:01 position check: even if the
-                                // position poll happens to sample at a moment
-                                // when playbackState isn't exactly STATE_READY,
-                                // the isPlaying signal still proves the stream.
-                                if (isPlayingChanged) hasStartedPlaying.set(true)
                                 // If playback resumed, auto-close the quality
                                 // menu so it never lingers over playing video.
                                 if (isPlayingChanged) showQualityMenu = false
+                                // The stream has demonstrably started playing ->
+                                // lock it in so the Cinejoy dead-segment guard in
+                                // onPlayerError is allowed to keep it alive.
+                                if (isPlayingChanged) hasStartedPlaying.set(true)
                             }
 
                             override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
@@ -2430,55 +2358,38 @@ private fun ExoPlayerView(
 
                             override fun onPlayerError(error: PlaybackException) {
                                 Log.e("ExoPlayer", "Error: ${error.errorCodeName} - ${error.message}")
-                                // ── PROVEN-WORKING GUARD (USER RULE) ──
-                                // If this stream already started playing (the
-                                // clock advanced past 00:00, OR the player
-                                // reported isPlaying), it is a WORKING stream
-                                // and must NEVER be skipped. Recover it IN PLACE
-                                // by re-preparing the SAME source. If the CDN has a
-                                // PERMANENTLY dead segment (HTTP 502) we jump FORWARD
-                                // past it so playback CONTINUES. A proven stream is
-                                // never failed over unless the CDN is unusable for
-                                // the whole title (see MAX_PROVEN_SKIPS).
-                                if (hasStartedPlaying.get()) {
-                                    provenRetryCount++
-                                    val resumeAt = try {
-                                        this@apply.currentPosition.coerceAtLeast(0L)
-                                    } catch (_: Exception) { 0L }
-                                    // ── Dead-segment recovery (KEEP PLAYING) ──
-                                    // This stream already PROVED it plays (the clock
-                                    // advanced past 00:00), so per the user's rule it
-                                    // is NEVER failed over to another server. But the
-                                    // CDN can have PERMANENTLY dead segments (HTTP 502
-                                    // "origin unavailable") — e.g. Steven Universe
-                                    // Future's Cinejoy stream dies at segment 1 (10.4s).
-                                    // Replaying that segment would loop forever, so we
-                                    // jump FORWARD past it (≈ one HLS segment) and keep
-                                    // playing. We ALWAYS skip forward (never rewind) so
-                                    // we can never loop back into the dead region.
-                                    if (provenRetryCount > MAX_PROVEN_SKIPS) {
-                                        // Skipped far too many segments → the CDN is
-                                        // unusable for this title. As a last resort
-                                        // surface the error so the parent can try the
-                                        // next candidate (a fully-dead stream cannot be
-                                        // played at all).
-                                        Log.w("ExoPlayer", "🛡️ Proven stream hit $provenRetryCount dead-segment skips — CDN unusable, surfacing error as a last resort.")
+                                // -- Cinejoy dead-segment recovery (KEEP PLAYING) --
+                                // If this is a Cinejoy stream that has ALREADY
+                                // started playing, it is a WORKING stream and per
+                                // the user's rule must NOT be skipped. Cinejoy's
+                                // CDN has permanently dead segments (HTTP 502), so
+                                // we jump FORWARD past the dead segment and keep
+                                // playing instead of failing over. Scoped to
+                                // Cinejoy so all other providers are unchanged.
+                                if (hasStartedPlaying.get() &&
+                                    providerNameState.value.contains("Cinejoy", ignoreCase = true)) {
+                                    cinejoySkipCount++
+                                    if (cinejoySkipCount > MAX_CINEJOY_SKIPS) {
+                                        Log.w("ExoPlayer", "Cinejoy: too many dead-segment skips - CDN unusable, surfacing error.")
                                         errorHandler.value.invoke(true)
                                         return
                                     }
+                                    val resumeAt = try {
+                                        this@apply.currentPosition.coerceAtLeast(0L)
+                                    } catch (_: Exception) { 0L }
                                     val seekTo = resumeAt + DEAD_SEGMENT_SKIP_MS
-                                    Log.w("ExoPlayer", "🛡️ Dead segment at ${resumeAt}ms — jumping forward ${DEAD_SEGMENT_SKIP_MS}ms to KEEP PLAYING (skip #$provenRetryCount), NOT skipping the stream.")
-                                    val provenItem = mediaItem
+                                    Log.w("ExoPlayer", "Cinejoy dead segment at ${resumeAt}ms - jumping forward ${DEAD_SEGMENT_SKIP_MS}ms (skip #$cinejoySkipCount), NOT skipping the stream.")
+                                    val item = mediaItem
                                     android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                                         try {
-                                            this@apply.setMediaItem(provenItem)
+                                            this@apply.setMediaItem(item)
                                             this@apply.prepare()
                                             if (seekTo > 0L) this@apply.seekTo(seekTo)
                                             this@apply.playWhenReady = true
                                         } catch (e: Exception) {
-                                            Log.e("ExoPlayer", "Proven-source re-prepare failed", e)
+                                            Log.e("ExoPlayer", "Cinejoy dead-segment re-prepare failed", e)
                                         }
-                                    }, 1_000L)
+                                    }, 800L)
                                     return
                                 }
                                 // ── Classify the error ──
@@ -2981,35 +2892,21 @@ private const val DEFAULT_UA =
 private const val MAX_PLAYER_RETRIES = 3
 
 /**
- * The position (ms) at which a stream is considered PROVEN to be playing:
- * 00:01. The user's rule — "as soon as 00:00 goes to 00:01 that shows the
- * stream works" — so crossing this locks the stream in and disables failover.
- */
-private const val PROVEN_PLAYING_POSITION_MS = 1_000L
-
-/**
- * How long a stream may sit in STATE_READY (manifest loaded) with the clock
- * still at 00:00 before we treat it as a dead/empty "00:00" stream and fail
- * over. This is the ONLY case in which a not-yet-playing stream is skipped.
- */
-private const val STALL_TIMEOUT_MS = 10_000L
-
-/**
- * How far to jump FORWARD when a PROVEN stream keeps erroring at ~the same
- * position — i.e. the CDN segment there is permanently dead. One HLS segment
- * is ~10.4s, so ~12s clears the dead segment and lands in the next one, letting
- * playback CONTINUE instead of stopping/looping at the same timestamp. The
- * stream itself is still never failed-over (per the user's rule).
+ * Cinejoy dead-segment recovery: how far to jump FORWARD when a proven-playing
+ * Cinejoy stream errors at ~the same position -- i.e. the CDN segment there is
+ * permanently dead (HTTP 502 "origin unavailable"). One HLS segment is ~10.4s,
+ * so ~12s clears the dead segment and lands in the next one, letting playback
+ * CONTINUE instead of stopping at ~10s.
  */
 private const val DEAD_SEGMENT_SKIP_MS = 12_000L
 
 /**
- * Safety cap on dead-segment skips for a single proven stream. A normal
- * title has only a handful of dead segments; hitting this many means the CDN
- * is unusable for the whole title, so we stop skipping and surface the error
+ * Safety cap on Cinejoy dead-segment skips for a single stream. A normal episode
+ * has only a handful of dead segments; hitting this many means the CDN is
+ * unusable for the whole title, so we stop skipping and surface the error
  * (last resort) rather than fast-forwarding through the entire video.
  */
-private const val MAX_PROVEN_SKIPS = 20
+private const val MAX_CINEJOY_SKIPS = 20
 
 /**
  * Classifies an ExoPlayer [PlaybackException] as transient (recoverable by

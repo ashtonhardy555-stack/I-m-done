@@ -75,11 +75,6 @@ object CinejoyExtractor {
     private const val REFERER = "https://cinejoy.pk/"
     private const val ORIGIN = "https://cinejoy.pk"
 
-    // Deep-validation tri-state results (see validate()).
-    private const val PROBE_PLAYABLE = 1   // proven to serve real media
-    private const val PROBE_UNKNOWN = 0    // couldn't confirm (network hiccup)
-    private const val PROBE_DEAD = -1      // definitively dead (no content)
-
     private const val USER_AGENT =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
             "(KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36"
@@ -109,8 +104,8 @@ object CinejoyExtractor {
      */
     private val probeClient by lazy {
         OkHttpClient.Builder()
-            .connectTimeout(3, TimeUnit.SECONDS)
-            .readTimeout(4, TimeUnit.SECONDS)
+            .connectTimeout(4, TimeUnit.SECONDS)
+            .readTimeout(5, TimeUnit.SECONDS)
             .followRedirects(true)
             .followSslRedirects(true)
             .build()
@@ -191,45 +186,31 @@ object CinejoyExtractor {
             return@withContext Result.Error("Cinejoy: no stream found")
         }
 
-        // 5. Order by preference, then DEEP-validate each (manifest + first
-        //    variant + a real segment) so a stream whose segments are dead is
-        //    rejected HERE instead of being played, sitting at 00:00, and
-        //    skipped. The first proven-playable candidate wins. If none is
-        //    proven playable we fall back to an INCONCLUSIVE candidate (better
-        //    than nothing) but NEVER to a definitively-dead one, so the race
-        //    can fall through to another provider instead of looping on a
-        //    dead Cinejoy server.
+        // 5. Order by preference, then validate each with a real fetch so we
+        //    skip Nebula's anti-scrape redirect loop. First valid wins; if
+        //    none validate, fall back to the best-effort top candidate.
         val ordered = resolved.sortedBy { (name, _) -> rank(name) }
-        var inconclusive: Pair<String, String>? = null
         for ((server, url) in ordered) {
-            when (validate(url)) {
-                PROBE_PLAYABLE -> {
-                    Log.i(TAG, "✅ Cinejoy[$server] validated (deep): ${url.take(90)}")
-                    return@withContext Result.Stream(
-                        url = url,
-                        headers = streamHeaders(),
-                        providerName = "Cinejoy·$server"
-                    )
-                }
-                PROBE_UNKNOWN -> {
-                    if (inconclusive == null) inconclusive = server to url
-                    Log.d(TAG, "Cinejoy[$server] deep validation inconclusive")
-                }
-                else -> Log.d(TAG, "Cinejoy[$server] deep validation: DEAD (no playable content)")
+            if (validate(url)) {
+                Log.i(TAG, "✅ Cinejoy[$server] validated: ${url.take(90)}")
+                return@withContext Result.Stream(
+                    url = url,
+                    headers = streamHeaders(),
+                    providerName = "Cinejoy·$server"
+                )
             }
+            Log.d(TAG, "Cinejoy[$server] candidate failed validation: ${url.take(70)}")
         }
 
-        inconclusive?.let { (server, url) ->
-            Log.i(TAG, "⚠️ Cinejoy[$server] inconclusive fallback: ${url.take(90)}")
-            return@withContext Result.Stream(
-                url = url,
-                headers = streamHeaders(),
-                providerName = "Cinejoy·$server"
-            )
-        }
-
-        Log.w(TAG, "No Cinejoy server passed deep validation for tmdb=$tmdbId")
-        Result.Error("Cinejoy: no playable stream")
+        // Best-effort: return the top candidate even if validation was
+        // inconclusive (ExoPlayer is the real arbiter on-device).
+        val (server, url) = ordered.first()
+        Log.i(TAG, "⚠️ Cinejoy[$server] unverified fallback: ${url.take(90)}")
+        Result.Stream(
+            url = url,
+            headers = streamHeaders(),
+            providerName = "Cinejoy·$server"
+        )
     }
 
     // ────────────────────────────────────────────────────────────────────── //
@@ -308,53 +289,10 @@ object CinejoyExtractor {
     // ────────────────────────────────────────────────────────────────────── //
 
     /**
-     * Confirm a candidate URL actually serves a PLAYABLE HLS stream — not just
-     * a manifest that *looks* valid.
-     *
-     * The old check only fetched the manifest and looked for `#EXTM3U`. That is
-     * fooled by a "00:00" stream: a provider can hand back a perfectly valid
-     * master playlist whose segments are all dead (HTTP 502 "origin
-     * unavailable", an HTML error page, …). ExoPlayer would then load the
-     * manifest, reach READY, and sit at 00:00 until it errored and the app
-     * skipped it — the exact "it tries to play streams that don't have any
-     * content" behaviour.
-     *
-     * This DEEP check walks the whole chain:
-     *   1. fetch the playlist and confirm it is HLS;
-     *   2. if it is a MASTER playlist, descend into the first variant so we
-     *      validate the MEDIA playlist (the one that actually lists segments);
-     *   3. confirm the media playlist advertises at least one segment;
-     *   4. fetch the first segment and confirm it is real media (not an HTML /
-     *      JSON error page).
-     *
-     * Returns a tri-state [Int]:
-     *   - [PROBE_PLAYABLE] the whole chain (manifest -> variant -> segment)
-     *     resolved to real media;
-     *   - [PROBE_DEAD] a definitive failure (non-2xx, no segments, or an
-     *     HTML/JSON error page) \u2014 this candidate must never be played;
-     *   - [PROBE_UNKNOWN] an inconclusive network hiccup. Unknown is treated as
-     *     acceptable (ExoPlayer is the final arbiter on-device) so a transient
-     *     probe failure never rejects a working stream.
+     * Confirm a candidate URL actually serves an HLS playlist (guards against
+     * Nebula's `…/hls/dontscrape/…` redirect loop and dead URLs).
      */
-    private fun validate(url: String): Int {
-        // 1. The playlist itself.
-        val body = fetchText(url) ?: return PROBE_UNKNOWN
-        if (!(body.contains("#EXTM3U") || body.contains("#EXTINF") || body.contains("#EXT-X-"))) {
-            return PROBE_DEAD
-        }
-        // 2. If this is a master playlist, descend into the first variant.
-        val variant = firstVariantUrl(body, url)
-        val mediaUrl = variant ?: url
-        val mediaBody = if (variant != null) (fetchText(variant) ?: return PROBE_UNKNOWN) else body
-        // 3. A real stream must list at least one media segment.
-        if (!mediaBody.contains("#EXTINF")) return PROBE_DEAD
-        // 4. Fetch the first segment and confirm it is real media.
-        val segUrl = firstSegmentUrl(mediaBody, mediaUrl) ?: return PROBE_UNKNOWN
-        return segmentProbe(segUrl)
-    }
-
-    /** GET a URL with the probe client and return its body, or null on failure. */
-    private fun fetchText(url: String): String? {
+    private fun validate(url: String): Boolean {
         val req = Request.Builder()
             .url(url)
             .header("User-Agent", USER_AGENT)
@@ -364,93 +302,15 @@ object CinejoyExtractor {
             .build()
         return try {
             probeClient.newCall(req).execute().use { resp ->
-                if (resp.isSuccessful) resp.body?.string() else null
+                if (!resp.isSuccessful) return false
+                val body = resp.body?.string() ?: return false
+                body.contains("#EXTM3U") || body.contains("#EXTINF") ||
+                    body.contains("#EXT-X-")
             }
         } catch (e: Exception) {
-            Log.d(TAG, "fetchText failed: ${typeOf(e)}")
-            null
-        }
-    }
-
-    /** First variant URI of a master playlist (the line after #EXT-X-STREAM-INF). */
-    private fun firstVariantUrl(masterBody: String, base: String): String? {
-        val lines = masterBody.lines()
-        for (i in lines.indices) {
-            if (lines[i].trim().startsWith("#EXT-X-STREAM-INF")) {
-                for (j in i + 1 until lines.size) {
-                    val v = lines[j].trim()
-                    if (v.isEmpty() || v.startsWith("#")) continue
-                    return resolveUrl(base, v)
-                }
-            }
-        }
-        return null
-    }
-
-    /** First media segment URI of a media playlist (the line after #EXTINF). */
-    private fun firstSegmentUrl(mediaBody: String, base: String): String? {
-        val lines = mediaBody.lines()
-        for (i in lines.indices) {
-            if (lines[i].trim().startsWith("#EXTINF")) {
-                for (j in i + 1 until lines.size) {
-                    val v = lines[j].trim()
-                    if (v.isEmpty() || v.startsWith("#")) continue
-                    return resolveUrl(base, v)
-                }
-            }
-        }
-        return null
-    }
-
-    /** Resolve a possibly-relative playlist URI against its base. */
-    private fun resolveUrl(base: String, ref: String): String = try {
-        java.net.URI(base).resolve(ref).toString()
-    } catch (e: Exception) {
-        ref
-    }
-
-    /**
-     * Ranged GET of the first bytes of a segment. Rejects the stream only when
-     * the response is a definitive failure (non-2xx) or the payload is clearly
-     * an HTML/JSON error page; an inconclusive network error is accepted so a
-     * transient probe hiccup never rejects a working stream.
-     */
-    private fun segmentProbe(segUrl: String): Int {
-        val req = Request.Builder()
-            .url(segUrl)
-            .header("User-Agent", USER_AGENT)
-            .header("Referer", REFERER)
-            .header("Origin", ORIGIN)
-            .get()
-            .build()
-        return try {
-            probeClient.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) return PROBE_DEAD
-                // Read only the first KB of the segment, then close the body
-                // (the rest of the segment is discarded — we never download it).
-                val src = resp.body?.source() ?: return PROBE_UNKNOWN
-                val buf = okio.Buffer()
-                src.read(buf, 1024L)
-                val bytes = buf.readByteArray()
-                if (bytes.isEmpty()) return PROBE_DEAD
-                var firstUnsigned = -1
-                for (b in bytes) {
-                    val u = b.toInt() and 0xFF
-                    if (u != 0x20 && u != 0x09 && u != 0x0A && u != 0x0D) {
-                        firstUnsigned = u
-                        break
-                    }
-                }
-                if (firstUnsigned < 0) return PROBE_DEAD
-                // Real TS/fMP4 media never starts with '<' (0x3C, HTML),
-                // '{' (0x7B) or '[' (0x5B) (JSON). Those are dead-stream
-                // error pages.
-                if (firstUnsigned == 0x3C || firstUnsigned == 0x7B || firstUnsigned == 0x5B) PROBE_DEAD
-                else PROBE_PLAYABLE
-            }
-        } catch (e: Exception) {
-            Log.d(TAG, "segment probe failed: ${typeOf(e)}")
-            PROBE_UNKNOWN
+            // Redirect loops throw (TooManyRedirects / ProtocolException).
+            Log.d(TAG, "validate failed: ${typeOf(e)}")
+            false
         }
     }
 
