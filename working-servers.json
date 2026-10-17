@@ -1,6 +1,6 @@
 {
   "version": 17,
-  "updated": "2026-10-16T10:13:08Z",
+  "updated": "2026-10-17T09:46:52Z",
   "description": "v17: Added VidUp (vidup.to) and enabled VidCore (vidcore.io) as new headless extractors - both resolve full-length HLS via the enc-dec.app bridge (enc/dec-vidup, enc/dec-vidcore). Verified end-to-end: Game of Thrones S1E1, Breaking Bad S1E1, Stranger Things S1E1, The Last of Us S1E1 all return HTTP 200 application/vnd.apple.mpegurl. Steven Universe Future S1E1-S1E3 extract a URL but the upstream CDN node returns 502 (provider-side content gap, not an extraction bug). Still HEADLESS-ONLY (no WebView).",
   "servers": [
     {
