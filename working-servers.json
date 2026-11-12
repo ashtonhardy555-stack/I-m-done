@@ -1,6 +1,6 @@
 {
   "version": 17,
-  "updated": "2026-11-11T13:03:37Z",
+  "updated": "2026-11-12T14:05:26Z",
   "description": "v17: Added VidUp (vidup.to) and enabled VidCore (vidcore.io) as new headless extractors - both resolve full-length HLS via the enc-dec.app bridge (enc/dec-vidup, enc/dec-vidcore). Verified end-to-end: Game of Thrones S1E1, Breaking Bad S1E1, Stranger Things S1E1, The Last of Us S1E1 all return HTTP 200 application/vnd.apple.mpegurl. Steven Universe Future S1E1-S1E3 extract a URL but the upstream CDN node returns 502 (provider-side content gap, not an extraction bug). Still HEADLESS-ONLY (no WebView).",
   "servers": [
     {
@@ -164,7 +164,7 @@
       "movieUrlTemplate": "{base}/player.php?tmdb={id}",
       "tvUrlTemplate": "{base}/player.php?type=series&tmdb={id}&season={season}&episode={episode}",
       "tier": 2,
-      "reliability": 88,
+      "reliability": 95,
       "cloudflare": false,
       "enabled": true
     },
@@ -197,7 +197,7 @@
       "movieUrlTemplate": "{base}/movie/{id}",
       "tvUrlTemplate": "{base}/tv/{id}/{season}/{episode}",
       "tier": 2,
-      "reliability": 1,
+      "reliability": 0,
       "cloudflare": false,
       "enabled": false
     },
@@ -208,7 +208,7 @@
       "movieUrlTemplate": "{base}/movie/{id}",
       "tvUrlTemplate": "{base}/tv/{id}/{season}/{episode}",
       "tier": 2,
-      "reliability": 1,
+      "reliability": 0,
       "cloudflare": false,
       "enabled": false
     },
@@ -329,7 +329,7 @@
       "movieUrlTemplate": "{base}/embed/movie/{id}",
       "tvUrlTemplate": "{base}/embed/tv/{id}/{season}/{episode}",
       "tier": 2,
-      "reliability": 50,
+      "reliability": 80,
       "cloudflare": false,
       "enabled": true
     },
@@ -340,9 +340,9 @@
       "movieUrlTemplate": "{base}/embed/movie/{id}",
       "tvUrlTemplate": "{base}/embed/tv/{id}/{season}/{episode}",
       "tier": 2,
-      "reliability": 0,
+      "reliability": 60,
       "cloudflare": false,
-      "enabled": false
+      "enabled": true
     },
     {
       "id": "vidsrc_me_su",
@@ -351,9 +351,9 @@
       "movieUrlTemplate": "{base}/embed/movie/{id}",
       "tvUrlTemplate": "{base}/embed/tv/{id}/{season}/{episode}",
       "tier": 2,
-      "reliability": 0,
+      "reliability": 60,
       "cloudflare": false,
-      "enabled": false
+      "enabled": true
     },
     {
       "id": "vidsrc_su",
@@ -373,7 +373,7 @@
       "movieUrlTemplate": "{base}/embed/movie/{id}",
       "tvUrlTemplate": "{base}/embed/tv/{id}/{season}/{episode}",
       "tier": 2,
-      "reliability": 69,
+      "reliability": 88,
       "cloudflare": false,
       "enabled": true
     },
@@ -395,9 +395,9 @@
       "movieUrlTemplate": "{base}/embed/movie/{id}",
       "tvUrlTemplate": "{base}/embed/tv/{id}/{season}/{episode}",
       "tier": 2,
-      "reliability": 0,
+      "reliability": 60,
       "cloudflare": true,
-      "enabled": false
+      "enabled": true
     },
     {
       "id": "flixer",
@@ -439,7 +439,7 @@
       "movieUrlTemplate": "{base}/embed/movie/{id}",
       "tvUrlTemplate": "{base}/embed/tv/{id}/{season}/{episode}",
       "tier": 3,
-      "reliability": 6,
+      "reliability": 2,
       "cloudflare": false,
       "enabled": false
     },
